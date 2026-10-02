@@ -53,8 +53,10 @@ refetches once back. The header shows Live / Connecting / Offline.
 
 ## Node version
 
-Develop and run the tests on **Node 22** (`nvm use` reads `.nvmrc`; CI and the
-Dockerfile use 22). On Node 24 five async page tests fail inside jsdom because
+Develop and run the tests on **Node 22** (`nvm use` reads `.nvmrc`; CI uses 22).
+The Dockerfile's `web` build stage uses Node 26 to produce `dist/`, which only
+runs `npm ci` and `npm run build` — not the test suite. On Node 24 five async
+page tests fail inside jsdom because
 Node 24 fetch rejects jsdom's AbortSignal (cross-realm brand check). The
 production build is unaffected. Tracked as a follow-up (try happy-dom or a
 vitest browser mode).
