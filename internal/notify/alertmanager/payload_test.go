@@ -1,6 +1,7 @@
 package alertmanager
 
 import (
+	"maps"
 	"regexp"
 	"strings"
 	"testing"
@@ -56,7 +57,7 @@ func TestBuildPayloadLabelsAnnotations(t *testing.T) {
 	wantL := map[string]string{
 		"alertname": "DeckardDnsDangling", "deckard_check": "dns.dangling", "severity": "high",
 		"asset": "foo.example.com", "zone": "example.com", "source": "prod-cf",
-		"fingerprint": "abc123", "status": "open",
+		"fingerprint": "abc123",
 	}
 	if len(a.Labels) != len(wantL) {
 		t.Errorf("labels = %v", a.Labels)
@@ -123,10 +124,26 @@ func TestEndsAtRules(t *testing.T) {
 			if !got[0].EndsAt.Equal(tc.wantEnd) {
 				t.Errorf("endsAt = %v, want %v", got[0].EndsAt, tc.wantEnd)
 			}
-			if tc.resolved != nil && got[0].Labels["status"] != "resolved" {
-				t.Errorf("status label = %q", got[0].Labels["status"])
+			if _, ok := got[0].Labels["status"]; ok {
+				t.Errorf("status must not be a label (it would change the alert identity), got %q", got[0].Labels["status"])
 			}
 		})
+	}
+}
+
+// Alertmanager identifies an alert by its full label set: a resolution
+// notice resolves the firing alert only if the labels match exactly. Any
+// label that differs between the firing assert and the resolution notice
+// (such as a status label) would land the endsAt on a separate, never-firing
+// series while the real alert keeps firing until its endsAt expires.
+func TestResolvedNoticeCarriesFiringLabelSet(t *testing.T) {
+	rt := t0.Add(-time.Minute)
+	open := finding(nil)
+	res := finding(func(f *model.Finding) { f.Status = model.StatusResolved; f.ResolvedAt = &rt })
+	firing := buildPayload([]model.Finding{open}, nil, t0, time.Minute, "")[0]
+	notice := buildPayload(nil, []model.Finding{res}, t0, time.Minute, "")[0]
+	if !maps.Equal(firing.Labels, notice.Labels) {
+		t.Fatalf("label sets differ:\n firing   %v\n resolved %v", firing.Labels, notice.Labels)
 	}
 }
 

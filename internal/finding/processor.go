@@ -172,6 +172,13 @@ func (p *Processor) Process(ctx context.Context, asset model.Asset, checkName st
 		if err := p.st.SaveObservation(ctx, asset.ID, o, now); err != nil {
 			return out, fmt.Errorf("save observation %s: %w", o.Check, err)
 		}
+		if res.Partial {
+			// A partial run proves presence, not absence, and baselines encode
+			// absence: its observations neither seed, advance nor adopt a
+			// baseline, and no drift is reconciled, so a drift finding can
+			// neither miss, resolve, nor be opened from incomplete data.
+			continue
+		}
 		prev, err := p.st.GetBaseline(ctx, asset.ID, o.Check)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return out, fmt.Errorf("get baseline %s: %w", o.Check, err)

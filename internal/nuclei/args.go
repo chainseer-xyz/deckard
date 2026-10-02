@@ -220,7 +220,11 @@ func buildArgs(tg target, a model.Asset, o runOptions) ([]string, error) {
 		return nil, err
 	}
 	tags := o.tagsFor(a)
-	args := []string{"-u", tg.arg, "-jsonl", "-silent", "-no-color", "-duc"}
+	// -dr (disable redirects): nuclei runs its own HTTP stack, so the scope
+	// guard cannot re-vet where a template's request chain goes. A template
+	// with redirects:true would otherwise follow a cross-host Location header
+	// and probe a third party only because an owned host pointed at it.
+	args := []string{"-u", tg.arg, "-jsonl", "-silent", "-no-color", "-duc", "-dr"}
 	if len(o.explicit) > 0 {
 		for _, p := range o.explicit {
 			if !filepath.IsAbs(p) || strings.HasPrefix(filepath.Base(p), "-") {

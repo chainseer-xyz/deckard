@@ -98,6 +98,64 @@ func TestChunkFailureIsolatedAndResolvedRetried(t *testing.T) {
 	}
 }
 
+func resolvedN(n int, at time.Time) []model.Finding {
+	out := make([]model.Finding, n)
+	for i := range out {
+		out[i] = resolvedF(int64(900+i), at)
+	}
+	return out
+}
+
+// A notifier that was down through a mass resolution must not be handed every
+// pending resolved notice in one request: resolved notices are chunked like
+// open findings, and notices delivered by a successful chunk are not re-sent
+// after a later chunk fails.
+func TestFlushChunksResolvedNotices(t *testing.T) {
+	clk := &clock{epoch}
+	st := &dstore{resolved: resolvedN(250, epoch.Add(time.Minute))}
+	n := &fnotifier{name: "am"}
+	d := finding.NewDispatcher(st, notifyN{n}.list(), 4*time.Minute, quiet, finding.WithClock(clk.now))
+	if err := d.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n.calls() != 3 {
+		t.Fatalf("250 resolved notices must arrive in 3 chunks, got %d call(s)", n.calls())
+	}
+	sizes := []int{len(n.res[0]), len(n.res[1]), len(n.res[2])}
+	if sizes[0] != 100 || sizes[1] != 100 || sizes[2] != 50 {
+		t.Fatalf("resolved chunk sizes %v, want [100 100 50]", sizes)
+	}
+	// Everything was acknowledged: the next cycle re-sends nothing.
+	if err := d.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n.calls() != 3 {
+		t.Fatalf("acknowledged resolved notices were re-sent: %d calls", n.calls())
+	}
+}
+
+func TestResolvedDeliveredBeforeChunkFailureNotResent(t *testing.T) {
+	clk := &clock{epoch}
+	st := &dstore{resolved: resolvedN(150, epoch.Add(time.Minute))}
+	n := &fnotifier{name: "am", failAfter: 1} // first chunk succeeds, second fails
+	d := finding.NewDispatcher(st, notifyN{n}.list(), 4*time.Minute, quiet, finding.WithClock(clk.now))
+	if err := d.Flush(context.Background()); err == nil {
+		t.Fatal("want error from failing second chunk")
+	}
+	if n.calls() != 2 {
+		t.Fatalf("want 2 calls (second fails), got %d", n.calls())
+	}
+	n.setFail(false)
+	if err := d.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// Only the 50 notices of the failed chunk are retried.
+	last := n.res[len(n.res)-1]
+	if len(last) != 50 {
+		t.Fatalf("retry re-sent %d notices, want only the 50 undelivered", len(last))
+	}
+}
+
 func TestBatchSizeOption(t *testing.T) {
 	st := &dstore{open: openN(5)}
 	n := &fnotifier{name: "am"}

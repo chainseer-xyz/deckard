@@ -161,26 +161,24 @@ func (d *Dispatcher) Flush(ctx context.Context) error {
 			defer wg.Done()
 			nctx, cancel := context.WithTimeout(ctx, d.opts.notifyTimeout)
 			defer cancel()
-			// Chunk the open set; resolved notices ride in the first chunk
-			// only. Stop at the first failure: the rest is re-sent next
-			// cycle, as is anything resolved that was not acknowledged.
-			for c, off := 0, 0; c == 0 || off < len(open); c++ {
+			// Chunk the open set AND the resolved notices: a notifier that was
+			// down through a mass resolution must not be handed every pending
+			// notice in one request. Stop at the first failure: undelivered
+			// chunks are re-sent next cycle, while notices a successful chunk
+			// already delivered are tracked and never re-sent.
+			for c, off, rOff := 0, 0, 0; c == 0 || off < len(open) || rOff < len(pending); c++ {
 				end := min(off+d.opts.batchSize, len(open))
-				var res []model.Finding
-				if c == 0 {
-					res = pending
-				}
+				rEnd := min(rOff+d.opts.batchSize, len(pending))
+				res := pending[rOff:rEnd]
 				if err := safeNotify(nctx, n, open[off:end], res); err != nil {
 					errs[i] = fmt.Errorf("notifier %s: %w", n.Name(), err)
 					return
 				}
-				if c == 0 {
-					// Only this goroutine touches tracks[i].
-					for _, f := range pending {
-						d.tracks[i].add(keyOf(f))
-					}
+				// Only this goroutine touches tracks[i].
+				for _, f := range res {
+					d.tracks[i].add(keyOf(f))
 				}
-				off = end
+				off, rOff = end, rEnd
 			}
 		}()
 	}
