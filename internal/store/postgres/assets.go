@@ -184,7 +184,67 @@ func removeAssets(ctx context.Context, tx pgx.Tx, in []model.Asset, now time.Tim
 			return nil, err
 		}
 	}
-	return removed, nil
+
+	// Derivation registrations die with the asset: a removed asset is never
+	// scanned again, so ReplaceDerived can never drop or confirm what it
+	// registered — without this its derived children would stay live (and
+	// keep being scheduled) forever, and the stale rows would veto the
+	// orphan GC when another parent drops the same child. Children left
+	// without any registration are orphans and are removed recursively,
+	// exactly as a live parent dropping them would remove them.
+	drows, err := tx.Query(ctx, `DELETE FROM derivations WHERE parent_id = ANY($1::bigint[]) OR child_id = ANY($1::bigint[])
+		RETURNING child_id`, ids)
+	if err != nil {
+		return nil, err
+	}
+	children := map[int64]bool{}
+	for drows.Next() {
+		var id int64
+		if err := drows.Scan(&id); err != nil {
+			drows.Close()
+			return nil, err
+		}
+		children[id] = true
+	}
+	drows.Close()
+	if err := drows.Err(); err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		delete(children, id) // already removed above
+	}
+	if len(children) == 0 {
+		return removed, nil
+	}
+	cids := make([]int64, 0, len(children))
+	for id := range children {
+		cids = append(cids, id)
+	}
+	orows, err := tx.Query(ctx, `SELECT `+assetCols+` FROM assets a
+		WHERE a.id = ANY($1::bigint[]) AND a.removed_at IS NULL
+		  AND NOT EXISTS (SELECT 1 FROM derivations d WHERE d.child_id = a.id)
+		ORDER BY a.id FOR UPDATE`, cids)
+	if err != nil {
+		return nil, err
+	}
+	cands, err := collectAssets(orows)
+	if err != nil {
+		return nil, err
+	}
+	var orphans []model.Asset
+	for _, a := range cands {
+		if store.IsDerivedSource(a.Source) {
+			orphans = append(orphans, a)
+		}
+	}
+	if len(orphans) == 0 {
+		return removed, nil
+	}
+	cascade, err := removeAssets(ctx, tx, orphans, now)
+	if err != nil {
+		return nil, err
+	}
+	return append(removed, cascade...), nil
 }
 
 // ReplaceDerived: see store.Store.

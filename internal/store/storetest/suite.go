@@ -32,6 +32,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		{"UpsertSnapshot", testUpsertSnapshot},
 		{"SyncWarning", testSyncWarning},
 		{"ReplaceDerived", testReplaceDerived},
+		{"DerivedGCOnRemoval", testDerivedGCOnRemoval},
 		{"Relations", testRelations},
 		{"ListAssets", testListAssets},
 		{"Observations", testObservations},
