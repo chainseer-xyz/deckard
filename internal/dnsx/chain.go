@@ -2,6 +2,7 @@ package dnsx
 
 import (
 	"context"
+	"time"
 
 	"github.com/miekg/dns"
 )
@@ -51,8 +52,8 @@ func ResolveChain(ctx context.Context, q Querier, name string) (Chain, error) {
 	for {
 		resp, err := q.Query(ctx, cur, dns.TypeA)
 		if err != nil {
-			if ctx.Err() != nil {
-				return ch, ctx.Err()
+			if cerr := ctxDone(ctx); cerr != nil {
+				return ch, cerr
 			}
 			ch.State, ch.Err = StateUnknown, err
 			return ch, nil
@@ -83,4 +84,18 @@ func ResolveChain(ctx context.Context, q Querier, name string) (Chain, error) {
 		ch.State = st
 		return ch, nil
 	}
+}
+
+// ctxDone reports a cancelled or expired context. A socket deadline derived
+// from the context can fire a moment before the context's own timer marks it
+// done, so an elapsed deadline counts as expiry too; otherwise a cancelled
+// lookup would be recorded as an unknown resolver failure.
+func ctxDone(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if dl, ok := ctx.Deadline(); ok && !time.Now().Before(dl) {
+		return context.DeadlineExceeded
+	}
+	return nil
 }
