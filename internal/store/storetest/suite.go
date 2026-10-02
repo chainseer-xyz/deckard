@@ -38,6 +38,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		{"Baselines", testBaselines},
 		{"Reconcile", testReconcile},
 		{"ReconcilePartial", testReconcilePartial},
+		{"ReconcileAcrossKinds", testReconcileAcrossKinds},
 		{"PreservedStatuses", testPreservedStatuses},
 		{"FindingStatus", testFindingStatus},
 		{"ListFindings", testListFindings},

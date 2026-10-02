@@ -103,3 +103,43 @@ func testReconcilePartial(t *testing.T, f Factory) {
 		}
 	})
 }
+
+// testReconcileAcrossKinds pins that two assets sharing one key (a zone and
+// its apex hostname both exist as assets, e.g. from an apex DNS record) can
+// each hold the finding a kind-agnostic check reports under the same check
+// and finding key. The fingerprint formula sees only (check, key, finding
+// key), so the two findings collide on the fingerprint value; uniqueness is
+// per asset and both reconciles must succeed independently.
+func testReconcileAcrossKinds(t *testing.T, f Factory) {
+	const check = "dns.dangling"
+	e := newEnv(t, f)
+	e.snapshot("cf", []store.AssetUpsert{
+		au(model.KindZone, "x.io", "cf", model.ScopeOwned, nil),
+		au(model.KindHostname, "x.io", "cf", model.ScopeOwned, nil),
+	}, nil, at(0))
+	zone := e.asset(model.KindZone, "x.io")
+	apex := e.asset(model.KindHostname, "x.io")
+
+	ns := fi(check, "ns:dead.ns.example", model.SeverityCritical)
+	if r := e.reconcile(zone.ID, check, []model.FindingInput{ns}, 2, at(1)); len(r.Opened) != 1 {
+		t.Fatalf("zone reconcile opened = %d, want 1", len(r.Opened))
+	}
+	r := e.reconcile(apex.ID, check, []model.FindingInput{ns}, 2, at(1))
+	if len(r.Opened) != 1 {
+		t.Fatalf("apex reconcile opened = %d, want 1 (same fingerprint on another asset)", len(r.Opened))
+	}
+
+	// Both findings live their own lifecycle: resolving one leaves the other.
+	e.reconcile(apex.ID, check, nil, 2, at(2))
+	r = e.reconcile(apex.ID, check, nil, 2, at(3))
+	if len(r.Resolved) != 1 {
+		t.Fatalf("apex resolve = %d, want 1", len(r.Resolved))
+	}
+	if fd := e.findingByTitle(zone.ID, check, ns.Title); fd.Status != model.StatusOpen {
+		t.Errorf("zone finding status = %s, want open", fd.Status)
+	}
+	// And the apex finding can reopen after its sibling resolved it its way.
+	if r := e.reconcile(apex.ID, check, []model.FindingInput{ns}, 2, at(4)); len(r.Reopened) != 1 {
+		t.Errorf("apex reopen = %d, want 1", len(r.Reopened))
+	}
+}

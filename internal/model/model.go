@@ -199,7 +199,10 @@ type Finding struct {
 	Context map[string]any `json:"context,omitempty"`
 }
 
-// Fingerprint is the dedup key for a finding: stable across runs.
+// Fingerprint is the dedup key for a finding: stable across runs. It does
+// not include the asset KIND, so a zone asset and a hostname asset sharing
+// one key produce equal fingerprints for the same finding; uniqueness is
+// therefore enforced per asset (see migration 00006), never globally.
 func Fingerprint(check, assetKey, findingKey string) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{check, assetKey, findingKey}, "\x00")))
 	return hex.EncodeToString(sum[:])
