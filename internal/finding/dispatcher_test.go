@@ -51,13 +51,14 @@ func (s *dstore) ResolvedSince(_ context.Context, t time.Time) ([]model.Finding,
 }
 
 type fnotifier struct {
-	name string
-	mu   sync.Mutex
-	fail bool
-	pan  bool
-	hang bool
-	open [][]int64
-	res  [][]int64
+	name      string
+	mu        sync.Mutex
+	fail      bool
+	failAfter int // >0: succeed for this many calls, then fail (until setFail(false))
+	pan       bool
+	hang      bool
+	open      [][]int64
+	res       [][]int64
 }
 
 func (n *fnotifier) Name() string { return n.name }
@@ -66,6 +67,9 @@ func (n *fnotifier) Notify(ctx context.Context, open, resolved []model.Finding) 
 	n.open = append(n.open, ids(open))
 	n.res = append(n.res, ids(resolved))
 	fail, pan, hang := n.fail, n.pan, n.hang
+	if n.failAfter > 0 && len(n.open) > n.failAfter {
+		fail = true
+	}
 	n.mu.Unlock()
 	if pan {
 		panic("boom")
@@ -79,8 +83,15 @@ func (n *fnotifier) Notify(ctx context.Context, open, resolved []model.Finding) 
 	}
 	return nil
 }
-func (n *fnotifier) setFail(v bool) { n.mu.Lock(); n.fail = v; n.mu.Unlock() }
-func (n *fnotifier) calls() int     { n.mu.Lock(); defer n.mu.Unlock(); return len(n.open) }
+func (n *fnotifier) setFail(v bool) {
+	n.mu.Lock()
+	n.fail = v
+	if !v {
+		n.failAfter = 0
+	}
+	n.mu.Unlock()
+}
+func (n *fnotifier) calls() int { n.mu.Lock(); defer n.mu.Unlock(); return len(n.open) }
 func (n *fnotifier) lastRes() []int64 {
 	n.mu.Lock()
 	defer n.mu.Unlock()
