@@ -1,6 +1,8 @@
 name: ci
 on:
-  push: { branches: [main] }
+  # Every branch push runs CI (main is merged via branch + review, so branches
+  # must be validated before a PR exists); tags are handled by release.yml.
+  push: { branches: ['**'] }
   pull_request:
 
 # Supersede in-flight runs for the same PR/branch.
