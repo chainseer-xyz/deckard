@@ -6,7 +6,7 @@ RUN --mount=type=cache,target=/root/.npm if [ -f package.json ]; then npm ci; fi
 COPY web/ ./
 RUN if [ -f package.json ]; then npm run build; else mkdir -p dist; fi
 
-FROM golang:1.26-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # NUCLEI_VERSION is bumped by .github/workflows/nuclei-bump.yml. NUCLEI_GO_GET_PINS
 # holds the transitive-dependency fixes; that workflow also builds with the pins
 # emptied and, when Trivy stays clean, opens a PR that removes the obsolete ones.
-FROM golang:1.26-alpine AS nuclei
+FROM golang:1.27-alpine AS nuclei
 ARG NUCLEI_VERSION=v3.11.1
 ARG NUCLEI_GO_GET_PINS="golang.org/x/crypto@v0.55.0 golang.org/x/mod@v0.40.0 google.golang.org/grpc@v1.83.2 github.com/go-git/go-git/v5@v5.19.2"
 RUN apk add --no-cache git
