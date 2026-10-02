@@ -1,0 +1,22 @@
+# Keep host-only and generated content out of the build context: a host
+# node_modules (macOS binaries) copied over the container's clean `npm ci`
+# breaks the web build, and .git / agent state must never enter an image build.
+.git
+.github
+.claude
+.env
+.env.*
+bin
+coverage.*
+*.out
+
+web/node_modules
+web/dist
+# The UI is built in the web stage and copied in; keep only the embed placeholder.
+internal/api/ui/dist/*
+!internal/api/ui/dist/.gitkeep
+
+# Not needed to build the binaries (docs/ stays: docs/embed.go embeds openapi.yaml).
+deploy
+examples
+docker-compose.yml

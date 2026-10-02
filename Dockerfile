@@ -1,12 +1,17 @@
 # syntax=docker/dockerfile:1.7
-FROM node:26-alpine AS web
+# Build stages run on the BUILD platform and cross-compile (CGO is off), so a
+# multi-arch release does not compile under QEMU emulation.
+# The UI is only BUILT here; its unit tests run on Node 22 (web/.nvmrc) in CI.
+FROM --platform=$BUILDPLATFORM node:26-alpine AS web
 WORKDIR /web
 COPY web/package*.json ./
 RUN --mount=type=cache,target=/root/.npm if [ -f package.json ]; then npm ci; fi
 COPY web/ ./
 RUN if [ -f package.json ]; then npm run build; else mkdir -p dist; fi
 
-FROM golang:1.27-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
@@ -14,7 +19,7 @@ COPY . .
 COPY --from=web /web/dist ./internal/api/ui/dist
 ARG VERSION=dev
 RUN --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/deckard ./cmd/deckard \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/deckard ./cmd/deckard \
  && mkdir -p /out/var/lib/deckard
 
 # nuclei is built from a pinned tag with the same (patched) Go toolchain as
@@ -23,7 +28,9 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # NUCLEI_VERSION is bumped by .github/workflows/nuclei-bump.yml. NUCLEI_GO_GET_PINS
 # holds the transitive-dependency fixes; that workflow also builds with the pins
 # emptied and, when Trivy stays clean, opens a PR that removes the obsolete ones.
-FROM golang:1.27-alpine AS nuclei
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS nuclei
+ARG TARGETOS
+ARG TARGETARCH
 ARG NUCLEI_VERSION=v3.11.1
 ARG NUCLEI_GO_GET_PINS="golang.org/x/crypto@v0.55.0 golang.org/x/mod@v0.40.0 google.golang.org/grpc@v1.83.2 github.com/go-git/go-git/v5@v5.19.2"
 RUN apk add --no-cache git
@@ -32,11 +39,11 @@ RUN git clone --quiet --depth 1 --branch ${NUCLEI_VERSION} https://github.com/pr
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     if [ -n "${NUCLEI_GO_GET_PINS}" ]; then go get ${NUCLEI_GO_GET_PINS}; fi \
  && go mod tidy -e \
- && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/nuclei ./cmd/nuclei
+ && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w" -o /out/nuclei ./cmd/nuclei
 
 # An empty state directory for the nuclei template updater. distroless has no
 # shell, so the directory is prepared here and copied with its ownership.
-FROM alpine:3.24 AS state
+FROM --platform=$BUILDPLATFORM alpine:3.24 AS state
 RUN mkdir -p /state/var/lib/deckard/nuclei-templates
 
 # slim: deckard only (no nuclei; set nuclei.enabled=false). Build with --target slim.
