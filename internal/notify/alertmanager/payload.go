@@ -164,7 +164,9 @@ func buildAlert(f model.Finding, endsAt time.Time, baseURL string) postableAlert
 	setLabel(l, "zone", f.Zone)
 	setLabel(l, "source", f.Source)
 	setLabel(l, "fingerprint", f.Fingerprint)
-	setLabel(l, "status", string(f.Status))
+	// Status is deliberately NOT a label: Alertmanager identifies an alert by
+	// its full label set, so a resolution notice must carry exactly the labels
+	// the firing assert carried or its endsAt lands on a different series.
 	if hasTag(f.Tags, "kev") {
 		// Listed in CISA KEV: lets Alertmanager route known-exploited CVEs.
 		setLabel(l, "kev", "true")
