@@ -188,6 +188,7 @@ func (c *configCheck) Run(ctx context.Context, t check.Target) (*check.Result, e
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		// #nosec G402 -- deliberately probes every legacy TLS version to detect what the target still accepts
 		if _, err := p.handshake(ctx, &tls.Config{MinVersion: v, MaxVersion: v, CipherSuites: offer}); err == nil {
 			versions = append(versions, v)
 		}

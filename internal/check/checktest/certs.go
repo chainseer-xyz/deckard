@@ -103,6 +103,7 @@ func (ca *CA) Issue(t testing.TB, s CertSpec) (tls.Certificate, *x509.Certificat
 // test cleanup.
 func ServeTLS(t testing.TB, cert tls.Certificate) string {
 	t.Helper()
+	// #nosec G402 -- test server deliberately allows the client's offered TLS version, including weak ones under test
 	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}})
 	if err != nil {
 		t.Fatal(err)

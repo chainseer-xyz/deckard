@@ -108,7 +108,8 @@ func Install(tb testing.TB, c Conf) *Binary {
 		tb.Fatal(err)
 	}
 	dst := filepath.Join(tb.TempDir(), "nuclei")
-	if err := os.WriteFile(dst, data, 0o700); err != nil { // #nosec G306 G703 -- test binary must be executable, path is a test temp dir
+	// #nosec G306 G703 -- test binary must be executable, path is a test temp dir
+	if err := os.WriteFile(dst, data, 0o700); err != nil {
 		tb.Fatal(err)
 	}
 	b := &Binary{Path: dst, tb: tb}

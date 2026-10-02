@@ -83,7 +83,8 @@ func (s *Source) build() (*source.Discovery, error) {
 			return nil, errf("invalid cidr %q", c)
 		}
 		p = p.Masked()
-		if n := config.PrefixHosts(p); n > uint64(s.maxCIDRHosts) { // #nosec G115 -- max_cidr_hosts is validated > 0
+		// #nosec G115 -- max_cidr_hosts is validated > 0
+		if n := config.PrefixHosts(p); n > uint64(s.maxCIDRHosts) {
 			return nil, errf("cidr %s has %d addresses, exceeds scope.max_cidr_hosts=%d", c, n, s.maxCIDRHosts)
 		}
 		for a := p.Addr(); a.IsValid() && p.Contains(a); a = a.Next() {

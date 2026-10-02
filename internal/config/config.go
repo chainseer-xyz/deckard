@@ -702,7 +702,8 @@ func (c *Config) validateSources(add func(string, ...any)) {
 				add("sources[%s]: invalid cidr %q", s.Name, cidr)
 				continue
 			}
-			if n := prefixHosts(p); n > uint64(c.Scope.MaxCIDRHosts) { // #nosec G115 -- scope.max_cidr_hosts is validated > 0
+			// #nosec G115 -- scope.max_cidr_hosts is validated > 0
+			if n := prefixHosts(p); n > uint64(c.Scope.MaxCIDRHosts) {
 				add("sources[%s]: cidr %s has %d hosts, exceeds scope.max_cidr_hosts=%d", s.Name, cidr, n, c.Scope.MaxCIDRHosts)
 			}
 		}

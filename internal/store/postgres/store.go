@@ -38,6 +38,7 @@ func New(ctx context.Context, url string, maxConns int) (*Store, error) {
 		return nil, fmt.Errorf("parse database url: %w", err)
 	}
 	if maxConns > 0 {
+		// #nosec G115 -- clamped to math.MaxInt32 above, cannot overflow
 		cfg.MaxConns = int32(min(maxConns, math.MaxInt32))
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
@@ -59,7 +60,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return err
 	}
 	db := stdlib.OpenDBFromPool(s.pool)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	locker, err := lock.NewPostgresSessionLocker()
 	if err != nil {
 		return fmt.Errorf("migration locker: %w", err)

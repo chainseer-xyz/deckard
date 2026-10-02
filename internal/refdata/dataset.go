@@ -278,7 +278,8 @@ func (r *Runner[T]) persist(s snapshot) error {
 		_ = os.Remove(name)
 		return werr
 	}
-	if err := os.Chmod(name, 0o640); err != nil { // #nosec G302 -- group-readable reference data, no secrets
+	// #nosec G302 -- group-readable reference data, no secrets
+	if err := os.Chmod(name, 0o640); err != nil {
 		_ = os.Remove(name)
 		return err
 	}
