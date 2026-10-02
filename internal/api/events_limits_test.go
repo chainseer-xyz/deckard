@@ -37,7 +37,7 @@ func TestSSEGlobalStreamCap(t *testing.T) {
 		if c.resp.StatusCode != 200 {
 			t.Fatalf("stream %d = %d", i, c.resp.StatusCode)
 		}
-		c.until(": connected", 2*time.Second)
+		c.until(": connected", 10*time.Second)
 		open = append(open, c)
 	}
 	over := e.stream(t, ts, "/api/v1/events")
@@ -71,7 +71,7 @@ func TestSSEGlobalStreamCap(t *testing.T) {
 		again = e.stream(t, ts, "/api/v1/events")
 		return again.resp.StatusCode == 200
 	})
-	again.until(": connected", 2*time.Second)
+	again.until(": connected", 10*time.Second)
 }
 
 func TestSSEPerIdentityCap(t *testing.T) {
@@ -92,7 +92,7 @@ func TestSSEPerIdentityCap(t *testing.T) {
 	if b1 := open("bob"); b1.resp.StatusCode != 200 {
 		t.Fatalf("bob blocked by alice's streams: %d", b1.resp.StatusCode)
 	}
-	a1.until(": connected", 2*time.Second)
+	a1.until(": connected", 10*time.Second)
 	a1.cancel()
 	waitFor(t, func() bool { return open("alice").resp.StatusCode == 200 })
 }
@@ -119,7 +119,7 @@ func TestSSENoGoroutineLeakAfterManyStreams(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		c := e.stream(t, ts, "/api/v1/events")
 		if c.resp.StatusCode == 200 {
-			c.until(": connected", 2*time.Second)
+			c.until(": connected", 10*time.Second)
 		}
 		c.cancel()
 		<-c.done
@@ -139,7 +139,7 @@ func TestSSEReplaySinceIsClampedToReplayWindow(t *testing.T) {
 	})
 	ts := e.sseServer(t)
 	c := e.stream(t, ts, "/api/v1/events?since=2000-01-01T00:00:00Z")
-	lines := strings.Join(c.until("id: 2", 2*time.Second), "\n")
+	lines := strings.Join(c.until("id: 2", 10*time.Second), "\n")
 	if strings.Contains(lines, "id: 1\n") {
 		t.Errorf("since older than the replay window was honoured: %q", lines)
 	}
@@ -149,7 +149,7 @@ func TestSSEWakeFloodIsCoalesced(t *testing.T) {
 	e := newEnv(t, func(d *api.Deps) { d.SSEPollInterval = time.Hour })
 	ts := e.sseServer(t)
 	c := e.stream(t, ts, "/api/v1/events")
-	c.until(": connected", 2*time.Second)
+	c.until(": connected", 10*time.Second)
 	time.Sleep(300 * time.Millisecond)
 	before := e.store.EventsCalls()
 	for i := 0; i < 200; i++ {

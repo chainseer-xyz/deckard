@@ -33,7 +33,20 @@ jobs:
         run: go mod tidy -diff
       - run: go vet ./...
       # Postgres-backed tests use testcontainers (Docker is available on the runner).
-      - run: go test -race -count=1 ./...
+      - name: go test
+        shell: bash
+        run: |
+          set +e
+          go test -race -count=1 ./... 2>&1 | tee test.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            # Surface the failures as annotations: they are readable through the
+            # public API without downloading (authenticated) job logs.
+            grep -E '^(--- FAIL|FAIL|panic:|WARNING: DATA RACE)|_test\.go:[0-9]+:' test.log | head -40 | while IFS= read -r line; do
+              echo "::error::${line//%/%25}"
+            done
+          fi
+          exit "$status"
       - uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8.0.0
       - name: gosec
         run: |
