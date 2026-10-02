@@ -28,7 +28,7 @@ func (d *plainDialer) DialContext(ctx context.Context, network, addr string) (ne
 // listen starts a TCP server on 127.0.0.1 running handler per connection.
 func listen(t *testing.T, handler func(net.Conn)) int {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	l, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}

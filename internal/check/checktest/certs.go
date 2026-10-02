@@ -1,6 +1,7 @@
 package checktest
 
 import (
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -117,7 +118,7 @@ func ServeTLS(t testing.TB, cert tls.Certificate) string {
 			}
 			go func(c net.Conn) {
 				defer func() { _ = c.Close() }()
-				_ = c.(*tls.Conn).Handshake()
+				_ = c.(*tls.Conn).HandshakeContext(context.Background())
 			}(c)
 		}
 	}()

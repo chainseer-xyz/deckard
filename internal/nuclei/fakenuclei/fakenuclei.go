@@ -3,6 +3,7 @@ package fakenuclei
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -76,7 +77,7 @@ func build() (string, error) {
 			return
 		}
 		out := filepath.Join(dir, "fakenuclei")
-		cmd := exec.Command("go", "build", "-o", out, "./cmd/fakenuclei") // #nosec G204 -- fixed args, test support
+		cmd := exec.CommandContext(context.Background(), "go", "build", "-o", out, "./cmd/fakenuclei") // #nosec G204 -- fixed args, test support
 		cmd.Dir = filepath.Dir(file)
 		if b, err := cmd.CombinedOutput(); err != nil {
 			buildErr = &buildError{err: err, out: string(b)}

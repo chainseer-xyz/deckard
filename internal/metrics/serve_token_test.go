@@ -12,7 +12,7 @@ import (
 
 func TestServeListenerBearerToken(t *testing.T) {
 	m := metrics.New("dev", "none")
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestServeListenerBearerToken(t *testing.T) {
 
 func TestServeListenerEmptyTokenIsOpen(t *testing.T) {
 	m := metrics.New("dev", "none")
-	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	ln, _ := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = metrics.ServeListener(ctx, ln, m.Registry(), metrics.WithToken("")) }()

@@ -30,11 +30,11 @@ func startServer(t *testing.T, h dns.HandlerFunc) *testServer {
 	var ln net.Listener
 	for i := 0; i < 20; i++ {
 		var err error
-		pc, err = net.ListenPacket("udp", "127.0.0.1:0")
+		pc, err = (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", "127.0.0.1:0")
 		if err != nil {
 			t.Fatal(err)
 		}
-		ln, err = net.Listen("tcp", pc.LocalAddr().String())
+		ln, err = (&net.ListenConfig{}).Listen(context.Background(), "tcp", pc.LocalAddr().String())
 		if err == nil {
 			break
 		}
@@ -275,7 +275,7 @@ func TestRetryRotatesPastServfail(t *testing.T) {
 
 func TestTimeoutIsUnavailableAndUnknown(t *testing.T) {
 	// A UDP socket that never answers.
-	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	pc, err := (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestTimeoutIsUnavailableAndUnknown(t *testing.T) {
 }
 
 func TestContextCancel(t *testing.T) {
-	pc, _ := net.ListenPacket("udp", "127.0.0.1:0")
+	pc, _ := (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", "127.0.0.1:0")
 	defer func() { _ = pc.Close() }()
 	c := New(WithServers(pc.LocalAddr().String()), WithTimeout(5*time.Second))
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)

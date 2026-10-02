@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -32,7 +33,7 @@ func TestTokenAuth(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest("GET", tt.target, nil)
+			req := httptest.NewRequestWithContext(context.Background(), "GET", tt.target, nil)
 			if tt.header != "" {
 				req.Header.Set("Authorization", tt.header)
 			}
@@ -54,11 +55,11 @@ func TestTokenAuth(t *testing.T) {
 }
 
 func TestNoneAndDeny(t *testing.T) {
-	id, err := auth.None{}.Authenticate(httptest.NewRequest("GET", "/", nil))
+	id, err := auth.None{}.Authenticate(httptest.NewRequestWithContext(context.Background(), "GET", "/", nil))
 	if err != nil || id.Actor() != "anonymous" || (auth.None{}).Mode() != "none" {
 		t.Fatalf("none: %+v %v", id, err)
 	}
-	if _, err := (auth.Deny{}).Authenticate(httptest.NewRequest("GET", "/", nil)); err == nil {
+	if _, err := (auth.Deny{}).Authenticate(httptest.NewRequestWithContext(context.Background(), "GET", "/", nil)); err == nil {
 		t.Fatal("deny must deny")
 	}
 	if (auth.Deny{}).Mode() == "" {

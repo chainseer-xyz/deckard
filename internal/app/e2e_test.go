@@ -77,7 +77,7 @@ func contains(xs []string, want string) bool {
 // source -> inventory -> scope guard -> engine -> real net.ports check ->
 // findings -> Alertmanager. A local listener plays the exposed service.
 func TestScanFindsExposedPortAndAlerts(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestScanFindsExposedPortAndAlerts(t *testing.T) {
 // operator did not declare as owned gets inventoried but no check runs on it,
 // even though a listener is reachable there.
 func TestUnownedAssetIsNeverScanned(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}

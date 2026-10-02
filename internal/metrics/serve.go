@@ -49,7 +49,7 @@ func RequireToken(h http.Handler, token string) http.Handler {
 
 // Serve listens on addr and serves /metrics until ctx is cancelled.
 func Serve(ctx context.Context, addr string, reg prometheus.Gatherer, opts ...Option) error {
-	ln, err := net.Listen("tcp", addr)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		return err
 	}

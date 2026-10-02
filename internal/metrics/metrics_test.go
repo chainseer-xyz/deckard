@@ -22,7 +22,7 @@ import (
 func scrape(t *testing.T, m *metrics.Metrics) string {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	metrics.Handler(m.Registry()).ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	metrics.Handler(m.Registry()).ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), "GET", "/metrics", nil))
 	if rec.Code != 200 {
 		t.Fatalf("status %d", rec.Code)
 	}
@@ -141,7 +141,7 @@ func TestNopRecorder(t *testing.T) {
 
 func TestServeListener(t *testing.T) {
 	m := metrics.New("dev", "none")
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}

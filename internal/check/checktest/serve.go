@@ -1,6 +1,7 @@
 package checktest
 
 import (
+	"context"
 	"net"
 	"testing"
 )
@@ -9,7 +10,7 @@ import (
 // closes. Returns its address; closed on test cleanup.
 func ServePlain(t testing.TB, banner string) string {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}

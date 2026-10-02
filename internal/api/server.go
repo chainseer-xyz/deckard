@@ -354,7 +354,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 
 // ListenAndServe listens on addr and calls Serve.
 func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
-	ln, err := net.Listen("tcp", addr)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		return err
 	}

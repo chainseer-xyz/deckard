@@ -167,7 +167,7 @@ func newRig(t *testing.T, mutate func(*config.OIDCConfig, *auth.Options)) *rig {
 }
 
 func (g *rig) do(method, target string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, target, nil)
+	req := httptest.NewRequestWithContext(context.Background(), method, target, nil)
 	for _, c := range cookies {
 		req.AddCookie(c)
 	}
@@ -234,7 +234,7 @@ func TestOIDCActorRequiresVerifiedEmail(t *testing.T) {
 				g.idp.claims["email_verified"] = tc.verified
 			}
 			s := g.fullLogin(t)
-			req := httptest.NewRequest("GET", "/api/v1/me", nil)
+			req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/me", nil)
 			req.AddCookie(s)
 			id, err := g.oidc.Authenticate(req)
 			if err != nil {
@@ -256,7 +256,7 @@ func TestOIDCFullFlow(t *testing.T) {
 	if strings.Contains(s.Value, "ada@example.com") || strings.Contains(s.Value, "u-1") {
 		t.Error("session cookie must be encrypted, not merely signed")
 	}
-	req := httptest.NewRequest("GET", "/api/v1/me", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/me", nil)
 	req.AddCookie(s)
 	id, err := g.oidc.Authenticate(req)
 	if err != nil {
@@ -393,7 +393,7 @@ func TestOIDCSessionExpiryAndTamper(t *testing.T) {
 	g := newRig(t, func(_ *config.OIDCConfig, o *auth.Options) { o.SessionTTL = time.Hour })
 	s := g.fullLogin(t)
 	authn := func(c *http.Cookie) error {
-		req := httptest.NewRequest("GET", "/", nil)
+		req := httptest.NewRequestWithContext(context.Background(), "GET", "/", nil)
 		if c != nil {
 			req.AddCookie(c)
 		}
@@ -423,7 +423,7 @@ func TestOIDCSessionExpiryAndTamper(t *testing.T) {
 func TestOIDCTxCookieCannotBeUsedAsSession(t *testing.T) {
 	g := newRig(t, nil)
 	tx, _, _ := g.login(t, "/")
-	req := httptest.NewRequest("GET", "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/", nil)
 	req.AddCookie(&http.Cookie{Name: "__Host-deckard_session", Value: tx.Value})
 	if _, err := g.oidc.Authenticate(req); !errors.Is(err, auth.ErrUnauthenticated) {
 		t.Fatalf("cross-cookie replay accepted: %v", err)
@@ -438,7 +438,7 @@ func TestOIDCSessionFromOtherSecretRejected(t *testing.T) {
 			return map[string]string{"DECKARD_SESSION_SECRET": strings.Repeat("z", 40)}[k]
 		}
 	})
-	req := httptest.NewRequest("GET", "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/", nil)
 	req.AddCookie(s)
 	if _, err := b.oidc.Authenticate(req); !errors.Is(err, auth.ErrUnauthenticated) {
 		t.Fatalf("session accepted under a different secret: %v", err)
@@ -454,7 +454,7 @@ func TestOIDCLogoutIsPostOnlyAndCSRFProtected(t *testing.T) {
 	}
 
 	post := func(csrf string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
-		req := httptest.NewRequest("POST", "/auth/logout", nil)
+		req := httptest.NewRequestWithContext(context.Background(), "POST", "/auth/logout", nil)
 		for _, c := range cookies {
 			req.AddCookie(c)
 		}
@@ -472,7 +472,7 @@ func TestOIDCLogoutIsPostOnlyAndCSRFProtected(t *testing.T) {
 		t.Errorf("logout with wrong CSRF token = %d", rec.Code)
 	}
 
-	req := httptest.NewRequest("GET", "/api/v1/me", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/me", nil)
 	req.AddCookie(s)
 	id, err := g.oidc.Authenticate(req)
 	if err != nil {
@@ -593,7 +593,7 @@ func TestOIDCCallbackDiscoveryFailure(t *testing.T) {
 	}
 	r := chi.NewRouter()
 	o2.Mount(r)
-	req := httptest.NewRequest("GET", "/auth/callback?code="+code+"&state="+state, nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/auth/callback?code="+code+"&state="+state, nil)
 	req.AddCookie(tx)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)

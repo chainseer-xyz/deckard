@@ -87,7 +87,7 @@ func TestNotifyRequestShapeAndAuth(t *testing.T) {
 	if r.method != http.MethodPost || r.path != "/api/v2/alerts" || r.ctype != "application/json" {
 		t.Errorf("req = %+v", r)
 	}
-	req, _ := http.NewRequest("GET", "http://x", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "http://x", nil)
 	req.SetBasicAuth("deckard", "s3cr3t-pw")
 	if r.auth != req.Header.Get("Authorization") {
 		t.Errorf("auth = %q", r.auth)

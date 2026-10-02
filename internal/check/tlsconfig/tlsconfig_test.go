@@ -35,7 +35,7 @@ func serve(t *testing.T, cfg *tls.Config) int {
 			}
 			go func() {
 				defer func() { _ = c.Close() }()
-				_ = c.(*tls.Conn).Handshake()
+				_ = c.(*tls.Conn).HandshakeContext(context.Background())
 			}()
 		}
 	}()
@@ -113,7 +113,7 @@ func TestTLS12OnlyReportsNo13(t *testing.T) {
 }
 
 func TestNonTLSListener(t *testing.T) {
-	l, _ := net.Listen("tcp", "127.0.0.1:0")
+	l, _ := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	defer func() { _ = l.Close() }()
 	go func() {
 		for {

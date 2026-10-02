@@ -118,7 +118,7 @@ func (e *env) do(method, target string, body string, hdr ...string) resp {
 	if body != "" {
 		rd = strings.NewReader(body)
 	}
-	req := httptest.NewRequest(method, target, rd)
+	req := httptest.NewRequestWithContext(context.Background(), method, target, rd)
 	req.Header.Set("Authorization", "Bearer "+testToken)
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
@@ -194,12 +194,14 @@ func waitFor(t *testing.T, cond func() bool) {
 
 func listen(t *testing.T) net.Listener {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	return ln
 }
 
-func newReq(method, target string) *http.Request { return httptest.NewRequest(method, target, nil) }
-func newRec() *httptest.ResponseRecorder         { return httptest.NewRecorder() }
+func newReq(method, target string) *http.Request {
+	return httptest.NewRequestWithContext(context.Background(), method, target, nil)
+}
+func newRec() *httptest.ResponseRecorder { return httptest.NewRecorder() }

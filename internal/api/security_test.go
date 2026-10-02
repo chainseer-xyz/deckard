@@ -25,7 +25,7 @@ import (
 )
 
 func raw(e *env, method, target string, hdr map[string]string) resp {
-	req := httptest.NewRequest(method, target, nil)
+	req := httptest.NewRequestWithContext(context.Background(), method, target, nil)
 	for k, v := range hdr {
 		req.Header.Set(k, v)
 	}
@@ -163,7 +163,7 @@ func TestCSRFOnCookieSessions(t *testing.T) {
 	e := newEnv(t, func(d *api.Deps) { d.Authenticator = cookieAuth{csrf: "csrf-123"} })
 	e.seed()
 	do := func(method, target string, hdr map[string]string) resp {
-		req := httptest.NewRequest(method, target, nil)
+		req := httptest.NewRequestWithContext(context.Background(), method, target, nil)
 		req.AddCookie(&http.Cookie{Name: "s", Value: "ok"})
 		for k, v := range hdr {
 			req.Header.Set(k, v)
@@ -318,7 +318,7 @@ func TestCORS(t *testing.T) {
 	if r.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Error("non-listed origin allowed")
 	}
-	req := httptest.NewRequest("OPTIONS", "/api/v1/findings/1/suppress", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "OPTIONS", "/api/v1/findings/1/suppress", nil)
 	req.Header.Set("Origin", "https://ui.example.com")
 	req.Header.Set("Access-Control-Request-Method", "POST")
 	rec := httptest.NewRecorder()
@@ -352,7 +352,7 @@ func TestGzip(t *testing.T) {
 		t.Error("html not compressed")
 	}
 	// HEAD untouched
-	req := httptest.NewRequest("HEAD", "/healthz", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "HEAD", "/healthz", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
 	rec := httptest.NewRecorder()
 	e.h.ServeHTTP(rec, req)
