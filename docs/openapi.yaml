@@ -1,0 +1,599 @@
+openapi: 3.0.3
+info:
+  title: deckard API
+  version: 1.0.0
+  description: |
+    REST + SSE API of deckard, the attack-surface monitor.
+
+    Authentication depends on `auth.mode`:
+    * `none` - no authentication; read AND write are open. Only run behind a trusted authenticating proxy.
+    * `token` - `Authorization: Bearer <token>` on every request except `/healthz` and `/readyz`. The token is never accepted in the query string.
+    * `oidc` - browser login via `/auth/login` (Authorization Code + PKCE) and a signed, encrypted session cookie.
+      State-changing requests authenticated by cookie must send the `X-CSRF-Token` header with the value returned by `GET /api/v1/me`.
+
+    List responses are `{items,total,limit,offset}`; `limit` defaults to 50 (max 500). Unknown or malformed query parameters yield 400.
+    Errors are `{"error":{"code","message"}}`.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+  - sessionCookie: []
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe
+      security: []
+      responses:
+        '200':
+          description: Process is serving
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Status'}
+  /readyz:
+    get:
+      summary: Readiness probe (database reachable)
+      security: []
+      responses:
+        '200':
+          description: Ready
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Status'}
+        '503':
+          description: Store unreachable
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Status'}
+  /auth/login:
+    get:
+      summary: Start OIDC login (oidc mode only)
+      security: []
+      parameters:
+        - name: next
+          in: query
+          description: Same-site path to return to after login
+          schema: {type: string}
+      responses:
+        '302': {description: Redirect to the identity provider}
+        '502': {$ref: '#/components/responses/Error'}
+  /auth/callback:
+    get:
+      summary: OIDC redirect URI (oidc mode only)
+      security: []
+      parameters:
+        - {name: code, in: query, schema: {type: string}}
+        - {name: state, in: query, schema: {type: string}}
+        - {name: error, in: query, schema: {type: string}}
+      responses:
+        '302': {description: Session established; redirect to the original page}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '502': {$ref: '#/components/responses/Error'}
+  /auth/logout:
+    post:
+      summary: End the session (oidc mode only)
+      description: |
+        POST only (a GET would be triggerable cross-site). With a live session the
+        `X-CSRF-Token` header (from `GET /api/v1/me` `csrf_token`) is required.
+      security: []
+      parameters:
+        - {name: X-CSRF-Token, in: header, schema: {type: string}}
+      responses:
+        '303': {description: Cookie cleared; redirect to /}
+        '403': {$ref: '#/components/responses/Error'}
+  /api/v1/me:
+    get:
+      summary: Current identity and capabilities
+      responses:
+        '200':
+          description: Identity
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Me'}
+        '401': {$ref: '#/components/responses/Error'}
+  /api/v1/openapi.yaml:
+    get:
+      summary: This document
+      responses:
+        '200':
+          description: OpenAPI document
+          content:
+            application/yaml:
+              schema: {type: string}
+        '401': {$ref: '#/components/responses/Error'}
+  /api/v1/stats:
+    get:
+      summary: Dashboard summary
+      responses:
+        '200':
+          description: Counts
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Stats'}
+        '401': {$ref: '#/components/responses/Error'}
+  /api/v1/assets:
+    get:
+      summary: List assets
+      parameters:
+        - {name: kind, in: query, schema: {$ref: '#/components/schemas/AssetKind'}}
+        - {name: source, in: query, schema: {type: string}}
+        - {name: scope, in: query, schema: {$ref: '#/components/schemas/ScopeClass'}}
+        - {name: zone, in: query, schema: {type: string}}
+        - {name: q, in: query, description: Substring match on key, schema: {type: string}}
+        - {name: include_removed, in: query, schema: {type: boolean, default: false}}
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Offset'}
+      responses:
+        '200':
+          description: Page of assets
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/ListEnvelope'}
+                  - type: object
+                    properties:
+                      items: {type: array, items: {$ref: '#/components/schemas/Asset'}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+  /api/v1/assets/{id}:
+    get:
+      summary: Asset detail with edges, latest observations, baselines and open findings
+      parameters:
+        - {$ref: '#/components/parameters/ID'}
+      responses:
+        '200':
+          description: Asset detail
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AssetDetail'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /api/v1/assets/{id}/graph:
+    get:
+      summary: Neighbourhood graph for the UI
+      parameters:
+        - {$ref: '#/components/parameters/ID'}
+        - {name: depth, in: query, schema: {type: integer, minimum: 1, maximum: 3, default: 1}}
+      responses:
+        '200':
+          description: Nodes and edges
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Graph'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /api/v1/assets/{id}/rescan:
+    post:
+      summary: Queue an immediate rescan of one asset
+      parameters:
+        - {$ref: '#/components/parameters/ID'}
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Status'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '501': {$ref: '#/components/responses/Error'}
+  /api/v1/findings:
+    get:
+      summary: List findings
+      parameters:
+        - name: status
+          in: query
+          description: Repeatable
+          style: form
+          explode: true
+          schema:
+            type: array
+            items: {$ref: '#/components/schemas/FindingStatus'}
+        - {name: min_severity, in: query, schema: {$ref: '#/components/schemas/Severity'}}
+        - {name: check, in: query, schema: {type: string}}
+        - {name: zone, in: query, schema: {type: string}}
+        - {name: source, in: query, schema: {type: string}}
+        - {name: asset_id, in: query, schema: {type: integer, format: int64, minimum: 1}}
+        - {name: q, in: query, schema: {type: string}}
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Offset'}
+      responses:
+        '200':
+          description: Page of findings
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/ListEnvelope'}
+                  - type: object
+                    properties:
+                      items: {type: array, items: {$ref: '#/components/schemas/Finding'}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+  /api/v1/findings/{id}:
+    get:
+      summary: Finding detail
+      parameters:
+        - {$ref: '#/components/parameters/ID'}
+      responses:
+        '200':
+          description: Finding
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Finding'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /api/v1/findings/{id}/acknowledge:
+    post:
+      summary: Acknowledge a finding (optionally until a time)
+      parameters:
+        - {$ref: '#/components/parameters/ID'}
+      requestBody: {$ref: '#/components/requestBodies/FindingAction'}
+      responses:
+        '200':
+          description: Updated finding
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Finding'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+  /api/v1/findings/{id}/suppress:
+    post:
+      summary: Suppress a finding; note required, until optional
+      parameters:
+        - {$ref: '#/components/parameters/ID'}
+      requestBody: {$ref: '#/components/requestBodies/FindingAction'}
+      responses:
+        '200':
+          description: Updated finding
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Finding'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+  /api/v1/findings/{id}/false-positive:
+    post:
+      summary: Mark a finding as a false positive
+      parameters:
+        - {$ref: '#/components/parameters/ID'}
+      requestBody: {$ref: '#/components/requestBodies/FindingAction'}
+      responses:
+        '200':
+          description: Updated finding
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Finding'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+  /api/v1/findings/{id}/reopen:
+    post:
+      summary: Reopen an acknowledged, suppressed or false-positive finding
+      parameters:
+        - {$ref: '#/components/parameters/ID'}
+      requestBody: {$ref: '#/components/requestBodies/FindingAction'}
+      responses:
+        '200':
+          description: Updated finding
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Finding'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+  /api/v1/sources:
+    get:
+      summary: Source sync status
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Offset'}
+      responses:
+        '200':
+          description: Page of source statuses
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/ListEnvelope'}
+                  - type: object
+                    properties:
+                      items: {type: array, items: {$ref: '#/components/schemas/SyncStatus'}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+  /api/v1/sources/{name}/sync:
+    post:
+      summary: Trigger a sync of one source
+      parameters:
+        - {name: name, in: path, required: true, schema: {type: string}}
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Status'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '501': {$ref: '#/components/responses/Error'}
+  /api/v1/scans:
+    get:
+      summary: Recent scan runs
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Offset'}
+      responses:
+        '200':
+          description: Page of scan runs (total is the number of rows within the requested window)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/ListEnvelope'}
+                  - type: object
+                    properties:
+                      items: {type: array, items: {$ref: '#/components/schemas/ScanRun'}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+  /api/v1/changes:
+    get:
+      summary: Inventory and finding change feed
+      parameters:
+        - {name: since, in: query, description: RFC3339 timestamp; default 24h ago, schema: {type: string, format: date-time}}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Events
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/ListEnvelope'}
+                  - type: object
+                    properties:
+                      items: {type: array, items: {$ref: '#/components/schemas/Event'}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+  /api/v1/events:
+    get:
+      summary: Server-sent change stream
+      description: |
+        Emits `event: change` with a JSON `Event` as data and the event id as the SSE id.
+        Resume with `Last-Event-ID` (replays up to 24h; `?since=` older than that is clamped) or `?since=`. Heartbeat comments every 15s.
+      parameters:
+        - {name: since, in: query, schema: {type: string, format: date-time}}
+        - {name: Last-Event-ID, in: header, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema: {type: string}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '429':
+          description: Too many open streams (global cap, default 100, or per identity, default 10). Retry after the `Retry-After` seconds.
+          headers:
+            Retry-After: {schema: {type: integer}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer}
+    sessionCookie: {type: apiKey, in: cookie, name: __Host-deckard_session, description: "Unprefixed deckard_session when base_url is not https"}
+  parameters:
+    ID:
+      name: id
+      in: path
+      required: true
+      schema: {type: integer, format: int64, minimum: 1}
+    Limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 500, default: 50}
+    Offset:
+      name: offset
+      in: query
+      schema: {type: integer, minimum: 0, default: 0}
+  requestBodies:
+    FindingAction:
+      required: false
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ActionRequest'}
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+  schemas:
+    Status: {type: object, properties: {status: {type: string}}}
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}
+    ListEnvelope:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items: {type: array, items: {}}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+    Me:
+      type: object
+      properties:
+        subject: {type: string}
+        name: {type: string}
+        email: {type: string}
+        groups: {type: array, items: {type: string}}
+        auth_mode: {type: string, enum: [none, token, oidc]}
+        method: {type: string, enum: [none, token, cookie]}
+        can_write: {type: boolean}
+        csrf_token: {type: string, description: Present for cookie sessions}
+    AssetKind: {type: string, enum: [zone, hostname, ip, service, url, certificate, cloud_resource]}
+    ScopeClass: {type: string, enum: [owned, shared, external, excluded]}
+    Severity: {type: string, enum: [info, low, medium, high, critical]}
+    FindingStatus: {type: string, enum: [open, acknowledged, suppressed, false_positive, resolved]}
+    Asset:
+      type: object
+      properties:
+        id: {type: integer, format: int64}
+        kind: {$ref: '#/components/schemas/AssetKind'}
+        key: {type: string}
+        source: {type: string}
+        scope: {$ref: '#/components/schemas/ScopeClass'}
+        zone: {type: string}
+        attrs: {type: object, additionalProperties: true}
+        first_seen: {type: string, format: date-time}
+        last_seen: {type: string, format: date-time}
+        removed_at: {type: string, format: date-time, nullable: true}
+    AssetDetail:
+      type: object
+      properties:
+        asset: {$ref: '#/components/schemas/Asset'}
+        edges:
+          type: array
+          items:
+            type: object
+            properties:
+              direction: {type: string, enum: [out, in]}
+              type: {type: string}
+              asset: {$ref: '#/components/schemas/Asset'}
+        observations:
+          type: array
+          items:
+            type: object
+            properties:
+              asset_id: {type: integer, format: int64}
+              check: {type: string}
+              data: {type: object, additionalProperties: true}
+              observed_at: {type: string, format: date-time}
+        baselines:
+          type: array
+          items:
+            type: object
+            properties:
+              check: {type: string}
+              data: {type: object, additionalProperties: true}
+              stable: {type: boolean}
+              consistent: {type: integer}
+              updated_at: {type: string, format: date-time}
+        findings: {type: array, items: {$ref: '#/components/schemas/Finding'}}
+    Graph:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            type: object
+            properties:
+              id: {type: integer, format: int64}
+              kind: {$ref: '#/components/schemas/AssetKind'}
+              key: {type: string}
+              scope: {$ref: '#/components/schemas/ScopeClass'}
+        edges:
+          type: array
+          items:
+            type: object
+            properties:
+              from: {type: integer, format: int64}
+              to: {type: integer, format: int64}
+              type: {type: string}
+        truncated: {type: boolean}
+    Finding:
+      type: object
+      properties:
+        id: {type: integer, format: int64}
+        fingerprint: {type: string}
+        check: {type: string}
+        asset_id: {type: integer, format: int64}
+        asset_key: {type: string}
+        zone: {type: string}
+        source: {type: string}
+        severity: {$ref: '#/components/schemas/Severity'}
+        title: {type: string}
+        description: {type: string}
+        evidence: {type: object, additionalProperties: true}
+        remediation: {type: string}
+        tags: {type: array, items: {type: string}}
+        status: {$ref: '#/components/schemas/FindingStatus'}
+        first_seen: {type: string, format: date-time}
+        last_seen: {type: string, format: date-time}
+        resolved_at: {type: string, format: date-time, nullable: true}
+        missed_runs: {type: integer}
+        reopened_count: {type: integer}
+        suppressed_until: {type: string, format: date-time, nullable: true}
+        suppression_note: {type: string}
+    ActionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        note: {type: string, maxLength: 2000}
+        until: {type: string, format: date-time, nullable: true, description: Must be in the future; only for acknowledge and suppress}
+    Stats:
+      type: object
+      properties:
+        assets_by_kind: {type: object, additionalProperties: {type: integer}}
+        assets_by_source: {type: object, additionalProperties: {type: integer}}
+        assets_by_scope: {type: object, additionalProperties: {type: integer}}
+        findings_by_severity: {type: object, additionalProperties: {type: integer}}
+        findings_by_check: {type: object, additionalProperties: {type: integer}}
+    SyncStatus:
+      type: object
+      properties:
+        source: {type: string}
+        type: {type: string}
+        last_run: {type: string, format: date-time}
+        last_ok: {type: string, format: date-time}
+        error: {type: string}
+        asset_count: {type: integer}
+        duration_ms: {type: integer, format: int64}
+    ScanRun:
+      type: object
+      properties:
+        id: {type: integer, format: int64}
+        asset_id: {type: integer, format: int64}
+        check: {type: string}
+        tier: {type: string}
+        started_at: {type: string, format: date-time}
+        duration_ms: {type: integer, format: int64}
+        error: {type: string}
+        findings: {type: integer}
+    Event:
+      type: object
+      properties:
+        id: {type: integer, format: int64}
+        type: {type: string}
+        subject: {type: string}
+        data: {type: object, additionalProperties: true}
+        at: {type: string, format: date-time}

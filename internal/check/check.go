@@ -1,0 +1,109 @@
+// Package check defines the probe contract. Checks never open their own
+// network connections: they use the scope-guarded clients in Target.
+package check
+
+import (
+	"context"
+	"net"
+	"net/http"
+
+	"github.com/chainseer-xyz/deckard/internal/dnsx"
+	"github.com/chainseer-xyz/deckard/internal/model"
+)
+
+// Dialer is a scope-guarded dialer. It refuses out-of-scope addresses.
+type Dialer interface {
+	DialContext(ctx context.Context, network, address string) (net.Conn, error)
+}
+
+// Resolver is a scope-aware DNS resolver.
+type Resolver interface {
+	LookupHost(ctx context.Context, host string) ([]string, error)
+	LookupCNAME(ctx context.Context, host string) (string, error)
+	LookupTXT(ctx context.Context, host string) ([]string, error)
+	LookupNS(ctx context.Context, host string) ([]string, error)
+}
+
+// DNSQuerier is a scope-guarded, rcode-aware DNS client (see internal/dnsx).
+// Unlike Resolver it exposes the rcode, the CNAME chain and DNSSEC data, and
+// models SERVFAIL/timeouts as "unknown" (dnsx.StateUnknown or an error
+// wrapping dnsx.ErrUnavailable), never as NXDOMAIN. Checks that need more than
+// Resolver offers use it when Target.DNS is non-nil and fall back to Resolver
+// otherwise.
+type DNSQuerier interface {
+	// Query asks the configured recursive resolvers for name/qtype.
+	Query(ctx context.Context, name string, qtype uint16) (*dnsx.Response, error)
+	// ResolveChain follows name's CNAME chain, reporting where it ends.
+	ResolveChain(ctx context.Context, name string) (dnsx.Chain, error)
+	// AXFR attempts a zone transfer from the zone's nameservers. Attempts the
+	// scope guard does not permit are reported as skipped, not as errors.
+	AXFR(ctx context.Context, zone string) (dnsx.AXFRReport, error)
+}
+
+// Neighbour is an asset connected to the target by a relation.
+type Neighbour struct {
+	Asset    model.Asset
+	Relation model.RelationType
+	Outbound bool
+}
+
+// Target is everything a check may use. Asset is always in scope for the
+// check tier (the engine enforces this before calling Run).
+type Target struct {
+	Asset      model.Asset
+	Neighbours []Neighbour
+	Baseline   map[string]map[string]any // per-check learned baseline
+	Dialer     Dialer
+	Resolver   Resolver
+	DNS        DNSQuerier // optional; nil means use Resolver only
+	HTTP       *http.Client
+	Config     map[string]any
+	// OpenFindings are this asset's unresolved findings (open, acknowledged,
+	// suppressed, false_positive) of the running check, newest severity first,
+	// capped at MaxOpenFindings. The engine fills it only for checks that
+	// implement WantsOpenFindings; it is nil for every other check.
+	OpenFindings []OpenFinding
+}
+
+// MaxOpenFindings bounds Target.OpenFindings.
+const MaxOpenFindings = 200
+
+// OpenFinding is the minimal view of an unresolved finding a check may use to
+// re-verify it (for example by re-running the template that produced it).
+//
+// The finding Key is not persisted (only its fingerprint is), so a check that
+// needs it reads what it put into Evidence when it reported the finding.
+type OpenFinding struct {
+	Fingerprint string
+	Severity    model.Severity
+	Status      model.FindingStatus
+	Evidence    map[string]any
+}
+
+// WantsOpenFindings is an optional Check interface. A check returning true
+// receives Target.OpenFindings; the engine runs one indexed store query per
+// scan for it and skips the query for every other check.
+type WantsOpenFindings interface {
+	WantsOpenFindings() bool
+}
+
+// Result is what a check returns.
+type Result struct {
+	Observations []model.ObservationInput
+	Findings     []model.FindingInput
+	Discovered   []model.AssetInput
+	Relations    []model.RelationInput
+	// Partial marks a run that only observed a subset of what the check can
+	// report (for example a delta scan with a handful of new nuclei templates).
+	// Its findings are opened and refreshed as usual, but absence proves
+	// nothing: no misses are counted and no finding is resolved.
+	Partial bool
+}
+
+// Check is one probe.
+type Check interface {
+	Name() string
+	Tier() model.Tier
+	Applies(a model.Asset) bool
+	Run(ctx context.Context, t Target) (*Result, error)
+}

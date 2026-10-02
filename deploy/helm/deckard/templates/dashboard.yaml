@@ -1,0 +1,12 @@
+{{- if .Values.metrics.dashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "deckard.fullname" . }}-dashboard
+  labels:
+    {{- include "deckard.labels" . | nindent 4 }}
+    {{ .Values.metrics.dashboard.label }}: "1"
+data:
+  deckard.json: |-
+    {{- .Files.Get "dashboards/deckard.json" | nindent 4 }}
+{{- end }}

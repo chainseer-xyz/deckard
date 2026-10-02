@@ -1,0 +1,29 @@
+{
+ "success": true,
+ "errors": [],
+ "messages": [],
+ "result": [
+  {
+   "id": "lb0001",
+   "name": "LB.example.com",
+   "enabled": true,
+   "proxied": true,
+   "default_pools": [
+    "pool0001"
+   ],
+   "fallback_pool": "pool0002",
+   "region_pools": {
+    "WNAM": [
+     "pool0001"
+    ]
+   }
+  }
+ ],
+ "result_info": {
+  "page": 1,
+  "per_page": 50,
+  "total_pages": 1,
+  "count": 1,
+  "total_count": 1
+ }
+}

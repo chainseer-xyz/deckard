@@ -1,0 +1,22 @@
+deckard {{ .Chart.AppVersion }} installed as {{ include "deckard.fullname" . }}.
+
+{{- if not .Values.config.sources }}
+
+WARNING: config.sources is empty, so deckard has nothing to discover. Add at least
+one source (cloudflare, route53, kubernetes or static) to your values.
+{{- end }}
+{{- if not .Values.config.notify.alertmanager.urls }}
+
+NOTE: config.notify.alertmanager.urls is empty. Findings will be stored and
+shown in the UI but no alerts are sent.
+{{- end }}
+
+Open the UI:
+{{- if .Values.ingress.enabled }}
+  https://{{ (index .Values.ingress.hosts 0).host }}
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "deckard.fullname" . }} 8080:{{ .Values.service.port }}
+  open http://localhost:8080
+{{- end }}
+
+Metrics: port {{ .Values.metrics.port }} at /metrics.

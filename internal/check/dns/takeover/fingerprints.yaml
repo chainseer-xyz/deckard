@@ -1,0 +1,120 @@
+# Subdomain-takeover fingerprints, modelled on the public can-i-take-over-xyz
+# project. Only providers with well-known, stable signatures are included.
+#
+#   provider     display name
+#   cname        regexes matched against the (lowercased, dotless) CNAME target
+#   fingerprint  substrings searched in the HTTP body served for the OWNED host
+#   nxdomain     true: the CNAME target returning NXDOMAIN is itself sufficient
+#                (no HTTP fingerprint needed)
+#   default_cert optional bare domains under which the provider issues its shared
+#                DEFAULT certificate (cloudfront.net matches *.cloudfront.net).
+#                A certificate whose every name lies under these is the provider
+#                default; any other certificate that verifies for the owned
+#                host proves the host is served by its owner (suppresses).
+#   status       vulnerable | edge-case (claimable only under some conditions)
+- provider: AWS S3 website bucket
+  cname: ['\.s3[.-]website[.-]([a-z0-9-]+\.)?amazonaws\.com$', '\.s3\.amazonaws\.com$', '\.s3[.-][a-z0-9-]+\.amazonaws\.com$']
+  fingerprint: ["The specified bucket does not exist"]
+  default_cert: [s3.amazonaws.com]
+  status: vulnerable
+- provider: AWS Elastic Beanstalk
+  cname: ['\.elasticbeanstalk\.com$']
+  nxdomain: true
+  status: vulnerable
+- provider: AWS CloudFront
+  cname: ['\.cloudfront\.net$']
+  fingerprint: ["The request could not be satisfied"]
+  default_cert: [cloudfront.net]
+  status: edge-case
+- provider: GitHub Pages
+  cname: ['\.github\.io$']
+  fingerprint: ["There isn't a GitHub Pages site here."]
+  default_cert: [github.io]
+  status: edge-case
+- provider: Heroku
+  cname: ['\.herokuapp\.com$', '\.herokudns\.com$', '\.herokussl\.com$']
+  fingerprint: ["No such app", "herokucdn.com/error-pages/no-such-app.html"]
+  default_cert: [herokuapp.com, herokudns.com, herokussl.com]
+  status: edge-case
+- provider: Azure App Service
+  cname: ['\.azurewebsites\.net$']
+  nxdomain: true
+  default_cert: [azurewebsites.net]
+  status: vulnerable
+- provider: Azure Cloud Services
+  cname: ['\.cloudapp\.net$', '\.cloudapp\.azure\.com$']
+  nxdomain: true
+  default_cert: [cloudapp.net]
+  status: vulnerable
+- provider: Azure Traffic Manager
+  cname: ['\.trafficmanager\.net$']
+  nxdomain: true
+  default_cert: [trafficmanager.net]
+  status: vulnerable
+- provider: Azure Blob Storage
+  cname: ['\.blob\.core\.windows\.net$']
+  nxdomain: true
+  default_cert: [blob.core.windows.net]
+  status: vulnerable
+- provider: Netlify
+  cname: ['\.netlify\.app$', '\.netlify\.com$']
+  fingerprint: ["Not Found - Request ID:"]
+  default_cert: [netlify.app, netlify.com]
+  status: edge-case
+- provider: Fastly
+  cname: ['\.fastly\.net$', '\.fastlylb\.net$']
+  fingerprint: ["Fastly error: unknown domain"]
+  default_cert: [fastly.net]
+  status: vulnerable
+- provider: Shopify
+  cname: ['\.myshopify\.com$', '^shops\.myshopify\.com$']
+  fingerprint: ["Sorry, this shop is currently unavailable."]
+  status: edge-case
+- provider: Zendesk
+  cname: ['\.zendesk\.com$']
+  fingerprint: ["Help Center Closed"]
+  default_cert: [zendesk.com]
+  status: vulnerable
+- provider: Readme.io
+  cname: ['\.readme\.io$']
+  fingerprint: ["The creators of this project are still working on making everything perfect!"]
+  status: vulnerable
+- provider: Ghost
+  cname: ['\.ghost\.io$']
+  fingerprint: ["The thing you were looking for is no longer here, or never was"]
+  status: vulnerable
+- provider: Surge.sh
+  cname: ['\.surge\.sh$']
+  fingerprint: ["project not found"]
+  default_cert: [surge.sh]
+  status: vulnerable
+- provider: Pantheon
+  cname: ['\.pantheonsite\.io$']
+  fingerprint: ["The gods are wise, but do not know of the site which you seek."]
+  status: vulnerable
+- provider: Tumblr
+  cname: ['(^|\.)domains\.tumblr\.com$']
+  fingerprint: ["Whatever you were looking for doesn't currently exist at this address."]
+  status: vulnerable
+- provider: WordPress.com
+  cname: ['\.wordpress\.com$']
+  fingerprint: ["Do you want to register"]
+  default_cert: [wordpress.com]
+  status: vulnerable
+- provider: Bitbucket
+  cname: ['\.bitbucket\.io$']
+  fingerprint: ["Repository not found"]
+  default_cert: [bitbucket.io]
+  status: vulnerable
+- provider: Unbounce
+  cname: ['\.unbouncepages\.com$']
+  fingerprint: ["The requested URL was not found on this server"]
+  status: edge-case
+- provider: Helpjuice
+  cname: ['\.helpjuice\.com$']
+  fingerprint: ["We could not find what you're looking for."]
+  status: vulnerable
+- provider: Atlassian Statuspage
+  cname: ['\.statuspage\.io$']
+  fingerprint: ["You are being <a href=\"https://www.statuspage.io\">redirected"]
+  status: edge-case

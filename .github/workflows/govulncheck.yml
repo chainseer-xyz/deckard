@@ -1,0 +1,96 @@
+name: govulncheck
+
+# Fails PR/push builds on vulnerabilities that deckard's code can actually
+# reach, and runs daily so a newly published advisory against an unchanged main
+# is noticed. The scheduled run keeps a single tracking issue (label: security)
+# open while findings exist and closes it when the tree is clean.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: govulncheck-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      status: ${{ steps.scan.outputs.status }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: govulncheck ./...
+        id: scan
+        run: |
+          set +e
+          govulncheck ./... 2>&1 | tee govulncheck.txt
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -eq 0 ]; then echo "status=clean" >> "$GITHUB_OUTPUT"; else echo "status=vulnerable" >> "$GITHUB_OUTPUT"; fi
+          # Keep the summary short: the full report lives in this run's log.
+          {
+            echo '### govulncheck'
+            echo '```'
+            head -c 12000 govulncheck.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+        shell: bash
+
+  # Scheduled runs only: maintain one tracking issue. Separate job so the scan
+  # itself (which also runs on fork PRs) never holds issues: write.
+  track:
+    needs: govulncheck
+    if: ${{ always() && github.event_name == 'schedule' && needs.govulncheck.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      STATUS: ${{ needs.govulncheck.outputs.status }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      TITLE: "govulncheck: reachable vulnerabilities in dependencies"
+    steps:
+      - name: open, update or close the tracking issue
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh label create security --color B60205 --description "Security-relevant work" 2>/dev/null || true
+          existing=$(gh issue list --label security --state open --search "\"$TITLE\" in:title" --json number,title \
+            --jq "map(select(.title == \"$TITLE\")) | .[0].number // empty")
+          if [ "$STATUS" = "clean" ]; then
+            if [ -n "$existing" ]; then
+              gh issue close "$existing" --comment "govulncheck is clean again ($RUN_URL)."
+            fi
+            exit 0
+          fi
+          body="The scheduled govulncheck run found vulnerabilities reachable from deckard's code (or the scan itself failed).
+
+          Run: $RUN_URL
+
+          Fix: bump the affected module in go.mod (minimal bump), run \`go mod tidy\` and \`make test\`, or rebuild with a patched Go toolchain. This issue closes automatically once a scheduled run is clean."
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Still failing: $RUN_URL"
+          else
+            gh issue create --title "$TITLE" --label security --body "$body"
+          fi

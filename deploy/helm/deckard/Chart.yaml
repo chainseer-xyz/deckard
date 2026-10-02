@@ -1,0 +1,18 @@
+apiVersion: v2
+name: deckard
+description: Continuous external attack-surface monitor. Discovers your domains, IPs and cluster endpoints and keeps probing them for dangling DNS, exposed services and new findings.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/chainseer-xyz/deckard
+sources:
+  - https://github.com/chainseer-xyz/deckard
+keywords:
+  - security
+  - attack-surface
+  - dns
+  - monitoring
+  - prometheus
+maintainers:
+  - name: quaekr

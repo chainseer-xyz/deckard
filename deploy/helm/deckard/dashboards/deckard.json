@@ -1,0 +1,129 @@
+{
+  "title": "deckard: attack surface",
+  "uid": "deckard-surface",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "tags": ["deckard", "security"],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Critical findings",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sum(deckard_findings_open{severity=\"critical\"}) or vector(0)", "refId": "A" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } }, "overrides": [] }
+    },
+    {
+      "id": 2, "type": "stat", "title": "High findings",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sum(deckard_findings_open{severity=\"high\"}) or vector(0)", "refId": "A" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] } }, "overrides": [] }
+    },
+    {
+      "id": 3, "type": "stat", "title": "Medium + low",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sum(deckard_findings_open{severity=~\"medium|low\"}) or vector(0)", "refId": "A" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }] } }, "overrides": [] }
+    },
+    {
+      "id": 4, "type": "stat", "title": "Assets tracked",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sum(deckard_assets)", "refId": "A" }]
+    },
+    {
+      "id": 5, "type": "stat", "title": "Oldest successful sync",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "time() - min(deckard_source_last_success_timestamp)", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1800 }, { "color": "red", "value": 3600 }] } }, "overrides": [] }
+    },
+    {
+      "id": 6, "type": "stat", "title": "Scan errors (1h)",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sum(increase(deckard_scan_errors_total[1h])) or vector(0)", "refId": "A" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] } }, "overrides": [] }
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Open findings by severity",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sum by (severity) (deckard_findings_open)", "legendFormat": "{{severity}}", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": { "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 40 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "critical" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "high" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "medium" }, "properties": [{ "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "low" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] }
+        ]
+      }
+    },
+    {
+      "id": 8, "type": "bargauge", "title": "Open findings by check",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "topk(15, sum by (check) (deckard_findings_open))", "legendFormat": "{{check}}", "refId": "A" }],
+      "options": { "orientation": "horizontal", "displayMode": "gradient" }
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "Assets by kind",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sum by (kind) (deckard_assets)", "legendFormat": "{{kind}}", "refId": "A" }]
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "Inventory changes (per hour)",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sum by (type) (increase(deckard_inventory_changes_total[1h]))", "legendFormat": "{{type}}", "refId": "A" }]
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "Queue depth",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sum by (queue) (deckard_queue_depth)", "legendFormat": "{{queue}}", "refId": "A" }]
+    },
+    {
+      "id": 12, "type": "timeseries", "title": "Scan duration p95 by check",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, check) (rate(deckard_scan_duration_seconds_bucket[15m])))", "legendFormat": "{{check}}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 13, "type": "timeseries", "title": "Checks run / errors per minute",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum(rate(deckard_checks_run_total[5m])) * 60", "legendFormat": "runs", "refId": "A" },
+        { "expr": "sum(rate(deckard_scan_errors_total[5m])) * 60", "legendFormat": "errors", "refId": "B" }
+      ]
+    },
+    {
+      "id": 14, "type": "table", "title": "Source sync health",
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "time() - deckard_source_last_success_timestamp", "format": "table", "instant": true, "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "transformations": [{ "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true }, "renameByName": { "Value": "seconds since last success" } } }]
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+ "success": true,
+ "errors": [],
+ "messages": [],
+ "result": [
+  {
+   "id": "spec0001",
+   "protocol": "tcp/22",
+   "dns": {
+    "type": "CNAME",
+    "name": "ssh.example.com"
+   },
+   "origin_direct": [
+    "tcp://192.0.2.60:22"
+   ],
+   "origin_port": 22,
+   "ip_firewall": true
+  }
+ ],
+ "result_info": {
+  "page": 1,
+  "per_page": 50,
+  "total_pages": 1,
+  "count": 1,
+  "total_count": 1
+ }
+}

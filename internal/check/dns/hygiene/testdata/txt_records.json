@@ -1,0 +1,19 @@
+{
+  "good.example.com": ["v=spf1 include:spf.mail.example.net -all", "google-site-verification=abc"],
+  "_dmarc.good.example.com": ["v=DMARC1; p=reject; rua=mailto:dmarc@good.example.com"],
+  "spf.mail.example.net": ["v=spf1 ip4:192.0.2.0/24 -all"],
+
+  "open.example.com": ["v=spf1 +all"],
+  "_dmarc.open.example.com": ["v=DMARC1; p=none"],
+
+  "neutral.example.com": ["v=spf1 ip4:192.0.2.1 ?all"],
+
+  "dupe.example.com": ["v=spf1 -all", "v=spf1 ip4:192.0.2.1 -all"],
+
+  "deep.example.com": ["v=spf1 include:a.example.net include:b.example.net a mx ptr exists:x.example.net -all"],
+  "a.example.net": ["v=spf1 include:c.example.net a mx -all"],
+  "b.example.net": ["v=spf1 a:mail.example.net mx:mail.example.net ~all"],
+  "c.example.net": ["v=spf1 a a a -all"],
+
+  "bare.example.com": ["some other txt"]
+}

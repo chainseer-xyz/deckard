@@ -1,0 +1,31 @@
+{
+ "success": true,
+ "errors": [],
+ "messages": [],
+ "result": [
+  {
+   "id": "rec0101",
+   "type": "A",
+   "name": "app.example.net",
+   "content": "198.51.100.7",
+   "proxied": true,
+   "ttl": 1
+  },
+  {
+   "id": "rec0102",
+   "type": "MX",
+   "name": "example.net",
+   "content": "mail.example.net",
+   "priority": 10,
+   "proxied": false,
+   "ttl": 300
+  }
+ ],
+ "result_info": {
+  "page": 1,
+  "per_page": 50,
+  "total_pages": 1,
+  "count": 2,
+  "total_count": 2
+ }
+}

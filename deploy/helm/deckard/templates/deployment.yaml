@@ -1,0 +1,34 @@
+{{- include "deckard.validate" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "deckard.fullname" . }}
+  labels:
+    {{- include "deckard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "deckard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: server
+  template:
+    {{- include "deckard.podTemplate" (dict "root" . "roles" .Values.roles "resources" .Values.resources "component" "server" "nucleiPVC" true) | nindent 4 }}
+{{- if .Values.worker.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "deckard.fullname" . }}-worker
+  labels:
+    {{- include "deckard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "deckard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    {{- include "deckard.podTemplate" (dict "root" . "roles" (list "worker") "resources" (default .Values.resources .Values.worker.resources) "component" "worker" "nucleiPVC" false) | nindent 4 }}
+{{- end }}

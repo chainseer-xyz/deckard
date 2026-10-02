@@ -1,0 +1,30 @@
+{
+ "success": true,
+ "errors": [],
+ "messages": [],
+ "result": [
+  {
+   "id": "rec0004",
+   "type": "A",
+   "name": "*.wild.example.com",
+   "content": "203.0.113.9",
+   "proxied": false,
+   "ttl": 120
+  },
+  {
+   "id": "rec0005",
+   "type": "CNAME",
+   "name": "blog.example.com.",
+   "content": "Hosted.Example.net.",
+   "proxied": false,
+   "ttl": 3600
+  }
+ ],
+ "result_info": {
+  "page": 2,
+  "per_page": 50,
+  "total_pages": 2,
+  "count": 2,
+  "total_count": 5
+ }
+}

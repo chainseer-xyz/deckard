@@ -1,0 +1,11 @@
+bin/
+*.out
+.env
+.env.*
+web/node_modules/
+!internal/api/ui/dist/
+internal/api/ui/dist/*
+!internal/api/ui/dist/.gitkeep
+coverage.*
+.claude/
+!.env.example

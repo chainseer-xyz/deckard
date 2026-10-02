@@ -1,0 +1,16 @@
+log: { level: info, format: json }
+sources:
+  - { name: cloudflare, type: cloudflare, token_env: CF_API_TOKEN }
+  # - { name: extra, type: static, hostnames: [www.example.com], cidrs: [203.0.113.0/28] }
+profiles:
+  passive: { enabled: true, interval: 5m }
+  active:  { enabled: true, interval: 6h, rate_limit: "50/s" }
+# nuclei CVE templates update themselves (every 6h, and every owned web asset is
+# tested with the templates a release just added). Air-gapped: set
+# `update: { enabled: false }` and mount templates at nuclei.templates_dir.
+nuclei:
+  update: { enabled: true, interval: 6h }
+notify:
+  alertmanager:
+    urls: ["http://alertmanager:9093"]
+auth: { mode: token, token_env: DECKARD_ADMIN_TOKEN }

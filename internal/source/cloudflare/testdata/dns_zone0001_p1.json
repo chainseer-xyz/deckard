@@ -1,0 +1,38 @@
+{
+ "success": true,
+ "errors": [],
+ "messages": [],
+ "result": [
+  {
+   "id": "rec0001",
+   "type": "A",
+   "name": "www.Example.com",
+   "content": "192.0.2.10",
+   "proxied": true,
+   "ttl": 1
+  },
+  {
+   "id": "rec0002",
+   "type": "AAAA",
+   "name": "www.example.com",
+   "content": "2001:db8::10",
+   "proxied": true,
+   "ttl": 1
+  },
+  {
+   "id": "rec0003",
+   "type": "A",
+   "name": "direct.example.com",
+   "content": "198.51.100.7",
+   "proxied": false,
+   "ttl": 300
+  }
+ ],
+ "result_info": {
+  "page": 1,
+  "per_page": 50,
+  "total_pages": 2,
+  "count": 3,
+  "total_count": 5
+ }
+}

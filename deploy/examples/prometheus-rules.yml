@@ -1,0 +1,169 @@
+# Prometheus alerting rules for deckard's own operational health (not findings;
+# those go to Alertmanager directly). Metric names come from design spec s10.
+groups:
+  - name: deckard-health
+    rules:
+      - alert: DeckardSourceSyncStale
+        expr: time() - deckard_source_last_success_timestamp > 3600
+        for: 10m
+        labels:
+          severity: high
+        annotations:
+          summary: "deckard source {{ $labels.source }} has not synced for over an hour"
+          description: "Inventory from {{ $labels.source }} is stale, so new assets are not being scanned."
+
+      - alert: DeckardSourceNeverSynced
+        expr: deckard_source_last_success_timestamp == 0
+        for: 30m
+        labels:
+          severity: medium
+        annotations:
+          summary: "deckard source {{ $labels.source }} has never synced successfully"
+
+      - alert: DeckardScanErrorRateHigh
+        expr: sum by (check) (rate(deckard_scan_errors_total[15m])) > 0.1
+        for: 15m
+        labels:
+          severity: medium
+        annotations:
+          summary: "deckard check {{ $labels.check }} is erroring"
+          description: "{{ $value | humanize }} errors/s over 15m."
+
+      - alert: DeckardScanErrorRatio
+        expr: |
+          sum by (check) (rate(deckard_scan_errors_total[30m]))
+            / clamp_min(sum by (check) (rate(deckard_checks_run_total[30m])), 1e-9) > 0.25
+        for: 30m
+        labels:
+          severity: medium
+        annotations:
+          summary: "More than 25% of {{ $labels.check }} runs are failing"
+
+      - alert: DeckardQueueBacklog
+        expr: deckard_queue_depth > 1000
+        for: 15m
+        labels:
+          severity: medium
+        annotations:
+          summary: "deckard queue {{ $labels.queue }} backlog is {{ $value }}"
+          description: "Workers are not keeping up; check worker replicas and rate limits."
+
+      - alert: DeckardQueueStuck
+        expr: sum(deckard_queue_depth) > 0 and on() sum(increase(deckard_checks_run_total[1h])) == 0
+        for: 1h
+        labels:
+          severity: high
+        annotations:
+          summary: "deckard queue is non-empty but no checks have run in an hour"
+
+      # Reference data refresh (takeover fingerprints, shared ranges). Alerts use
+      # the default refdata.interval of 24h: "stale" is more than three intervals.
+      # Air-gapped deployments set refdata.enabled=false and never see these series.
+      - alert: DeckardRefdataStale
+        expr: deckard_refdata_age_seconds > 3 * 86400
+        for: 30m
+        labels:
+          severity: medium
+        annotations:
+          summary: "deckard reference data {{ $labels.dataset }} has not been refreshed for over 3 days"
+          description: "Running on the last good or embedded copy. Check egress to the dataset sources and deckard_refdata_refresh_total{result=~\"error|rejected\"}; adjust the threshold if you changed refdata.interval."
+
+      - alert: DeckardRefdataRejected
+        expr: increase(deckard_refdata_refresh_total{result="rejected"}[3d]) >= 2
+        labels:
+          severity: medium
+        annotations:
+          summary: "deckard keeps rejecting the {{ $labels.dataset }} download"
+          description: "The published data failed validation (parse error, too small, or shrank by more than 50%), so the previous copy stays in use. Inspect the upstream source; a persistent reject may mean its format changed."
+
+      - alert: DeckardRefdataRefreshFailing
+        expr: increase(deckard_refdata_refresh_total{result="error"}[1d]) > 3 unless on(dataset) increase(deckard_refdata_refresh_total{result=~"ok|unchanged"}[1d]) > 0
+        for: 1h
+        labels:
+          severity: low
+        annotations:
+          summary: "deckard cannot download {{ $labels.dataset }}"
+          description: "Every refresh in the last day failed. Check egress/proxy rules."
+
+      - alert: DeckardDown
+        expr: absent(up{job="deckard"} == 1)
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "deckard is down or not being scraped"
+
+  - name: deckard-nuclei-templates
+    rules:
+      # The threshold is nuclei.update.max_age_warn (default 72h), exported by
+      # deckard itself. The age counts from the last time the updater confirmed
+      # the templates current, so a quiet upstream does not trigger it: only a
+      # broken updater does.
+      - alert: DeckardNucleiTemplatesStale
+        expr: deckard_nuclei_templates_age_seconds > on() deckard_nuclei_templates_max_age_warn_seconds
+        for: 15m
+        labels:
+          severity: high
+        annotations:
+          summary: "deckard's nuclei templates have not been refreshed for {{ $value | humanizeDuration }}"
+          description: "New CVE templates are not being fetched, so new vulnerabilities (for example the next React2Shell) will not be tested. Check the update_templates job, the nuclei.update.dir volume and egress to github.com."
+
+      - alert: DeckardNucleiTemplateUpdatesFailing
+        expr: increase(deckard_nuclei_template_updates_total{result="error"}[6h]) >= 3 and on() sum(increase(deckard_nuclei_template_updates_total{result=~"ok|unchanged"}[6h])) == 0
+        for: 30m
+        labels:
+          severity: medium
+        annotations:
+          summary: "deckard's nuclei template updates keep failing"
+          description: "{{ $value | humanize }} failed updates in 6h and none succeeded. deckard keeps scanning with the last good templates; check egress to github.com and the nuclei.update.dir volume."
+
+      # Only meaningful when the updater runs on this deployment: the series does
+      # not exist when nuclei.update.enabled is false (air-gapped installs).
+      - alert: DeckardNucleiTemplatesNeverLoaded
+        expr: deckard_nuclei_template_updates_total{result="error"} > 0 and on() absent(deckard_nuclei_template_count)
+        for: 1h
+        labels:
+          severity: high
+        annotations:
+          summary: "deckard has never installed nuclei templates"
+          description: "cve.nuclei cannot run until the first template update succeeds."
+
+  - name: deckard-vulnintel
+    rules:
+      # Ages are relative to the last successful fetch. The threshold (18h) is 3x
+      # the default vulnintel.interval of 6h: tune it if you changed the interval.
+      # Air-gapped deployments (vulnintel.enabled=false) never export these series.
+      - alert: DeckardVulnintelFeedStale
+        expr: deckard_vulnintel_age_seconds > 3 * 6 * 3600
+        for: 30m
+        labels:
+          severity: medium
+        annotations:
+          summary: "deckard {{ $labels.feed }} exploit-intelligence feed is stale"
+          description: "No successful {{ $labels.feed }} fetch for {{ $value | humanizeDuration }}. Findings keep using the last good copy, but new KEV additions are not being noticed. Air-gapped? Set vulnintel.enabled: false."
+
+      - alert: DeckardVulnintelRefreshFailing
+        expr: sum by (feed) (increase(deckard_vulnintel_refresh_total{result="error"}[6h])) >= 3
+        for: 10m
+        labels:
+          severity: medium
+        annotations:
+          summary: "deckard {{ $labels.feed }} feed refresh keeps failing"
+          description: "{{ $value }} failed refreshes in 6h. Check egress to www.cisa.gov / api.first.org and the deckard logs."
+
+      - alert: DeckardVulnintelNeverLoaded
+        expr: deckard_vulnintel_kev_entries == 0 and on() deckard_vulnintel_refresh_total{feed="kev"} > 0
+        for: 1h
+        labels:
+          severity: medium
+        annotations:
+          summary: "deckard has no CISA KEV data despite refresh attempts"
+
+      # Informational: open findings whose CVE is in CISA KEV.
+      - alert: DeckardKnownExploitedOpen
+        expr: deckard_findings_kev_open > 0
+        for: 5m
+        labels:
+          severity: high
+        annotations:
+          summary: "{{ $value }} open deckard finding(s) are known-exploited (CISA KEV)"

@@ -1,0 +1,60 @@
+{
+  "title": "CISA Catalog of Known Exploited Vulnerabilities",
+  "catalogVersion": "2025.01.01",
+  "dateReleased": "2025-01-01T12:00:00.000Z",
+  "count": 4,
+  "vulnerabilities": [
+    {
+      "cveID": "CVE-2021-44228",
+      "vendorProject": "Apache",
+      "product": "Log4j2",
+      "vulnerabilityName": "Apache Log4j2 Remote Code Execution Vulnerability",
+      "dateAdded": "2021-12-10",
+      "shortDescription": "Apache Log4j2 contains a vulnerability where JNDI features do not protect against attacker-controlled JNDI-related endpoints.",
+      "requiredAction": "For all affected software assets for which updates exist, the activity must be applied.",
+      "dueDate": "2021-12-24",
+      "knownRansomwareCampaignUse": "Known",
+      "notes": "",
+      "cwes": ["CWE-20", "CWE-400", "CWE-502"]
+    },
+    {
+      "cveID": "CVE-2023-34362",
+      "vendorProject": "Progress",
+      "product": "MOVEit Transfer",
+      "vulnerabilityName": "Progress MOVEit Transfer SQL Injection Vulnerability",
+      "dateAdded": "2023-06-02",
+      "shortDescription": "Progress MOVEit Transfer contains a SQL injection vulnerability.",
+      "requiredAction": "Apply mitigations per vendor instructions.",
+      "dueDate": "2023-06-23",
+      "knownRansomwareCampaignUse": "Known",
+      "notes": "",
+      "cwes": ["CWE-89"]
+    },
+    {
+      "cveID": "CVE-2017-5638",
+      "vendorProject": "Apache",
+      "product": "Struts",
+      "vulnerabilityName": "Apache Struts Remote Code Execution Vulnerability",
+      "dateAdded": "2021-11-03",
+      "shortDescription": "Apache Struts contains an improper input validation vulnerability.",
+      "requiredAction": "Apply updates per vendor instructions.",
+      "dueDate": "2022-05-03",
+      "knownRansomwareCampaignUse": "Unknown",
+      "notes": "",
+      "cwes": ["CWE-20"]
+    },
+    {
+      "cveID": "CVE-2019-0708",
+      "vendorProject": "Microsoft",
+      "product": "Remote Desktop Services",
+      "vulnerabilityName": "Microsoft Remote Desktop Services Remote Code Execution Vulnerability",
+      "dateAdded": "2021-11-03",
+      "shortDescription": "Microsoft Remote Desktop Services contains a remote code execution vulnerability.",
+      "requiredAction": "Apply updates per vendor instructions.",
+      "dueDate": "2022-05-03",
+      "knownRansomwareCampaignUse": "Known",
+      "notes": "",
+      "cwes": ["CWE-416"]
+    }
+  ]
+}

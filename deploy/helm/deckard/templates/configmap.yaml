@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "deckard.fullname" . }}
+  labels:
+    {{- include "deckard.labels" . | nindent 4 }}
+data:
+  deckard.yaml: |
+    {{- toYaml .Values.config | nindent 4 }}
+{{- if .Values.secretEnv }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "deckard.fullname" . }}-env
+  labels:
+    {{- include "deckard.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  {{- range $k, $v := .Values.secretEnv }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+{{- end }}

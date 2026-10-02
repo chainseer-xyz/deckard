@@ -1,0 +1,110 @@
+# Example Alertmanager configuration for deckard findings.
+#
+# deckard pushes one alert per open finding to /api/v2/alerts with labels:
+#   alertname (DeckardDnsDangling, ...), deckard_check, severity
+#   (info|low|medium|high|critical), asset, zone, source, fingerprint, status,
+#   and kev="true" when the finding's CVE is in the CISA KEV catalog
+# and annotations: summary, description, remediation, evidence, first_seen, url.
+#
+# Secrets are read from files (api_url_file, *_file) so nothing sensitive lives
+# in this file. Adjust paths, channels and hosts to your environment.
+
+global:
+  # deckard re-asserts open findings every notify.resend and sets endsAt to
+  # 2x that, so alerts auto-resolve if deckard dies. resolve_timeout only
+  # applies to alerts that arrive without an endsAt, which deckard never sends.
+  resolve_timeout: 10m
+
+route:
+  receiver: blackhole
+  group_by: [alertname, asset]
+  group_wait: 30s        # batch a burst of findings from one scan
+  group_interval: 5m     # wait before notifying about new alerts in a group
+  repeat_interval: 12h   # re-notify unresolved groups
+  routes:
+    # info findings are visible in the deckard UI/API only.
+    - matchers: [severity="info"]
+      receiver: blackhole
+
+    # Known exploited vulnerabilities (CISA KEV) page immediately, whatever the
+    # severity, ahead of the severity routes below.
+    - matchers: [kev="true"]
+      receiver: urgent
+      group_by: [alertname, asset]
+      group_wait: 0s
+      repeat_interval: 2h
+      continue: false
+
+    # critical + high -> pager-ish channel, nag more often.
+    - matchers: [severity=~"critical|high"]
+      receiver: urgent
+      group_wait: 15s
+      repeat_interval: 4h
+      continue: false
+
+    # medium + low -> quiet channel, digest-style.
+    - matchers: [severity=~"medium|low"]
+      receiver: quiet
+      group_wait: 2m
+      group_interval: 15m
+      repeat_interval: 24h
+
+inhibit_rules:
+  # A critical finding on an asset mutes lower-severity noise for that asset.
+  - source_matchers: [severity="critical"]
+    target_matchers: [severity=~"high|medium|low|info"]
+    equal: [asset]
+  # Likewise high mutes medium/low/info.
+  - source_matchers: [severity="high"]
+    target_matchers: [severity=~"medium|low|info"]
+    equal: [asset]
+
+receivers:
+  - name: blackhole
+
+  # Urgent: Slack channel + Discord + ntfy push.
+  - name: urgent
+    slack_configs:
+      - channel: "#security-alerts"
+        api_url_file: /etc/alertmanager/secrets/slack-webhook-url
+        # Or inline (less safe): api_url: https://hooks.slack.com/services/XXX/YYY/ZZZ
+        send_resolved: true
+        title: '{{ .CommonLabels.severity | toUpper }} {{ .CommonLabels.alertname }}: {{ .CommonLabels.asset }}'
+        text: |-
+          {{ range .Alerts }}*{{ .Annotations.summary }}*
+          {{ .Annotations.description }}
+          Fix: {{ .Annotations.remediation }}
+          {{ if .Annotations.url }}<{{ .Annotations.url }}|Open in deckard>{{ end }}
+          {{ end }}
+    # Native Discord receiver (Alertmanager >= 0.28).
+    discord_configs:
+      - webhook_url_file: /etc/alertmanager/secrets/discord-webhook-url
+        send_resolved: true
+        title: '{{ .CommonLabels.severity | toUpper }} {{ .CommonLabels.alertname }}: {{ .CommonLabels.asset }}'
+        message: '{{ range .Alerts }}{{ .Annotations.summary }}{{ "\n" }}{{ end }}'
+    # Fallback for Alertmanager < 0.28: use Discord's Slack-compatible endpoint
+    # through slack_configs instead, by appending /slack to the webhook URL:
+    #   slack_configs:
+    #     - api_url_file: /etc/alertmanager/secrets/discord-webhook-url-slack
+    #       # file content: https://discord.com/api/webhooks/<id>/<token>/slack
+    # or run a bridge such as benjojo/alertmanager-discord behind webhook_configs.
+    webhook_configs:
+      # ntfy: either point at an alertmanager-ntfy style bridge ...
+      - url: http://alertmanager-ntfy.monitoring.svc:8080/hook
+        send_resolved: true
+        # ... or post JSON straight to a bridge-less ntfy publish URL
+        # (ntfy shows the raw JSON; the bridge renders it nicely).
+        # url: https://ntfy.example.com/deckard-alerts
+        http_config:
+          basic_auth:
+            username: alertmanager
+            password_file: /etc/alertmanager/secrets/ntfy-password
+
+  # Quiet: low-priority Slack channel only, no resolved spam.
+  - name: quiet
+    slack_configs:
+      - channel: "#security-digest"
+        api_url_file: /etc/alertmanager/secrets/slack-webhook-url
+        send_resolved: false
+        title: '{{ .CommonLabels.alertname }} on {{ .CommonLabels.asset }}'
+        text: '{{ range .Alerts }}- {{ .Annotations.summary }} ({{ .Labels.severity }}){{ "\n" }}{{ end }}'

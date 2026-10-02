@@ -1,0 +1,240 @@
+# -- Image settings. Tag defaults to the chart appVersion.
+image:
+  repository: ghcr.io/chainseer-xyz/deckard
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# -- Roles this release runs: api, scheduler, worker. With worker.enabled=true
+# the main Deployment runs `roles` and a second Deployment runs only workers.
+roles: [api, scheduler, worker]
+replicaCount: 1
+
+# -- Dedicated scan-worker Deployment. Enable it to scale scanning separately
+# from the API/UI. When enabled, remove "worker" from `roles` above.
+worker:
+  enabled: false
+  replicaCount: 2
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# -- deckard configuration. Rendered verbatim to /etc/deckard/deckard.yaml.
+# See docs/configuration.md for every key. Secrets never go here: reference
+# them by env var name (token_env, password_env, client_secret_env) and supply
+# the variables via `secretEnv` / `extraEnvFrom`.
+config:
+  log: { level: info, format: json }
+  sync: { interval: 10m }
+  # error_retry: soonest a failed (asset, check) is retried (capped at its
+  # interval). queue_workers: max concurrent jobs per queue; the shared database
+  # pool (database.max_conns) should comfortably exceed the busiest replica's sum.
+  scheduling:
+    error_retry: 10m
+    queue_workers: { sync: 2, passive: 10, active: 4, intrusive: 1, default: 2, expand: 1, maintenance: 1 }
+  # How long scan history and relations of removed assets are kept.
+  retention: { scans: 168h, relations: 720h }
+  # nuclei CVE templates are kept fresh automatically: the updater downloads the
+  # latest nuclei-templates every `interval`, swaps them in atomically, and scans
+  # every owned web asset with the templates a release just added (new CVEs are
+  # tested within hours). The state lives on the nuclei-templates volume below.
+  # Air-gapped? Set `enabled: false`, mount your own templates (extraVolumes) and
+  # set config.nuclei.templates_dir. See docs/configuration.md.
+  nuclei:
+    update: { enabled: true, interval: 6h, run_new_templates: true, max_age_warn: 72h }
+  sources: []
+  #  - { name: cloudflare, type: cloudflare, token_env: CF_API_TOKEN }
+  #  - { name: aws, type: route53, region: us-east-1 }
+  #  - { name: this-cluster, type: kubernetes, in_cluster: true }
+  scope:
+    include: []
+    exclude: []
+    max_cidr_hosts: 1024
+  profiles:
+    passive: { enabled: true, interval: 5m, on_inventory_change: true }
+    active: { enabled: true, interval: 6h, on_inventory_change: true, rate_limit: "50/s", per_host_concurrency: 2 }
+    intrusive: { enabled: false, interval: 24h }  # never triggered by inventory change
+  # Discovery expansion of owned zones (CT logs / DNS bruteforce).
+  expansion: { ct_logs: true, dns_bruteforce: false, interval: 6h }
+  # Live refresh of the takeover fingerprints and shared CDN/SaaS ranges (the
+  # embedded copies stay the fallback). Set enabled: false when the pod has no
+  # internet egress. The refreshed copy is kept under /var/lib/deckard/refdata.
+  # refdata: { enabled: true, interval: 24h, timeout: 30s }
+  # Exploit intelligence: CISA KEV + FIRST EPSS enrichment, and an immediate
+  # targeted nuclei scan when a CVE is newly added to KEV. Last-good copies are
+  # kept under /var/lib/deckard/vulnintel (the data volume). Set enabled: false
+  # when the pod has no egress to www.cisa.gov / api.first.org.
+  # vulnintel: { enabled: true, interval: 6h, timeout: 30s, kev_floor: critical, epss_high: 0.7, epss_medium: 0.3 }
+  # Per-check cadence overrides; on_new_asset (default true) can only turn
+  # immediate scans on discovery off for a check.
+  # checks:
+  #   tls.cert: { interval: 1h }
+  #   net.ports: { interval: 24h, on_new_asset: false }
+  notify:
+    alertmanager:
+      urls: []
+  auth:
+    mode: token
+    token_env: DECKARD_ADMIN_TOKEN
+
+database:
+  # -- Provision a CloudNativePG Cluster alongside deckard (requires the CNPG operator).
+  cnpg:
+    enabled: false
+    instances: 1
+    storage:
+      size: 5Gi
+      storageClass: ""
+    # -- Extra spec fields merged into the Cluster (e.g. backup, monitoring).
+    extraSpec: {}
+  # -- Use an existing Secret holding the connection URL when cnpg is disabled.
+  existingSecret: ""
+  existingSecretKey: url
+
+# -- Environment variables from literal values.
+env: {}
+# -- Environment variables sourced from existing Secrets/ConfigMaps (full corev1 EnvVar list).
+extraEnv: []
+# -- Whole Secrets/ConfigMaps to expose as env (corev1 EnvFromSource list). Put
+# CF_API_TOKEN, DECKARD_ADMIN_TOKEN, OIDC secrets, AWS creds here.
+extraEnvFrom: []
+# -- Create a Secret from these values (for quick starts). Prefer an existing Secret.
+secretEnv: {}
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}  # e.g. eks.amazonaws.com/role-arn for the route53 source (IRSA)
+
+# -- ClusterRole letting the kubernetes source list Services, Nodes, Ingresses and Gateway API routes.
+rbac:
+  create: true
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: deckard.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+metrics:
+  # -- Service port for the metrics listener. The container listens on
+  # server.metrics_addr (default :9090) on all interfaces so in-cluster
+  # Prometheus can scrape; networkPolicy limits who can reach it. To require a
+  # bearer token set config.server.metrics_token_env (supply the variable via
+  # extraEnvFrom) and bearerTokenSecret below.
+  port: 9090
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+    # -- Secret holding the metrics bearer token, e.g. { name: deckard-metrics, key: token }.
+    bearerTokenSecret: {}
+  # -- Ship the Grafana dashboard as a ConfigMap picked up by the Grafana sidecar.
+  dashboard:
+    enabled: false
+    label: grafana_dashboard
+
+persistence:
+  # -- Volume for custom nuclei templates / wordlists / plugins and the
+  # refreshed reference data (refdata.dir, /var/lib/deckard/refdata). Without it
+  # /var/lib/deckard is an emptyDir: refreshed data is re-downloaded after a
+  # pod restart (the embedded copy covers the gap).
+  enabled: false
+  size: 1Gi
+  storageClass: ""
+  existingClaim: ""
+
+nuclei:
+  # -- Volume for the nuclei template updater (config.nuclei.update.dir, default
+  # /var/lib/deckard/nuclei-templates). The root filesystem stays read-only; the
+  # default is an emptyDir (templates are re-downloaded when the pod restarts, a
+  # few seconds at start-up). Enable persistence to keep them across restarts.
+  # With worker.enabled the claim backs the main Deployment only (a
+  # ReadWriteOnce claim cannot be shared by replicas); workers use an emptyDir
+  # and update themselves.
+  persistence:
+    enabled: false
+    size: 2Gi
+    storageClass: ""
+    existingClaim: ""
+  # -- Size limit of the emptyDir used when persistence is off. A release is
+  # about 80 MB on disk; current + previous + one download need about 300 MB.
+  emptyDirSizeLimit: 2Gi
+
+# -- Extra volumes/mounts, e.g. to mount a kubeconfig Secret or exec plugins.
+extraVolumes: []
+extraVolumeMounts: []
+
+podAnnotations: {}
+podLabels: {}
+
+# -- Requests only. deckard deliberately sets no CPU limit (avoids throttling);
+# the chart refuses a resources.limits.cpu value.
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile: { type: RuntimeDefault }
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: [ALL] }
+
+livenessProbe:
+  httpGet: { path: /healthz, port: http }
+  periodSeconds: 20
+readinessProbe:
+  httpGet: { path: /readyz, port: http }
+  periodSeconds: 10
+
+networkPolicy:
+  # -- Restrict ingress; egress stays open because deckard must reach the assets it audits.
+  # The API (8080) and metrics (metrics.port) are reachable from the release
+  # namespace plus the selectors below. Without a CNI that enforces
+  # NetworkPolicy this is a no-op.
+  enabled: true
+  # -- Where the ingress controller runs (reaches the API/UI port). Set
+  # podSelector to narrow to its pods.
+  ingressController:
+    namespaceSelector:
+      matchLabels: { kubernetes.io/metadata.name: ingress-nginx }
+    podSelector: {}
+  # -- Where Prometheus runs (reaches the metrics port).
+  prometheus:
+    namespaceSelector:
+      matchLabels: { kubernetes.io/metadata.name: monitoring }
+    podSelector: {}
+  # -- Extra `from` peers (NetworkPolicyPeer list) allowed on both ports.
+  ingressFrom: []
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []

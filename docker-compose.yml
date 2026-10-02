@@ -1,0 +1,59 @@
+# Quick start: cp .env.example .env, edit it, then: docker compose up -d
+# UI: http://localhost:8080   Metrics: http://localhost:9090/metrics
+services:
+  deckard:
+    image: ghcr.io/chainseer-xyz/deckard:latest
+    build: .
+    command: ["serve", "--config", "/etc/deckard/deckard.yaml"]
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DECKARD_DATABASE__URL: postgres://deckard:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/deckard?sslmode=disable
+      CF_API_TOKEN: ${CF_API_TOKEN:-}
+      DECKARD_ADMIN_TOKEN: ${DECKARD_ADMIN_TOKEN:?set DECKARD_ADMIN_TOKEN in .env}
+      HOME: /tmp
+    volumes:
+      - ./deploy/compose/deckard.yaml:/etc/deckard/deckard.yaml:ro
+      # Writable state: refreshed reference data (refdata/), the nuclei template
+      # updater's templates (nuclei-templates/) and exploit-intel feeds. One named
+      # volume keeps them across restarts while the root filesystem stays
+      # read-only. Air-gapped? Set nuclei.update.enabled: false (and refdata /
+      # vulnintel enabled: false) in deploy/compose/deckard.yaml and mount your
+      # own templates instead (see docs/configuration.md).
+      - deckard-data:/var/lib/deckard
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9090:9090"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: deckard
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: deckard
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deckard -d deckard"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    profiles: ["alerting"]
+    restart: unless-stopped
+    volumes:
+      - ./deploy/examples/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "127.0.0.1:9093:9093"
+
+volumes:
+  pgdata:
+  deckard-data:

@@ -1,0 +1,57 @@
+{
+ "success": true,
+ "errors": [],
+ "messages": [],
+ "result": [
+  {
+   "id": "pool0001",
+   "name": "primary",
+   "enabled": true,
+   "origins": [
+    {
+     "name": "o1",
+     "address": "192.0.2.50",
+     "enabled": true,
+     "weight": 1
+    },
+    {
+     "name": "o2",
+     "address": "Origin.example.org",
+     "enabled": true,
+     "weight": 1
+    }
+   ]
+  },
+  {
+   "id": "pool0002",
+   "name": "fallback",
+   "enabled": true,
+   "origins": [
+    {
+     "name": "o3",
+     "address": "2001:db8::50",
+     "enabled": true
+    }
+   ]
+  },
+  {
+   "id": "pool0003",
+   "name": "unused",
+   "enabled": false,
+   "origins": [
+    {
+     "name": "o4",
+     "address": "203.0.113.77",
+     "enabled": false
+    }
+   ]
+  }
+ ],
+ "result_info": {
+  "page": 1,
+  "per_page": 50,
+  "total_pages": 1,
+  "count": 3,
+  "total_count": 3
+ }
+}

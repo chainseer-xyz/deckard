@@ -1,0 +1,105 @@
+name: scheduled-image
+
+# Weekly from-scratch rebuild of both image targets. --no-cache --pull picks up a
+# patched base image (distroless, golang, node) and Go toolchain that a cached
+# build would hide. Nothing is published here (releases are tag-driven); the
+# point is to learn about fixed HIGH/CRITICAL vulnerabilities before users do.
+on:
+  schedule:
+    - cron: "41 4 * * 3"
+  workflow_dispatch:
+
+concurrency:
+  group: scheduled-image
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      security-events: write # SARIF upload to code scanning
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [slim, full]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: build ${{ matrix.target }} from scratch
+        env:
+          TARGET: ${{ matrix.target }}
+        run: docker build --no-cache --pull --target "$TARGET" -t "deckard:$TARGET" .
+
+      # First pass never fails: it produces the SARIF report.
+      - name: trivy (SARIF)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: deckard:${{ matrix.target }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          format: sarif
+          output: trivy-${{ matrix.target }}.sarif
+          limit-severities-for-sarif: true
+          exit-code: "0"
+      # Code scanning needs GitHub Advanced Security on private repos; do not
+      # fail the run when it is unavailable.
+      - name: upload SARIF
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: trivy-${{ matrix.target }}.sarif
+          category: trivy-${{ matrix.target }}
+      # Second pass is the gate.
+      - name: trivy (gate)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: deckard:${{ matrix.target }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          format: table
+          exit-code: "1"
+
+  # One tracking issue: opened/updated on failure, closed on success.
+  track:
+    needs: scan
+    if: ${{ always() && needs.scan.result != 'cancelled' && needs.scan.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      RESULT: ${{ needs.scan.result }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      TITLE: "Scheduled image scan: fixed HIGH/CRITICAL vulnerabilities"
+    steps:
+      - name: open, update or close the tracking issue
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh label create security --color B60205 --description "Security-relevant work" 2>/dev/null || true
+          existing=$(gh issue list --label security --state open --search "\"$TITLE\" in:title" --json number,title \
+            --jq "map(select(.title == \"$TITLE\")) | .[0].number // empty")
+          if [ "$RESULT" = "success" ]; then
+            if [ -n "$existing" ]; then
+              gh issue close "$existing" --comment "The scheduled image rebuild is clean again ($RUN_URL)."
+            fi
+            exit 0
+          fi
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Still failing: $RUN_URL"
+          else
+            gh issue create --title "$TITLE" --label security --body "The weekly from-scratch rebuild of the slim/full images failed the Trivy gate (fixed HIGH/CRITICAL) or the build failed.
+
+          Run: $RUN_URL
+
+          If the finding is in the bundled nuclei engine, check the open nuclei-bump PRs (or run that workflow manually). If it is in deckard's own modules, bump go.mod; if in the base image, a new release or rebuild picks up the fix. This issue closes automatically when a scheduled run is clean."
+          fi

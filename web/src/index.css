@@ -1,0 +1,146 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens: space-separated RGB triplets so Tailwind can apply opacity. */
+:root {
+  color-scheme: light;
+  --bg: 244 246 248;
+  --surface: 255 255 255;
+  --surface2: 238 241 245;
+  --line: 208 214 222;
+  --fg: 22 28 38;
+  --muted: 82 94 112;
+  --accent: 14 116 144;
+  --accent-fg: 255 255 255;
+  --sev-critical: 159 18 57;
+  --sev-high: 180 40 10;
+  --sev-medium: 146 84 0;
+  --sev-low: 21 94 117;
+  --sev-info: 71 85 105;
+  --ok: 21 128 61;
+  --warn: 161 98 7;
+  --bad: 185 28 28;
+  --k-zone: 124 58 237;
+  --k-hostname: 14 116 144;
+  --k-ip: 194 65 12;
+  --k-service: 21 128 61;
+  --k-url: 190 24 93;
+  --k-certificate: 161 98 7;
+  --k-cloud_resource: 67 56 202;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: 11 15 22;
+  --surface: 19 25 35;
+  --surface2: 28 36 49;
+  --line: 52 64 82;
+  --fg: 230 235 242;
+  --muted: 154 167 186;
+  --accent: 45 190 215;
+  --accent-fg: 6 20 28;
+  --sev-critical: 255 138 160;
+  --sev-high: 255 153 102;
+  --sev-medium: 245 197 80;
+  --sev-low: 110 205 230;
+  --sev-info: 170 182 200;
+  --ok: 74 222 128;
+  --warn: 250 204 21;
+  --bad: 252 129 129;
+  --k-zone: 180 150 255;
+  --k-hostname: 70 200 225;
+  --k-ip: 255 160 100;
+  --k-service: 110 220 140;
+  --k-url: 255 130 180;
+  --k-certificate: 240 200 80;
+  --k-cloud_resource: 150 160 255;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']):not([data-theme='dark']) {
+    color-scheme: dark;
+    --bg: 11 15 22;
+    --surface: 19 25 35;
+    --surface2: 28 36 49;
+    --line: 52 64 82;
+    --fg: 230 235 242;
+    --muted: 154 167 186;
+    --accent: 45 190 215;
+    --accent-fg: 6 20 28;
+    --sev-critical: 255 138 160;
+    --sev-high: 255 153 102;
+    --sev-medium: 245 197 80;
+    --sev-low: 110 205 230;
+    --sev-info: 170 182 200;
+    --ok: 74 222 128;
+    --warn: 250 204 21;
+    --bad: 252 129 129;
+    --k-zone: 180 150 255;
+    --k-hostname: 70 200 225;
+    --k-ip: 255 160 100;
+    --k-service: 110 220 140;
+    --k-url: 255 130 180;
+    --k-certificate: 240 200 80;
+    --k-cloud_resource: 150 160 255;
+  }
+}
+
+@layer base {
+  html {
+    font-size: 14px;
+  }
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid rgb(var(--accent));
+    outline-offset: 2px;
+  }
+  th {
+    @apply text-left font-medium text-muted;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-lg border border-line bg-surface;
+  }
+  .btn {
+    @apply inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1 text-sm font-medium text-fg hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply border-accent bg-accent text-accent-fg hover:bg-accent/90;
+  }
+  .btn-sm {
+    @apply px-2 py-0.5 text-xs;
+  }
+  .input {
+    @apply rounded-md border border-line bg-surface px-2 py-1 text-sm text-fg placeholder:text-muted;
+  }
+  .th {
+    @apply whitespace-nowrap px-3 py-2 text-xs uppercase tracking-wide;
+  }
+  .td {
+    @apply px-3 py-2 align-top;
+  }
+}
+
+/* React Flow chrome follows the theme. */
+.react-flow__controls-button {
+  background: rgb(var(--surface));
+  color: rgb(var(--fg));
+  border-bottom: 1px solid rgb(var(--line));
+}
+.react-flow__controls-button svg {
+  fill: currentColor;
+}
+.react-flow__edge-path {
+  stroke: rgb(var(--muted));
+}
+.react-flow__edge-text {
+  fill: rgb(var(--muted));
+}
+.react-flow__attribution {
+  display: none;
+}

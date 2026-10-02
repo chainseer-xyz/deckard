@@ -1,0 +1,26 @@
+{{- if .Values.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "deckard.fullname" . }}
+  labels:
+    {{- include "deckard.labels" . | nindent 4 }}
+    {{- with .Values.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "deckard.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+      path: /metrics
+      {{- with .Values.metrics.serviceMonitor.bearerTokenSecret }}
+      {{- if .name }}
+      bearerTokenSecret:
+        name: {{ .name }}
+        key: {{ .key | default "token" }}
+      {{- end }}
+      {{- end }}
+{{- end }}

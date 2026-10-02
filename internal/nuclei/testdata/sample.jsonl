@@ -1,0 +1,10 @@
+[INF] Using Nuclei Engine 3.x (example log noise)
+
+{"template-id":"git-config","info":{"name":"Git Config Exposure","author":["example"],"tags":["config","git","exposure"],"description":"Git configuration file is exposed.","reference":["https://example.com/ref1"],"severity":"medium","remediation":"Block access to .git."},"type":"http","host":"https://app.example.com","matched-at":"https://app.example.com/.git/config","extracted-results":["https://github.com/example/repo.git"],"timestamp":"2026-10-02T00:00:00Z"}
+{"template-id":"CVE-2021-99999","info":{"name":"Example Product RCE","tags":"cve,cve2021,rce,example","severity":"critical","classification":{"cve-id":["cve-2021-99999"],"cwe-id":["cwe-94"]}},"type":"http","host":"https://app.example.com","matched-at":"https://app.example.com/a"}
+{"template-id":"CVE-2021-99999","info":{"name":"Example Product RCE","tags":"cve","severity":"critical"},"type":"http","host":"https://app.example.com","matched-at":"https://app.example.com/b"}
+{"template-id":"tech-detect","info":{"name":"Wappalyzer","severity":"info","tags":["tech"]},"matcher-name":"nginx","type":"http","host":"https://app.example.com","matched-at":"https://app.example.com"}
+{"template-id":"weird","info":{"name":"Odd severity","severity":"unknown"},"matched-at":"x"}
+{this is not json}
+{"info":{"name":"no template id"}}
+{"template-id":"truncated","info":{"name":"cut off

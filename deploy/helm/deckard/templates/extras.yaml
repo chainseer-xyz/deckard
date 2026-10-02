@@ -1,0 +1,90 @@
+{{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "deckard.fullname" . }}-data
+  labels:
+    {{- include "deckard.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+  {{- with .Values.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+{{- end }}
+{{- if and .Values.nuclei.persistence.enabled (not .Values.nuclei.persistence.existingClaim) (include "deckard.nucleiUpdateEnabled" .) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "deckard.fullname" . }}-nuclei
+  labels:
+    {{- include "deckard.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.nuclei.persistence.size }}
+  {{- with .Values.nuclei.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+{{- end }}
+{{- if .Values.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "deckard.fullname" . }}
+  labels:
+    {{- include "deckard.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "deckard.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: server
+{{- end }}
+{{- if .Values.networkPolicy.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "deckard.fullname" . }}
+  labels:
+    {{- include "deckard.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "deckard.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  # Egress is intentionally open: deckard audits arbitrary external assets.
+  egress:
+    - {}
+  ingress:
+    # API/UI: same namespace, the ingress controller, plus any ingressFrom extras.
+    - from:
+        - podSelector: {}
+        - namespaceSelector: {{- toYaml .Values.networkPolicy.ingressController.namespaceSelector | nindent 12 }}
+          {{- with .Values.networkPolicy.ingressController.podSelector }}
+          podSelector: {{- toYaml . | nindent 12 }}
+          {{- end }}
+        {{- with .Values.networkPolicy.ingressFrom }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ports:
+        - { port: 8080, protocol: TCP }
+    # Metrics: same namespace, Prometheus, plus any ingressFrom extras.
+    - from:
+        - podSelector: {}
+        - namespaceSelector: {{- toYaml .Values.networkPolicy.prometheus.namespaceSelector | nindent 12 }}
+          {{- with .Values.networkPolicy.prometheus.podSelector }}
+          podSelector: {{- toYaml . | nindent 12 }}
+          {{- end }}
+        {{- with .Values.networkPolicy.ingressFrom }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ports:
+        - { port: {{ .Values.metrics.port }}, protocol: TCP }
+{{- end }}

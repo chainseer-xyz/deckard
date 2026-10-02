@@ -1,0 +1,215 @@
+name: nuclei-bump
+
+# Keeps the bundled nuclei engine current without human polling.
+#   bump        : newer upstream release than `ARG NUCLEI_VERSION` -> update the
+#                 ARG, build both targets, Trivy-scan, open a PR.
+#   prune-pins  : build WITHOUT the `NUCLEI_GO_GET_PINS` transitive-dependency
+#                 pins; if Trivy is clean the pins are obsolete -> open a PR
+#                 that empties them. If Trivy still finds fixed HIGH/CRITICAL
+#                 issues the pins are still needed and nothing happens.
+#
+# Setup notes: Settings > Actions > "Allow GitHub Actions to create and approve
+# pull requests" must be on. PRs opened with the default GITHUB_TOKEN do not
+# trigger other workflows; set an AUTOMATION_TOKEN secret (fine-grained PAT with
+# contents + pull-requests write) if you want CI to run on them automatically.
+on:
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: nuclei-bump
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: compare pinned and latest nuclei release
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          cur=$(sed -n 's/^ARG NUCLEI_VERSION=\(v[0-9][0-9.]*\)$/\1/p' Dockerfile)
+          latest=$(gh api repos/projectdiscovery/nuclei/releases/latest --jq .tag_name)
+          [[ "$cur" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "cannot parse current version: '$cur'"; exit 1; }
+          [[ "$latest" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected latest tag: '$latest'"; exit 1; }
+          echo "current=$cur latest=$latest"
+          echo "current=$cur" >> "$GITHUB_OUTPUT"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          if [ "$cur" != "$latest" ] && [ "$(printf '%s\n%s\n' "$cur" "$latest" | sort -V | tail -1)" = "$latest" ]; then
+            echo "bump=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+            echo "nuclei is up to date ($cur)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: update ARG NUCLEI_VERSION
+        if: steps.ver.outputs.bump == 'true'
+        env:
+          LATEST: ${{ steps.ver.outputs.latest }}
+        run: sed -i "s/^ARG NUCLEI_VERSION=.*/ARG NUCLEI_VERSION=${LATEST}/" Dockerfile
+
+      - name: build full
+        if: steps.ver.outputs.bump == 'true'
+        run: docker build --pull --target full -t deckard:full .
+      - name: build slim
+        if: steps.ver.outputs.bump == 'true'
+        run: docker build --target slim -t deckard:slim .
+
+      # Scans do not fail the job so the PR still opens (as a draft) with the
+      # findings attached; a failing scan fails the workflow at the end.
+      - name: trivy scan full
+        id: scan_full
+        if: steps.ver.outputs.bump == 'true'
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: deckard:full
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+          output: trivy-full.txt
+      - name: trivy scan slim
+        id: scan_slim
+        if: steps.ver.outputs.bump == 'true'
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: deckard:slim
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+          output: trivy-slim.txt
+
+      - name: write PR body
+        id: body
+        if: steps.ver.outputs.bump == 'true'
+        env:
+          CUR: ${{ steps.ver.outputs.current }}
+          LATEST: ${{ steps.ver.outputs.latest }}
+          FULL: ${{ steps.scan_full.outcome }}
+          SLIM: ${{ steps.scan_slim.outcome }}
+        shell: bash
+        run: |
+          {
+            echo "Bumps the bundled nuclei engine from \`$CUR\` to \`$LATEST\`."
+            echo
+            echo "Release notes: https://github.com/projectdiscovery/nuclei/releases/tag/$LATEST"
+            echo
+            echo "### Trivy (fixed HIGH/CRITICAL only)"
+            echo "- full: **$FULL**"
+            echo "- slim: **$SLIM**"
+            for t in full slim; do
+              if [ -s "trivy-$t.txt" ]; then
+                echo
+                echo "<details><summary>$t</summary>"
+                echo
+                echo '```'
+                head -c 20000 "trivy-$t.txt"
+                echo '```'
+                echo "</details>"
+              fi
+            done
+            echo
+            echo "If a scan failed, the transitive pins in \`NUCLEI_GO_GET_PINS\` (Dockerfile) probably need updating before merge."
+          } > pr-body.md
+          if [ "$FULL" = success ] && [ "$SLIM" = success ]; then echo "draft=false" >> "$GITHUB_OUTPUT"; else echo "draft=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: open pull request
+        if: steps.ver.outputs.bump == 'true'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ secrets.AUTOMATION_TOKEN || secrets.GITHUB_TOKEN }}
+          branch: automation/nuclei-${{ steps.ver.outputs.latest }}
+          add-paths: Dockerfile
+          commit-message: "build(docker): bump nuclei to ${{ steps.ver.outputs.latest }}"
+          title: "build(docker): bump nuclei to ${{ steps.ver.outputs.latest }}"
+          body-path: pr-body.md
+          draft: ${{ steps.body.outputs.draft == 'true' }}
+          delete-branch: true
+
+      - name: fail if a scan failed
+        if: steps.ver.outputs.bump == 'true' && (steps.scan_full.outcome != 'success' || steps.scan_slim.outcome != 'success')
+        run: |
+          echo "Trivy found fixed HIGH/CRITICAL issues; see the draft PR." >&2
+          exit 1
+
+  prune-pins:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: any pins left?
+        id: pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -q '^ARG NUCLEI_GO_GET_PINS=""$' Dockerfile; then
+            echo "has_pins=false" >> "$GITHUB_OUTPUT"
+            echo "no transitive pins left in the Dockerfile" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "has_pins=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: build full WITHOUT the transitive pins
+        if: steps.pins.outputs.has_pins == 'true'
+        run: docker build --pull --target full --build-arg NUCLEI_GO_GET_PINS="" -t deckard:nopins .
+
+      # exit-code 1 fails the step => pins are still needed => no PR.
+      - name: trivy scan (pins removed)
+        id: scan
+        if: steps.pins.outputs.has_pins == 'true'
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: deckard:nopins
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+          output: trivy-nopins.txt
+
+      - name: pins are still needed
+        if: steps.pins.outputs.has_pins == 'true' && steps.scan.outcome != 'success'
+        run: echo "Trivy still reports fixed HIGH/CRITICAL issues without the pins; keeping them." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: empty NUCLEI_GO_GET_PINS
+        if: steps.pins.outputs.has_pins == 'true' && steps.scan.outcome == 'success'
+        run: sed -i 's|^ARG NUCLEI_GO_GET_PINS=.*|ARG NUCLEI_GO_GET_PINS=""|' Dockerfile
+
+      - name: open pull request
+        if: steps.pins.outputs.has_pins == 'true' && steps.scan.outcome == 'success'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ secrets.AUTOMATION_TOKEN || secrets.GITHUB_TOKEN }}
+          branch: automation/nuclei-drop-pins
+          add-paths: Dockerfile
+          commit-message: "build(docker): drop obsolete nuclei transitive pins"
+          title: "build(docker): drop obsolete nuclei transitive pins"
+          body: |
+            The nuclei image builds and scans clean (fixed HIGH/CRITICAL, Trivy) without the
+            `go get` pins in `NUCLEI_GO_GET_PINS`, so the pinned transitive dependency fixes
+            are now included upstream and the pins can go.
+          delete-branch: true

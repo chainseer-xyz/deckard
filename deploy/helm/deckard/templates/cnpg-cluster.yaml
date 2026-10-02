@@ -1,0 +1,22 @@
+{{- if .Values.database.cnpg.enabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "deckard.dbClusterName" . }}
+  labels:
+    {{- include "deckard.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.database.cnpg.instances }}
+  bootstrap:
+    initdb:
+      database: deckard
+      owner: deckard
+  storage:
+    size: {{ .Values.database.cnpg.storage.size }}
+    {{- with .Values.database.cnpg.storage.storageClass }}
+    storageClass: {{ . }}
+    {{- end }}
+  {{- with .Values.database.cnpg.extraSpec }}
+  {{- toYaml . | nindent 2 }}
+  {{- end }}
+{{- end }}
