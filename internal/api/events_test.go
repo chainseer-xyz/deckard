@@ -33,7 +33,7 @@ func (e *env) stream(t *testing.T, ts *httptest.Server, path string, hdr ...stri
 	for i := 0; i+1 < len(hdr); i += 2 {
 		req.Header.Set(hdr[i], hdr[i+1])
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:bodyclose // closed in t.Cleanup below; bodyclose doesn't trace into go func(){}() or t.Cleanup closures
 	if err != nil {
 		cancel()
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func (e *env) stream(t *testing.T, ts *httptest.Server, path string, hdr ...stri
 			c.lines <- sc.Text()
 		}
 	}()
-	t.Cleanup(func() { cancel(); resp.Body.Close() })
+	t.Cleanup(func() { cancel(); _ = resp.Body.Close() })
 	return c
 }
 
@@ -260,13 +260,16 @@ func TestServeShutsDownSSEOnContextCancel(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- e.srv.Serve(ctx, ln) }()
 
-	req, _ := http.NewRequest("GET", "http://"+ln.Addr().String()+"/api/v1/events", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://"+ln.Addr().String()+"/api/v1/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req.Header.Set("Authorization", "Bearer "+testToken)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	br := bufio.NewReader(resp.Body)
 	if _, err := br.ReadString('\n'); err != nil {
 		t.Fatal(err)

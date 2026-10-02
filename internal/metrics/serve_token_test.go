@@ -21,7 +21,10 @@ func TestServeListenerBearerToken(t *testing.T) {
 	go func() { done <- metrics.ServeListener(ctx, ln, m.Registry(), metrics.WithToken("s3cret-scrape-token")) }()
 
 	get := func(authz string) int {
-		req, _ := http.NewRequest("GET", "http://"+ln.Addr().String()+"/metrics", nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+ln.Addr().String()+"/metrics", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if authz != "" {
 			req.Header.Set("Authorization", authz)
 		}
@@ -29,7 +32,7 @@ func TestServeListenerBearerToken(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode == 401 && resp.Header.Get("WWW-Authenticate") == "" {
 			t.Error("401 without WWW-Authenticate")
 		}
@@ -64,11 +67,15 @@ func TestServeListenerEmptyTokenIsOpen(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = metrics.ServeListener(ctx, ln, m.Registry(), metrics.WithToken("")) }()
-	resp, err := http.Get("http://" + ln.Addr().String() + "/metrics")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+ln.Addr().String()+"/metrics", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Fatalf("open metrics = %d", resp.StatusCode)
 	}

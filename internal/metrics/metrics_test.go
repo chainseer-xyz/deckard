@@ -149,20 +149,28 @@ func TestServeListener(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- metrics.ServeListener(ctx, ln, m.Registry()) }()
 
-	resp, err := http.Get("http://" + ln.Addr().String() + "/metrics")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+ln.Addr().String()+"/metrics", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != 200 || !strings.Contains(string(body), "deckard_build_info") {
 		t.Fatalf("bad scrape: %d", resp.StatusCode)
 	}
-	resp, err = http.Get("http://" + ln.Addr().String() + "/other")
+	req, err = http.NewRequestWithContext(ctx, http.MethodGet, "http://"+ln.Addr().String()+"/other", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
 	if resp.StatusCode != 404 {
 		t.Errorf("/other = %d, want 404", resp.StatusCode)
 	}

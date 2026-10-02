@@ -2,6 +2,7 @@ package fakestore
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -38,7 +39,7 @@ func TestReconcilePartialNeverResolves(t *testing.T) {
 	if r := rec(false, "new"); len(r.Resolved) != 1 || r.Resolved[0].Title != "old" {
 		t.Fatalf("full run must resolve old: %+v", r)
 	}
-	if _, err := s.ReconcileFindings(ctx, store.ReconcileInput{AssetID: 9}); err != store.ErrNotFound {
+	if _, err := s.ReconcileFindings(ctx, store.ReconcileInput{AssetID: 9}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("unknown asset err = %v", err)
 	}
 }
