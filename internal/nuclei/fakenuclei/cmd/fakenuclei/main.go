@@ -256,7 +256,7 @@ func scan(conf fakenuclei.Conf, args []string) int {
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
 	out := bufio.NewWriter(os.Stdout)
-	defer out.Flush()
+	defer func() { _ = out.Flush() }()
 	for _, f := range files {
 		t, ok := readTemplate(f)
 		if !ok || !pass(t, wantIDs, wantTags, exTags, sevs) {
@@ -275,7 +275,7 @@ func scan(conf fakenuclei.Conf, args []string) int {
 					},
 				}
 				line, _ := json.Marshal(ev)
-				fmt.Fprintln(out, string(line))
+				_, _ = fmt.Fprintln(out, string(line))
 			}
 		}
 	}
@@ -331,7 +331,7 @@ func hit(c *http.Client, url, needle string) bool {
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	return resp.StatusCode == 200 && strings.Contains(string(b), needle)
 }

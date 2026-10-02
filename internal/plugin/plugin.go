@@ -206,7 +206,7 @@ func (p *pluginCheck) exec(ctx context.Context, stdin []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: temp dir: %w", p.name, err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	cmd := exec.CommandContext(ctx, p.cfg.Exec[0], p.cfg.Exec[1:]...) // #nosec G204 -- operator-configured plugin, argv only, never a shell
 	cmd.Dir = dir

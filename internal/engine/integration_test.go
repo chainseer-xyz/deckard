@@ -61,7 +61,6 @@ type recordingCheck struct {
 	mu   sync.Mutex
 	keys []string
 	hold time.Duration
-	done chan struct{}
 }
 
 func (c *recordingCheck) Name() string             { return c.name }

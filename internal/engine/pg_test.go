@@ -95,7 +95,7 @@ func adminExec(t *testing.T, sql string) {
 	if err != nil {
 		t.Fatalf("admin connect: %v", err)
 	}
-	defer c.Close(ctx)
+	defer func() { _ = c.Close(ctx) }()
 	if _, err := c.Exec(ctx, sql); err != nil {
 		t.Fatalf("%s: %v", sql, err)
 	}

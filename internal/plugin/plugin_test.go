@@ -56,26 +56,26 @@ func helperPlugin(mode string) int {
 				map[string]any{"from_kind": "hostname", "from_key": "a", "to_kind": "ip", "to_key": "192.0.2.1", "type": "nonsense"},
 			},
 		}
-		json.NewEncoder(os.Stdout).Encode(out)
+		_ = json.NewEncoder(os.Stdout).Encode(out)
 	case "badjson":
-		os.Stdout.WriteString("not json at all")
+		_, _ = os.Stdout.WriteString("not json at all")
 	case "twoobjects":
-		os.Stdout.WriteString(`{"findings":[]} {"findings":[]}`)
+		_, _ = os.Stdout.WriteString(`{"findings":[]} {"findings":[]}`)
 	case "fail":
-		os.Stdout.WriteString(`{"findings":[{"severity":"high","title":"partial"}]}`)
-		os.Stderr.WriteString("boom: something broke\n")
+		_, _ = os.Stdout.WriteString(`{"findings":[{"severity":"high","title":"partial"}]}`)
+		_, _ = os.Stderr.WriteString("boom: something broke\n")
 		return 3
 	case "sleep":
 		time.Sleep(30 * time.Second)
 	case "bigout":
 		chunk := strings.Repeat("a", 1<<20)
-		os.Stdout.WriteString(`{"findings":[],"pad":"`)
+		_, _ = os.Stdout.WriteString(`{"findings":[],"pad":"`)
 		for i := 0; i < 8; i++ {
-			os.Stdout.WriteString(chunk)
+			_, _ = os.Stdout.WriteString(chunk)
 		}
 	case "spawn": // child that would outlive the plugin; the pgid kill must reap it
 		pid := os.Getpid()
-		os.WriteFile(os.Getenv("DECKARD_PIDFILE"), []byte(fmt.Sprint(pid)), 0o600)
+		_ = os.WriteFile(os.Getenv("DECKARD_PIDFILE"), []byte(fmt.Sprint(pid)), 0o600)
 		time.Sleep(30 * time.Second)
 	}
 	return 0
@@ -215,7 +215,7 @@ func TestTimeoutKillsProcessGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	var pid int
-	fmt.Sscan(string(b), &pid)
+	_, _ = fmt.Sscan(string(b), &pid)
 	time.Sleep(200 * time.Millisecond)
 	if err := syscall.Kill(pid, 0); err == nil {
 		t.Errorf("plugin process %d still alive", pid)

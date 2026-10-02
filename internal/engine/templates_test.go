@@ -393,7 +393,7 @@ func TestRunDeltaProcessesFindingsAsPartialRuns(t *testing.T) {
 			t.Errorf("run = %+v", r)
 		}
 	}
-	for _, o := range th.rec.fakeRec.scans {
+	for _, o := range th.rec.scans {
 		if o.check == nuclei.NameActive {
 			t.Errorf("metrics recorded the regular check name: %+v", o)
 		}
@@ -489,7 +489,7 @@ func TestRunDeltaWaitsForTemplatesThatHaveNotArrived(t *testing.T) {
 		t.Errorf("old job: %v, want a cancel", got)
 	}
 	other := errors.New("other")
-	if notReadyResult(other, now, now) != other || notReadyResult(nil, now, now) != nil {
+	if !errors.Is(notReadyResult(other, now, now), other) || !errors.Is(notReadyResult(nil, now, now), nil) {
 		t.Error("other results must pass through")
 	}
 

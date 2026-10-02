@@ -364,7 +364,8 @@ func TestPerHostConcurrencyAndRate(t *testing.T) {
 
 func TestLimiterShared(t *testing.T) {
 	l := newLimiterSet()
-	if l.get(model.TierActive, 50) != l.get(model.TierActive, 50) {
+	first, second := l.get(model.TierActive, 50), l.get(model.TierActive, 50)
+	if first != second {
 		t.Fatal("same tier+rate must share a limiter")
 	}
 	if l.get(model.TierActive, 50) == l.get(model.TierActive, 5) || l.get(model.TierActive, 50) == l.get(model.TierPassive, 50) {

@@ -20,7 +20,7 @@ func TestParseJSONLFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	got, err := ParseJSONL(f)
 	if err != nil {
 		t.Fatal(err)
@@ -261,7 +261,9 @@ func TestIntrusiveVariant(t *testing.T) {
 	}
 	// active variant always excludes dos and intrusive
 	fr := &fakeRunner{}
-	New(config.NucleiConfig{}, verifyOnly("app.example.com"), fr, false, nil).Run(context.Background(), check.Target{Asset: urlAsset("https://app.example.com")})
+	if _, err := New(config.NucleiConfig{}, verifyOnly("app.example.com"), fr, false, nil).Run(context.Background(), check.Target{Asset: urlAsset("https://app.example.com")}); err != nil {
+		t.Fatal(err)
+	}
 	if got := argAfter(fr.calls[0], "-etags"); got != "dos,intrusive" {
 		t.Errorf("active etags=%q", got)
 	}

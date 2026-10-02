@@ -28,7 +28,7 @@ func refdataEngine(t *testing.T, enabled bool, r Refresher) *Engine {
 		c.Refdata.Enabled = enabled
 		c.Refdata.Interval = 24 * time.Hour
 	}, nil)
-	h.r.Deps.Refdata = r
+	h.r.Refdata = r
 	e, err := New(h.r.Deps, WithRoles(RoleAPI, RoleScheduler, RoleWorker))
 	if err != nil {
 		t.Fatal(err)

@@ -187,7 +187,7 @@ func ParseFile(root, rel string) (Meta, error) {
 	if err != nil {
 		return Meta{}, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	buf, err := io.ReadAll(io.LimitReader(f, headerLimit))
 	if err != nil {
 		return Meta{}, err

@@ -38,7 +38,7 @@ func (j scanJob) key() string { return fmt.Sprintf("%d|%s|%s", j.AssetID, j.Tier
 type riverQueue struct{ c *river.Client[pgx.Tx] }
 
 func (q riverQueue) enqueueScan(ctx context.Context, j scanJob) (bool, error) {
-	res, err := q.c.Insert(ctx, ScanAssetArgs{AssetID: j.AssetID, Tier: j.Tier, Check: j.Check},
+	res, err := q.c.Insert(ctx, ScanAssetArgs(j),
 		&river.InsertOpts{Queue: queueForTier(j.Tier)})
 	if err != nil {
 		return false, err
