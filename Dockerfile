@@ -36,7 +36,7 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 
 # An empty state directory for the nuclei template updater. distroless has no
 # shell, so the directory is prepared here and copied with its ownership.
-FROM alpine:3.22 AS state
+FROM alpine:3.24 AS state
 RUN mkdir -p /state/var/lib/deckard/nuclei-templates
 
 # slim: deckard only (no nuclei; set nuclei.enabled=false). Build with --target slim.
