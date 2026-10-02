@@ -21,7 +21,7 @@ func ServePlain(t testing.TB, banner string) string {
 				return
 			}
 			go func(c net.Conn) {
-				defer c.Close()
+				defer func() { _ = c.Close() }()
 				_, _ = c.Write([]byte(banner))
 			}(c)
 		}

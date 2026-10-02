@@ -132,7 +132,7 @@ func (c *Check) handshake(ctx context.Context, t check.Target, ep endpoint, time
 	if err != nil {
 		return nil, err, nil
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	// Verification is done by Assess so each failure mode gets its own finding;
 	// the handshake itself must therefore accept any certificate.
 	tc := tls.Client(conn, &tls.Config{ServerName: ep.sni, InsecureSkipVerify: true, MinVersion: tls.VersionTLS10}) // #nosec G402 -- certificate checker must classify invalid chains itself

@@ -183,7 +183,7 @@ func (p *prober) banner(ctx context.Context) svcInfo {
 	if err != nil {
 		return svcInfo{}
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetReadDeadline(time.Now().Add(p.wait))
 	line, _ := bufio.NewReaderSize(io.LimitReader(conn, 1024), 1024).ReadString('\n')
 	return classifyBanner(sanitize(line, 200))
@@ -220,7 +220,7 @@ func (p *prober) redis(ctx context.Context) svcInfo {
 	if err != nil {
 		return svcInfo{}
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if _, err := conn.Write([]byte("PING\r\n")); err != nil {
 		return svcInfo{}
 	}
@@ -240,7 +240,7 @@ func (p *prober) memcached(ctx context.Context) svcInfo {
 	if err != nil {
 		return svcInfo{}
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if _, err := conn.Write([]byte("version\r\n")); err != nil {
 		return svcInfo{}
 	}
@@ -271,7 +271,7 @@ func (p *prober) mongo(ctx context.Context) svcInfo {
 	if err != nil {
 		return svcInfo{}
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if _, err := conn.Write(mongoIsMaster()); err != nil {
 		return svcInfo{}
 	}
@@ -289,7 +289,7 @@ func (p *prober) http(ctx context.Context) svcInfo {
 	if err != nil {
 		return svcInfo{}
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	return p.httpOver(conn, svcInfo{})
 }
 
@@ -298,7 +298,7 @@ func (p *prober) httpsProbe(ctx context.Context) svcInfo {
 	if err != nil {
 		return svcInfo{}
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	tc := tls.Client(conn, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS10}) // #nosec G402 -- scanner must inspect services with invalid certificates
 	if err := tc.HandshakeContext(ctx); err != nil {
 		return svcInfo{}
@@ -322,7 +322,7 @@ func (p *prober) httpOver(rw io.ReadWriter, base svcInfo) svcInfo {
 	if err != nil {
 		return svcInfo{}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	info := base
 	info.service = "http"
 	if base.tls {

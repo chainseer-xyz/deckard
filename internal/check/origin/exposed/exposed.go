@@ -130,7 +130,7 @@ func direct(ctx context.Context, d check.Dialer, ip string, port int, hostname s
 	if err != nil {
 		return Page{}, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(timeout))
 	if port == 443 || port == 8443 {
 		// Only the response's look matters here, not certificate validity.
@@ -148,7 +148,7 @@ func direct(ctx context.Context, d check.Dialer, ip string, port int, hostname s
 	if err != nil {
 		return Page{}, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, checkutil.DefaultMaxBody))
 	return Summarise(resp.StatusCode, body), nil
 }

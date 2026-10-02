@@ -26,7 +26,7 @@ func serve(t *testing.T, cfg *tls.Config) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { l.Close() })
+	t.Cleanup(func() { _ = l.Close() })
 	go func() {
 		for {
 			c, err := l.Accept()
@@ -34,7 +34,7 @@ func serve(t *testing.T, cfg *tls.Config) int {
 				return
 			}
 			go func() {
-				defer c.Close()
+				defer func() { _ = c.Close() }()
 				_ = c.(*tls.Conn).Handshake()
 			}()
 		}
@@ -114,14 +114,14 @@ func TestTLS12OnlyReportsNo13(t *testing.T) {
 
 func TestNonTLSListener(t *testing.T) {
 	l, _ := net.Listen("tcp", "127.0.0.1:0")
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	go func() {
 		for {
 			c, err := l.Accept()
 			if err != nil {
 				return
 			}
-			c.Close()
+			_ = c.Close()
 		}
 	}()
 	res := run(t, svc(l.Addr().(*net.TCPAddr).Port))

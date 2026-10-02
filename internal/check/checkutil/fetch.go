@@ -88,7 +88,7 @@ func Fetch(ctx context.Context, client *http.Client, rawURL string, o FetchOpts)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, o.MaxBody+1))
 	if err != nil && len(body) == 0 {
 		return nil, err

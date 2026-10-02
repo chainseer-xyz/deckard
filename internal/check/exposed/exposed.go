@@ -58,7 +58,7 @@ func fetch(ctx context.Context, c *http.Client, u string) (*response, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	// A redirect to a different path (e.g. a login page) is not the resource.
 	if resp.Request != nil && resp.Request.URL != nil && resp.Request.URL.Path != req.URL.Path {
 		return &response{status: 0}, nil

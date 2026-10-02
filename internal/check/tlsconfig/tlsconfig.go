@@ -133,7 +133,7 @@ func (p *prober) handshake(ctx context.Context, cfg *tls.Config) (*tls.Connectio
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	cfg.ServerName = p.sni
 	cfg.InsecureSkipVerify = true //nolint:gosec // enumeration only; certificate validity is tls.cert's job
 	tc := tls.Client(conn, cfg)

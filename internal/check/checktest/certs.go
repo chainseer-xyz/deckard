@@ -116,7 +116,7 @@ func ServeTLS(t testing.TB, cert tls.Certificate) string {
 				return
 			}
 			go func(c net.Conn) {
-				defer c.Close()
+				defer func() { _ = c.Close() }()
 				_ = c.(*tls.Conn).Handshake()
 			}(c)
 		}

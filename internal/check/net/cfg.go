@@ -51,13 +51,6 @@ func cfgDuration(m map[string]any, key string, def time.Duration) time.Duration 
 	return def
 }
 
-func cfgString(m map[string]any, key, def string) string {
-	if s, ok := m[key].(string); ok && s != "" {
-		return s
-	}
-	return def
-}
-
 // cfgPorts reads a port list given as []int, []any, a single int or a
 // comma/range string.
 func cfgPorts(m map[string]any, key string) ([]int, error) {

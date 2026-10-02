@@ -170,7 +170,7 @@ func BuildFinding(host, cname string, f *Fingerprint, reason string, evidence ma
 	sev, note := f.Severity(), ""
 	// Edge-case providers are only claimable under some conditions, so they
 	// need the HTTPS certificate confirmation to stay at high severity.
-	if st, ok := ev["https_cert"].(string); f.Status != "vulnerable" && !(ok && certConfirms(st)) {
+	if st, ok := ev["https_cert"].(string); f.Status != "vulnerable" && (!ok || !certConfirms(st)) {
 		sev = model.SeverityMedium
 		note = " The match is unconfirmed: HTTPS did not show the provider's default certificate."
 	}
@@ -313,7 +313,7 @@ func (c *Check) probeCert(ctx context.Context, t check.Target, host string, fp *
 		obs["https_cert"], obs["https_cert_error"] = certUnavailable, "connect: "+err.Error()
 		return certUnavailable
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	tc := tls.Client(conn, &tls.Config{ServerName: host, InsecureSkipVerify: true, MinVersion: tls.VersionTLS10}) // #nosec G402 -- chain is verified explicitly below to classify the outcome
 	if err := tc.HandshakeContext(ctx); err != nil {
 		obs["https_cert"], obs["https_cert_error"] = certUnavailable, "handshake: "+err.Error()

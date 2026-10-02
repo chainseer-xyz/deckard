@@ -32,14 +32,14 @@ func listen(t *testing.T, handler func(net.Conn)) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { l.Close() })
+	t.Cleanup(func() { _ = l.Close() })
 	go func() {
 		for {
 			c, err := l.Accept()
 			if err != nil {
 				return
 			}
-			go func() { defer c.Close(); handler(c) }()
+			go func() { defer func() { _ = c.Close() }(); handler(c) }()
 		}
 	}()
 	return l.Addr().(*net.TCPAddr).Port
@@ -245,7 +245,7 @@ func TestServicesBanners(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			port := listen(t, func(c net.Conn) { io.WriteString(c, tc.banner) })
+			port := listen(t, func(c net.Conn) { _, _ = io.WriteString(c, tc.banner) })
 			res := runSvc(t, port)
 			if res.Observations[0].Data["service"] != tc.service {
 				t.Fatalf("obs=%v", res.Observations[0].Data)
@@ -283,7 +283,7 @@ func TestServicesRedis(t *testing.T) {
 				buf := make([]byte, 16)
 				n, _ := c.Read(buf)
 				if strings.HasPrefix(string(buf[:n]), "PING") {
-					io.WriteString(c, tc.reply)
+					_, _ = io.WriteString(c, tc.reply)
 				}
 			})
 			p := &prober{d: &plainDialer{}, host: "127.0.0.1", port: port, timeout: 2 * time.Second, wait: 200 * time.Millisecond}
@@ -309,8 +309,8 @@ func TestServicesRedis(t *testing.T) {
 func TestServicesMemcachedAndMongo(t *testing.T) {
 	mc := listen(t, func(c net.Conn) {
 		buf := make([]byte, 32)
-		c.Read(buf)
-		io.WriteString(c, "VERSION 1.6.9\r\n")
+		_, _ = c.Read(buf)
+		_, _ = io.WriteString(c, "VERSION 1.6.9\r\n")
 	})
 	p := &prober{d: &plainDialer{}, host: "127.0.0.1", port: mc, timeout: 2 * time.Second}
 	info := p.memcached(context.Background())
@@ -329,7 +329,7 @@ func TestServicesMemcachedAndMongo(t *testing.T) {
 		gotReq = buf[:n]
 		reply := make([]byte, 16)
 		reply[0] = 40
-		io.WriteString(c, string(reply)+"\x08ismaster\x00")
+		_, _ = io.WriteString(c, string(reply)+"\x08ismaster\x00")
 	})
 	p = &prober{d: &plainDialer{}, host: "127.0.0.1", port: mg, timeout: 2 * time.Second}
 	info = p.mongo(context.Background())
@@ -348,7 +348,7 @@ func TestServicesMemcachedAndMongo(t *testing.T) {
 func TestServicesHTTPAndElasticsearch(t *testing.T) {
 	web := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Server", "Apache/2.2.15 (CentOS)")
-		io.WriteString(w, "hi")
+		_, _ = io.WriteString(w, "hi")
 	}))
 	defer web.Close()
 	res := runSvc(t, portOf(web.Listener))
@@ -360,7 +360,7 @@ func TestServicesHTTPAndElasticsearch(t *testing.T) {
 	}
 
 	es := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, `{"name":"n1","cluster_name":"prod","version":{"number":"7.10.2"},"tagline":"You Know, for Search"}`)
+		_, _ = io.WriteString(w, `{"name":"n1","cluster_name":"prod","version":{"number":"7.10.2"},"tagline":"You Know, for Search"}`)
 	}))
 	defer es.Close()
 	res = runSvc(t, portOf(es.Listener))

@@ -38,7 +38,7 @@ func byKey(r *check.Result) map[string]model.FindingInput {
 func notFoundExcept(routes map[string]string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if body, ok := routes[r.URL.Path]; ok {
-			fmt.Fprint(w, body)
+			_, _ = fmt.Fprint(w, body)
 			return
 		}
 		http.NotFound(w, r)
@@ -93,7 +93,7 @@ func TestRealExposuresDetectedAndRedacted(t *testing.T) {
 func TestSoft404SiteYieldsNothing(t *testing.T) {
 	// Catch-all returns the same page with 200 for every path.
 	res, _ := run(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "<html><body>ref: refs/heads/main DB_NAME PK Index of /</body></html>")
+		_, _ = fmt.Fprint(w, "<html><body>ref: refs/heads/main DB_NAME PK Index of /</body></html>")
 	}), nil)
 	if len(res.Findings) != 0 {
 		t.Fatalf("soft-404 produced findings: %v", byKey(res))
@@ -107,7 +107,7 @@ func TestSPAWithVariableBodyRejectedByValidators(t *testing.T) {
 	// Catch-all whose body differs per path (echoes it), so soft-404 hashing
 	// cannot save us; content validation must.
 	res, _ := run(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "<html><title>App</title><body>page for %s ref: refs/heads/x\nFOO=bar</body></html>", r.URL.Path)
+		_, _ = fmt.Fprintf(w, "<html><title>App</title><body>page for %s ref: refs/heads/x\nFOO=bar</body></html>", r.URL.Path)
 	}), nil)
 	if len(res.Findings) != 0 {
 		t.Fatalf("false positives: %v", byKey(res))
@@ -152,7 +152,7 @@ func TestValidatorFalsePositives(t *testing.T) {
 func TestRedirectToLoginIsNotAHit(t *testing.T) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/login" {
-			fmt.Fprint(w, "ref: refs/heads/main\n")
+			_, _ = fmt.Fprint(w, "ref: refs/heads/main\n")
 			return
 		}
 		http.Redirect(w, r, "/login", http.StatusFound)
@@ -168,7 +168,7 @@ func TestExcludePathsAndPoliteSequential(t *testing.T) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen[r.URL.Path]++ // sequential => no data race under -race
 		if r.URL.Path == "/.env" || r.URL.Path == "/.git/HEAD" {
-			fmt.Fprint(w, "A=1\n")
+			_, _ = fmt.Fprint(w, "A=1\n")
 			return
 		}
 		http.NotFound(w, r)
