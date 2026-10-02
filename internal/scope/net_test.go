@@ -219,7 +219,7 @@ func TestDialerNeverReachesUnderlyingDialerWhenRefused(t *testing.T) {
 				_ = conn.Close()
 				t.Fatalf("want error, got success; dial calls %v", calls)
 			}
-			if c.wantErr != errAny && !errors.Is(err, c.wantErr) {
+			if !errors.Is(c.wantErr, errAny) && !errors.Is(err, c.wantErr) {
 				t.Fatalf("error = %v, want errors.Is %v", err, c.wantErr)
 			}
 			if len(calls) != 0 {
@@ -447,15 +447,13 @@ func TestResolver(t *testing.T) {
 // ---- HTTP client ----
 
 type httpEnv struct {
-	g      *Guard
-	res    *fakeResolver
-	hits   map[string]*atomic.Int32
-	srvA   *httptest.Server
-	srvB   *httptest.Server
-	portA  string
-	portB  string
-	bURL   string
-	closed func()
+	g     *Guard
+	res   *fakeResolver
+	hits  map[string]*atomic.Int32
+	srvA  *httptest.Server
+	srvB  *httptest.Server
+	portA string
+	portB string
 }
 
 func setupHTTP(t *testing.T) *httpEnv {
@@ -526,6 +524,17 @@ func portOf(t *testing.T, raw string) string {
 	return u.Port()
 }
 
+// httpGet issues a GET through cl using a context-bound request so tests
+// don't rely on the deprecated, context-less (*http.Client).Get.
+func httpGet(t *testing.T, cl *http.Client, rawURL string) (*http.Response, error) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, rawURL, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	return cl.Do(req)
+}
+
 func TestHTTPClientRedirects(t *testing.T) {
 	e := setupHTTP(t)
 	cl := e.g.HTTPClient(model.TierPassive, model.ScopeOwned, nil)
@@ -552,9 +561,9 @@ func TestHTTPClientRedirects(t *testing.T) {
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			e.hits["B"].Store(0)
-			resp, err := cl.Get(base + c.path)
+			resp, err := httpGet(t, cl, base+c.path)
 			if resp != nil {
-				defer resp.Body.Close()
+				defer func() { _ = resp.Body.Close() }()
 			}
 			if c.wantErr == nil {
 				if err != nil {
@@ -569,10 +578,10 @@ func TestHTTPClientRedirects(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected error, got status %d", resp.StatusCode)
 			}
-			if c.wantErr != errAny && !errors.Is(err, c.wantErr) {
+			if !errors.Is(c.wantErr, errAny) && !errors.Is(err, c.wantErr) {
 				t.Fatalf("err=%v want %v", err, c.wantErr)
 			}
-			if c.wantErr == ErrOutOfScope || c.wantErr == ErrExcluded {
+			if errors.Is(c.wantErr, ErrOutOfScope) || errors.Is(c.wantErr, ErrExcluded) {
 				if resp == nil || resp.StatusCode != http.StatusFound {
 					t.Fatalf("refused redirect must hand back the 302 response, got %+v", resp)
 				}
@@ -597,7 +606,10 @@ func TestHTTPClientRedirectCap(t *testing.T) {
 	defer srv.Close()
 	e.res.seq["app.example.com"] = [][]string{{"127.0.0.1"}}
 	cl := e.g.HTTPClient(model.TierPassive, model.ScopeOwned, nil, WithMaxRedirects(2))
-	_, err := cl.Get("http://app.example.com:" + portOf(t, srv.URL) + "/")
+	resp, err := httpGet(t, cl, "http://app.example.com:"+portOf(t, srv.URL)+"/")
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 	if !errors.Is(err, ErrTooManyRedirects) {
 		t.Fatalf("err=%v", err)
 	}
@@ -615,19 +627,27 @@ func TestHTTPClientDialsUseGuard(t *testing.T) {
 
 	// Excluded host: first hop refused at dial time, server never hit.
 	e.hits["A"].Store(0)
-	if _, err := cl.Get("http://secret.example.com:" + e.portA + "/ok"); !errors.Is(err, ErrExcluded) {
+	if resp, err := httpGet(t, cl, "http://secret.example.com:"+e.portA+"/ok"); !errors.Is(err, ErrExcluded) {
 		t.Fatalf("excluded first hop: %v", err)
+	} else if resp != nil {
+		_ = resp.Body.Close()
 	}
 	// Literal private IP not registered (10.x): refused.
-	if _, err := cl.Get("http://10.0.0.1/"); !errors.Is(err, ErrOutOfScope) {
+	if resp, err := httpGet(t, cl, "http://10.0.0.1/"); !errors.Is(err, ErrOutOfScope) {
 		t.Fatalf("literal private: %v", err)
+	} else if resp != nil {
+		_ = resp.Body.Close()
 	}
 	// Rebinding: second lookup returns 10.0.0.1.
-	if _, err := cl.Get("http://rebind.example.com:" + e.portA + "/ok"); err != nil {
+	if resp, err := httpGet(t, cl, "http://rebind.example.com:"+e.portA+"/ok"); err != nil {
 		t.Fatalf("first lookup is loopback-owned and fine: %v", err)
+	} else {
+		_ = resp.Body.Close()
 	}
-	if _, err := cl.Get("http://rebind.example.com:" + e.portA + "/ok"); !errors.Is(err, ErrOutOfScope) {
+	if resp, err := httpGet(t, cl, "http://rebind.example.com:"+e.portA+"/ok"); !errors.Is(err, ErrOutOfScope) {
 		t.Fatalf("rebind must be refused: %v", err)
+	} else if resp != nil {
+		_ = resp.Body.Close()
 	}
 	if e.hits["A"].Load() != 1 {
 		t.Fatalf("A hits=%d", e.hits["A"].Load())
@@ -647,7 +667,7 @@ func TestHTTPClientIgnoresProxyEnv(t *testing.T) {
 	if tr.Proxy != nil {
 		t.Fatal("proxy must be disabled: it would bypass the dialer's destination vetting")
 	}
-	resp, err := cl.Get("http://app.example.com:" + e.portA + "/ok")
+	resp, err := httpGet(t, cl, "http://app.example.com:"+e.portA+"/ok")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -661,7 +681,7 @@ func TestHTTPClientRefusesNonOwnedInitialHost(t *testing.T) {
 	for _, class := range []model.ScopeClass{model.ScopeExternal, model.ScopeOwned} {
 		cl := e.g.HTTPClient(model.TierPassive, class, nil)
 		e.hits["A"].Store(0)
-		resp, err := cl.Get("http://external-app.test:" + e.portA + "/same")
+		resp, err := httpGet(t, cl, "http://external-app.test:"+e.portA+"/same")
 		if err == nil {
 			_ = resp.Body.Close()
 		}

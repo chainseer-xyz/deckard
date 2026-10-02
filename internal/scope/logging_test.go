@@ -45,11 +45,11 @@ func lastLog(t *testing.T, buf *bytes.Buffer) logRec {
 
 func redirectReq(t *testing.T, raw string) (*http.Request, []*http.Request) {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, raw, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, raw, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	orig, _ := http.NewRequest(http.MethodGet, "https://app.example.com/", nil)
+	orig, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://app.example.com/", nil)
 	return req, []*http.Request{orig}
 }
 

@@ -84,7 +84,7 @@ func TestSetOwnedPrefixesRejectsDangerousRanges(t *testing.T) {
 		{"64:ff9b::a9fe:a9fe", model.ScopeExternal},
 	}
 	for _, tc := range tests {
-		if got := g.Classify(model.KindIP, tc.ip); got != tc.want && !(tc.want == model.ScopeExternal && got == model.ScopeShared) {
+		if got := g.Classify(model.KindIP, tc.ip); got != tc.want && (tc.want != model.ScopeExternal || got != model.ScopeShared) {
 			t.Errorf("%s: got %s want %s", tc.ip, got, tc.want)
 		}
 	}
