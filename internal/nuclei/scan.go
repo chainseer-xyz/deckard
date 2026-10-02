@@ -262,9 +262,11 @@ func (s *Scanner) runSettings(req ScanRequest, hosts int) (args []string, runTim
 	bulk := max(1, min(hosts, maxBulkHosts))
 	global := max(1, int(math.Ceil(rate*float64(bulk))))
 	// Never intrusive, always dos-excluded, whatever the operator lists.
+	// -dr: see buildArgs — nuclei must never follow a redirect off the
+	// verified host.
 	ro := runOptions{cfg: s.cfg}
 	args = []string{
-		"-jsonl", "-silent", "-no-color", "-duc",
+		"-jsonl", "-silent", "-no-color", "-duc", "-dr",
 		"-pt", networkProtocols, "-severity", sev,
 	}
 	if ex := ro.excludeTags(); len(ex) > 0 {

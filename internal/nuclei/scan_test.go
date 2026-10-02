@@ -98,7 +98,9 @@ func TestScanArgvAndLists(t *testing.T) {
 			t.Errorf("%s = %q, want %q (args %v)", flag, got, want, a)
 		}
 	}
-	for _, f := range []string{"-jsonl", "-silent", "-no-color", "-duc", "-no-interactsh"} {
+	// -dr keeps nuclei's own HTTP stack from following cross-host redirects
+	// to hosts the scope guard never verified.
+	for _, f := range []string{"-jsonl", "-silent", "-no-color", "-duc", "-no-interactsh", "-dr"} {
 		if !slices.Contains(a, f) {
 			t.Errorf("missing %s", f)
 		}

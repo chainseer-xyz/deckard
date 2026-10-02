@@ -151,7 +151,11 @@ func TestRunBuildsArgvAndParses(t *testing.T) {
 			t.Errorf("%s = %q want %q (args=%v)", flag, got, want, a)
 		}
 	}
-	for _, f := range []string{"-jsonl", "-silent", "-no-color", "-duc", "-no-interactsh"} {
+	// -dr: nuclei runs its own HTTP stack, so without it a template with
+	// redirects:true would follow a cross-host Location header and probe a
+	// third party the scope guard never verified (invariant: deckard only
+	// probes assets the operator owns).
+	for _, f := range []string{"-jsonl", "-silent", "-no-color", "-duc", "-no-interactsh", "-dr"} {
 		if !slices.Contains(a, f) {
 			t.Errorf("missing %s", f)
 		}
