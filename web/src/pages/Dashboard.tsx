@@ -25,8 +25,8 @@ function Bars({ data, hrefFor }: { data: Record<string, number>; hrefFor?: (k: s
             )}
             <span className="tabular-nums">{v}</span>
           </div>
-          <div className="mt-0.5 h-1.5 rounded bg-surface2" aria-hidden="true">
-            <div className="h-1.5 rounded bg-accent" style={{ width: `${(v / max) * 100}%` }} />
+          <div className="mt-0.5 h-1.5 rounded-sm bg-surface2" aria-hidden="true">
+            <div className="h-1.5 rounded-sm bg-accent" style={{ width: `${(v / max) * 100}%` }} />
           </div>
         </li>
       ))}

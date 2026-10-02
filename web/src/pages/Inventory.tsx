@@ -195,7 +195,7 @@ export default function Inventory() {
                             <td className="td"><KindBadge kind={a.kind} /></td>
                             <td className="td font-mono text-xs">
                               <Link className="text-accent hover:underline" to={`/assets/${a.id}`}>{a.key}</Link>
-                              {a.removed_at && <span className="ml-2 rounded border border-line px-1 text-[10px] uppercase">removed</span>}
+                              {a.removed_at && <span className="ml-2 rounded-sm border border-line px-1 text-[10px] uppercase">removed</span>}
                             </td>
                             <td className="td"><ScopeBadge scope={a.scope} /></td>
                             <td className="td text-xs">{a.source}</td>

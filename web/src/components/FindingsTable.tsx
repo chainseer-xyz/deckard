@@ -145,7 +145,7 @@ export function FindingsTable({ items, compact = false }: { items: Finding[]; co
                   <tr className="border-b border-line/60 hover:bg-surface2/50">
                     <td className="td">
                       <button
-                        className="rounded p-0.5 hover:bg-surface2"
+                        className="rounded-sm p-0.5 hover:bg-surface2"
                         aria-expanded={expanded}
                         aria-controls={`finding-${f.id}`}
                         aria-label={`${expanded ? 'Collapse' : 'Expand'} details for ${f.title}`}

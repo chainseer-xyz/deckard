@@ -28,7 +28,7 @@ export function SeverityBadge({ severity }: { severity: Severity }) {
   const s = SEV[severity] ?? SEV.info;
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-xs font-semibold uppercase ${s.cls}`}
+      className={`inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-xs font-semibold uppercase ${s.cls}`}
     >
       <s.Icon size={12} aria-hidden="true" />
       {severity}
@@ -40,7 +40,7 @@ export function SeverityBadge({ severity }: { severity: Severity }) {
 export function KevBadge({ dateAdded }: { dateAdded?: string }) {
   return (
     <span
-      className="inline-flex items-center gap-1 rounded border border-sev-critical bg-sev-critical/10 px-1.5 py-0.5 text-xs font-semibold uppercase text-sev-critical"
+      className="inline-flex items-center gap-1 rounded-sm border border-sev-critical bg-sev-critical/10 px-1.5 py-0.5 text-xs font-semibold uppercase text-sev-critical"
       title={dateAdded ? `Listed in CISA KEV, added ${dateAdded}` : 'Listed in CISA Known Exploited Vulnerabilities'}
     >
       <Flame size={12} aria-hidden="true" />
@@ -58,7 +58,7 @@ export function EpssChip({ score, percentile }: { score: number; percentile?: nu
       : `FIRST EPSS exploitation probability, ${pctile(percentile)}`;
   return (
     <span
-      className="inline-flex items-center gap-1 rounded border border-line bg-surface2 px-1.5 py-0.5 text-xs text-muted"
+      className="inline-flex items-center gap-1 rounded-sm border border-line bg-surface2 px-1.5 py-0.5 text-xs text-muted"
       title={title}
     >
       <Gauge size={12} aria-hidden="true" />
@@ -91,7 +91,7 @@ const SCOPE_CLS: Record<string, string> = {
 };
 export function ScopeBadge({ scope }: { scope: string }) {
   return (
-    <span className={`inline-flex rounded border px-1.5 py-0.5 text-xs ${SCOPE_CLS[scope] ?? 'border-line'}`}>
+    <span className={`inline-flex rounded-sm border px-1.5 py-0.5 text-xs ${SCOPE_CLS[scope] ?? 'border-line'}`}>
       {scope}
     </span>
   );
@@ -102,7 +102,7 @@ export function KindBadge({ kind }: { kind: string }) {
     <span className="inline-flex items-center gap-1.5 text-xs">
       <span
         aria-hidden="true"
-        className="inline-block h-2.5 w-2.5 rounded-sm"
+        className="inline-block h-2.5 w-2.5 rounded-xs"
         style={{ background: `rgb(var(--k-${kind}, var(--muted)))` }}
       />
       {kind}

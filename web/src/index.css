@@ -1,6 +1,27 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+
+/* Theme colours read the runtime design tokens below (not static values), so
+   the light/dark themes switch by changing the variables alone. */
+@theme inline {
+  --color-bg: rgb(var(--bg));
+  --color-surface: rgb(var(--surface));
+  --color-surface2: rgb(var(--surface2));
+  --color-line: rgb(var(--line));
+  --color-fg: rgb(var(--fg));
+  --color-muted: rgb(var(--muted));
+  --color-accent: rgb(var(--accent));
+  --color-accent-fg: rgb(var(--accent-fg));
+  --color-sev-critical: rgb(var(--sev-critical));
+  --color-sev-high: rgb(var(--sev-high));
+  --color-sev-medium: rgb(var(--sev-medium));
+  --color-sev-low: rgb(var(--sev-low));
+  --color-sev-info: rgb(var(--sev-info));
+  --color-ok: rgb(var(--ok));
+  --color-warn: rgb(var(--warn));
+  --color-bad: rgb(var(--bad));
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
 
 /* Design tokens: space-separated RGB triplets so Tailwind can apply opacity. */
 :root {
@@ -87,6 +108,19 @@
 }
 
 @layer base {
+  /* Tailwind 4 defaults borders to currentColor and buttons to the default
+     cursor; keep the v3 behaviour with the themed line colour. */
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: rgb(var(--line));
+  }
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
   html {
     font-size: 14px;
   }
