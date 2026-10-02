@@ -11,7 +11,7 @@ import (
 
 func runConfig(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] != "validate" {
-		fmt.Fprintln(stderr, "usage: deckard config validate [--config path]")
+		_, _ = fmt.Fprintln(stderr, "usage: deckard config validate [--config path]")
 		return 2
 	}
 	fs := flag.NewFlagSet("config validate", flag.ContinueOnError)
@@ -21,9 +21,9 @@ func runConfig(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if _, err := config.Load(*path, os.Environ()); err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
-	fmt.Fprintln(stdout, "config OK")
+	_, _ = fmt.Fprintln(stdout, "config OK")
 	return 0
 }

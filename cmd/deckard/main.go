@@ -37,15 +37,15 @@ Common flags:
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprint(stderr, usage)
+		_, _ = fmt.Fprint(stderr, usage)
 		return 2
 	}
 	switch args[0] {
 	case "version", "--version", "-v":
-		fmt.Fprintf(stdout, "deckard %s (%s)\n", version, commit)
+		_, _ = fmt.Fprintf(stdout, "deckard %s (%s)\n", version, commit)
 		return 0
 	case "help", "--help", "-h":
-		fmt.Fprint(stdout, usage)
+		_, _ = fmt.Fprint(stdout, usage)
 		return 0
 	case "config":
 		return runConfig(args[1:], stdout, stderr)
@@ -60,6 +60,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "findings":
 		return runFindings(args[1:], stdout, stderr)
 	}
-	fmt.Fprintf(stderr, "deckard: unknown command %q\n\n%s", args[0], usage)
+	_, _ = fmt.Fprintf(stderr, "deckard: unknown command %q\n\n%s", args[0], usage)
 	return 2
 }

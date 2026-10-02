@@ -36,7 +36,7 @@ func runFindings(args []string, stdout, stderr io.Writer) int {
 	if *minSev != "" {
 		sev := model.Severity(*minSev)
 		if !sev.Valid() {
-			fmt.Fprintf(stderr, "deckard: invalid --min-severity %q\n%s\n", *minSev, findingsUsage)
+			_, _ = fmt.Fprintf(stderr, "deckard: invalid --min-severity %q\n%s\n", *minSev, findingsUsage)
 			return 2
 		}
 		filter.MinSeverity = sev
@@ -46,35 +46,35 @@ func runFindings(args []string, stdout, stderr io.Writer) int {
 		filter.Statuses = []model.FindingStatus{model.FindingStatus(*status)}
 	default:
 		if *status != "all" {
-			fmt.Fprintf(stderr, "deckard: invalid --status %q\n%s\n", *status, findingsUsage)
+			_, _ = fmt.Fprintf(stderr, "deckard: invalid --status %q\n%s\n", *status, findingsUsage)
 			return 2
 		}
 	}
 	if *format != "table" && *format != "json" {
-		fmt.Fprintf(stderr, "deckard: invalid --format %q\n%s\n", *format, findingsUsage)
+		_, _ = fmt.Fprintf(stderr, "deckard: invalid --format %q\n%s\n", *format, findingsUsage)
 		return 2
 	}
 
 	cfg, err := config.Load(*path, os.Environ())
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
 	if cfg.Database.URL == "" {
-		fmt.Fprintln(stderr, "deckard: database.url is required (or DECKARD_DATABASE__URL)")
+		_, _ = fmt.Fprintln(stderr, "deckard: database.url is required (or DECKARD_DATABASE__URL)")
 		return 1
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	st, err := postgres.New(ctx, cfg.Database.URL, 2)
 	if err != nil {
-		fmt.Fprintln(stderr, "deckard:", err)
+		_, _ = fmt.Fprintln(stderr, "deckard:", err)
 		return 1
 	}
 	defer st.Close()
 	fs2, _, err := st.ListFindings(ctx, filter)
 	if err != nil {
-		fmt.Fprintln(stderr, "deckard:", err)
+		_, _ = fmt.Fprintln(stderr, "deckard:", err)
 		return 1
 	}
 	sortFindings(fs2)
@@ -85,18 +85,18 @@ func runFindings(args []string, stdout, stderr io.Writer) int {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(fs2); err != nil {
-			fmt.Fprintln(stderr, "deckard:", err)
+			_, _ = fmt.Fprintln(stderr, "deckard:", err)
 			return 1
 		}
 		return 0
 	}
 	tw := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "SEVERITY\tCHECK\tASSET\tTITLE\tFIRST_SEEN")
+	_, _ = fmt.Fprintln(tw, "SEVERITY\tCHECK\tASSET\tTITLE\tFIRST_SEEN")
 	for _, f := range fs2 {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", f.Severity, f.Check, f.AssetKey, f.Title, f.FirstSeen.UTC().Format("2006-01-02 15:04"))
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", f.Severity, f.Check, f.AssetKey, f.Title, f.FirstSeen.UTC().Format("2006-01-02 15:04"))
 	}
 	if err := tw.Flush(); err != nil {
-		fmt.Fprintln(stderr, "deckard:", err)
+		_, _ = fmt.Fprintln(stderr, "deckard:", err)
 		return 1
 	}
 	return 0

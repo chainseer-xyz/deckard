@@ -17,12 +17,8 @@ import (
 	"github.com/chainseer-xyz/deckard/internal/logging"
 )
 
-// commonFlags parses --config and loads the configuration.
-func commonFlags(name string, args []string, stderr io.Writer) (*config.Config, int) {
-	return commonFlagsWith(name, args, stderr, nil)
-}
-
-// commonFlagsWith is commonFlags plus extra flags registered by the command.
+// commonFlagsWith parses --config, loads the configuration and registers any
+// extra flags the command needs.
 func commonFlagsWith(name string, args []string, stderr io.Writer, extra func(*flag.FlagSet)) (*config.Config, int) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -35,7 +31,7 @@ func commonFlagsWith(name string, args []string, stderr io.Writer, extra func(*f
 	}
 	cfg, err := config.Load(*path, os.Environ())
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return nil, 1
 	}
 	return cfg, 0
@@ -62,13 +58,13 @@ func withAppFlags(name string, args []string, extra func(*flag.FlagSet), stdout,
 	a, err := app.New(ctx, cfg, log, app.Options{Version: version, Commit: commit})
 	if err != nil {
 		log.Error("startup failed", "error", err)
-		fmt.Fprintln(stderr, "deckard:", err)
+		_, _ = fmt.Fprintln(stderr, "deckard:", err)
 		return 1
 	}
 	defer a.Close()
 	if err := fn(ctx, a, stdout); err != nil {
 		log.Error(name+" failed", "error", err)
-		fmt.Fprintln(stderr, "deckard:", err)
+		_, _ = fmt.Fprintln(stderr, "deckard:", err)
 		return 1
 	}
 	return 0
@@ -85,7 +81,7 @@ func runMigrate(args []string, stdout, stderr io.Writer) int {
 		if err := a.Migrate(ctx); err != nil {
 			return err
 		}
-		fmt.Fprintln(out, "migrations applied")
+		_, _ = fmt.Fprintln(out, "migrations applied")
 		return nil
 	})
 }
@@ -101,10 +97,10 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 			d, err := a.Inventory().Sync(ctx, src)
 			if err != nil {
 				failed++
-				fmt.Fprintf(out, "%s: FAILED: %v\n", src.Name(), err)
+				_, _ = fmt.Fprintf(out, "%s: FAILED: %v\n", src.Name(), err)
 				continue
 			}
-			fmt.Fprintf(out, "%s: added=%d changed=%d removed=%d revived=%d\n",
+			_, _ = fmt.Fprintf(out, "%s: added=%d changed=%d removed=%d revived=%d\n",
 				src.Name(), len(d.Added), len(d.Changed), len(d.Removed), len(d.Revived))
 		}
 		if failed > 0 {
@@ -136,7 +132,7 @@ func runScan(args []string, stdout, stderr io.Writer) int {
 			return err
 		}
 		if err := a.Dispatcher().Flush(ctx); err != nil {
-			fmt.Fprintln(stderr, "deckard: notify:", err)
+			_, _ = fmt.Fprintln(stderr, "deckard: notify:", err)
 		}
 		st, err := a.Stats(ctx)
 		if err != nil {

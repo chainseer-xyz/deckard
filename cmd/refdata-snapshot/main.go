@@ -76,7 +76,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, client *h
 		return 2
 	}
 	if o.only != "all" && o.only != "takeover" && o.only != "shared" {
-		fmt.Fprintf(stderr, "refdata-snapshot: -only must be takeover, shared or all (got %q)\n", o.only)
+		_, _ = fmt.Fprintf(stderr, "refdata-snapshot: -only must be takeover, shared or all (got %q)\n", o.only)
 		return 2
 	}
 	f := &refdata.Fetcher{Client: client, Timeout: o.timeout, UserAgent: "deckard-refdata-snapshot"}
@@ -94,11 +94,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, client *h
 			errs = append(errs, fmt.Errorf("%s: %w", name, err))
 		case changed && o.check:
 			drift = true
-			fmt.Fprintf(stdout, "%s: %s is out of date (%d entries)\n", name, path, n)
+			_, _ = fmt.Fprintf(stdout, "%s: %s is out of date (%d entries)\n", name, path, n)
 		case changed:
-			fmt.Fprintf(stdout, "%s: wrote %s (%d entries)\n", name, path, n)
+			_, _ = fmt.Fprintf(stdout, "%s: wrote %s (%d entries)\n", name, path, n)
 		default:
-			fmt.Fprintf(stdout, "%s: %s unchanged (%d entries)\n", name, path, n)
+			_, _ = fmt.Fprintf(stdout, "%s: %s unchanged (%d entries)\n", name, path, n)
 		}
 	}
 	if o.only != "shared" {
@@ -108,7 +108,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, client *h
 		step("shared", countLines, func() (string, []byte, int, error) { return sharedSnapshot(ctx, f, o) })
 	}
 	if len(errs) > 0 {
-		fmt.Fprintln(stderr, "refdata-snapshot:", errors.Join(errs...))
+		_, _ = fmt.Fprintln(stderr, "refdata-snapshot:", errors.Join(errs...))
 		return 1
 	}
 	if drift {
