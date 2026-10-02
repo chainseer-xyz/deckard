@@ -38,7 +38,7 @@ func AlertName(check string) string {
 	b.WriteString("Deckard")
 	newWord := true
 	for _, r := range check {
-		if r > unicode.MaxASCII || !(unicode.IsLetter(r) || unicode.IsDigit(r)) {
+		if r > unicode.MaxASCII || (!unicode.IsLetter(r) && !unicode.IsDigit(r)) {
 			newWord = true
 			continue
 		}

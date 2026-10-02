@@ -269,7 +269,7 @@ func TestRedirectToHTTPNeverApplied(t *testing.T) {
 	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "a\nb\nc\nd\n") }))
 	defer plain.Close()
 	h := newHarness(t)
-	h.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, plain.URL, 302) })
+	h.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, plain.URL, http.StatusFound) })
 	r := h.runner(t, nil)
 	res := r.Refresh(context.Background())
 	if res.Outcome != OutcomeError || !errors.Is(res.Err, ErrNotHTTPS) {

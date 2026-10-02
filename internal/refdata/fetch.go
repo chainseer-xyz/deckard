@@ -143,7 +143,7 @@ func (f *Fetcher) once(ctx context.Context, c *http.Client, rawURL string, v Val
 	if err != nil {
 		return Fetched{}, !errors.Is(err, ErrNotHTTPS), err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	switch {
 	case resp.StatusCode == http.StatusNotModified:
 		return Fetched{NotModified: true, Validators: v}, false, nil

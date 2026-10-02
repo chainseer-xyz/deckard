@@ -200,7 +200,7 @@ func (n *Notifier) postWithRetry(ctx context.Context, endpoint string, body []by
 			select {
 			case <-ctx.Done():
 				t.Stop()
-				return fmt.Errorf("%w (last error: %v)", ctx.Err(), err)
+				return fmt.Errorf("%w (last error: %w)", ctx.Err(), err)
 			case <-t.C:
 			}
 		}
@@ -208,7 +208,7 @@ func (n *Notifier) postWithRetry(ctx context.Context, endpoint string, body []by
 			return nil
 		}
 		if ctx.Err() != nil {
-			return fmt.Errorf("%w (last error: %v)", ctx.Err(), err)
+			return fmt.Errorf("%w (last error: %w)", ctx.Err(), err)
 		}
 		if !retryable(err) {
 			return err
@@ -237,7 +237,7 @@ func (n *Notifier) post(ctx context.Context, endpoint string, body []byte) error
 		}
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 == 2 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 		return nil

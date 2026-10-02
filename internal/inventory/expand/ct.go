@@ -171,7 +171,7 @@ func (c *CT) once(ctx context.Context, u string) (body []byte, retry bool, err e
 	if err != nil {
 		return nil, true, fmt.Errorf("ct: request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
 		return nil, true, fmt.Errorf("ct: status %d", resp.StatusCode)
@@ -218,7 +218,7 @@ func validLabel(l string) bool {
 	}
 	for i := 0; i < len(l); i++ {
 		ch := l[i]
-		if !(ch >= 'a' && ch <= 'z' || ch >= '0' && ch <= '9' || ch == '-' || ch == '_') {
+		if (ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') && ch != '-' && ch != '_' {
 			return false
 		}
 	}

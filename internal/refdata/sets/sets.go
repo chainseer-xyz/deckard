@@ -119,7 +119,7 @@ func TakeoverDataset(apply func([]takeover.Fingerprint)) refdata.Dataset[Takeove
 		Count: func(s TakeoverSet) int { return s.Sourced },
 		Apply: func(s TakeoverSet) error { apply(s.Fingerprints); return nil },
 		Embedded: func() (TakeoverSet, error) {
-			return TakeoverSet{takeover.Default(), len(takeover.CommunitySnapshot())}, nil
+			return TakeoverSet{takeover.Default(), embeddedTakeoverSourced()}, nil
 		},
 		MinEntries: minRefreshedFingerprints,
 	}

@@ -96,7 +96,7 @@ func adminExec(ctx context.Context, sql string) error {
 	if err != nil {
 		return err
 	}
-	defer c.Close(ctx)
+	defer func() { _ = c.Close(ctx) }()
 	_, err = c.Exec(ctx, sql)
 	return err
 }

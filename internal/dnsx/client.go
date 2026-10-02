@@ -170,7 +170,7 @@ func (c *Client) Query(ctx context.Context, name string, qtype uint16) (*Respons
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return nil, fmt.Errorf("%w: %v", ErrUnavailable, lastErr)
+	return nil, fmt.Errorf("%w: %w", ErrUnavailable, lastErr)
 }
 
 func (c *Client) exchange(ctx context.Context, m *dns.Msg, srv string) (*Response, error) {

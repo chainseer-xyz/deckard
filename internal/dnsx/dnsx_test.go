@@ -38,7 +38,7 @@ func startServer(t *testing.T, h dns.HandlerFunc) *testServer {
 		if err == nil {
 			break
 		}
-		pc.Close()
+		_ = pc.Close()
 		pc = nil
 	}
 	if pc == nil {
@@ -59,11 +59,11 @@ func startServer(t *testing.T, h dns.HandlerFunc) *testServer {
 	started := make(chan struct{}, 2)
 	us := &dns.Server{PacketConn: pc, Handler: handler, NotifyStartedFunc: func() { started <- struct{}{} }}
 	ss := &dns.Server{Listener: ln, Handler: handler, NotifyStartedFunc: func() { started <- struct{}{} }}
-	go us.ActivateAndServe()
-	go ss.ActivateAndServe()
+	go func() { _ = us.ActivateAndServe() }()
+	go func() { _ = ss.ActivateAndServe() }()
 	<-started
 	<-started
-	t.Cleanup(func() { us.Shutdown(); ss.Shutdown() })
+	t.Cleanup(func() { _ = us.Shutdown(); _ = ss.Shutdown() })
 	return ts
 }
 
@@ -279,7 +279,7 @@ func TestTimeoutIsUnavailableAndUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pc.Close()
+	defer func() { _ = pc.Close() }()
 	c := New(WithServers(pc.LocalAddr().String()), WithTimeout(100*time.Millisecond), WithRetries(1))
 	_, err = c.Query(context.Background(), "x.example.com", dns.TypeA)
 	if !errors.Is(err, ErrUnavailable) {
@@ -293,7 +293,7 @@ func TestTimeoutIsUnavailableAndUnknown(t *testing.T) {
 
 func TestContextCancel(t *testing.T) {
 	pc, _ := net.ListenPacket("udp", "127.0.0.1:0")
-	defer pc.Close()
+	defer func() { _ = pc.Close() }()
 	c := New(WithServers(pc.LocalAddr().String()), WithTimeout(5*time.Second))
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -305,8 +305,7 @@ func TestContextCancel(t *testing.T) {
 }
 
 func TestTruncationFallsBackToTCP(t *testing.T) {
-	var ts *testServer
-	ts = startServer(t, func(w dns.ResponseWriter, r *dns.Msg) {
+	ts := startServer(t, func(w dns.ResponseWriter, r *dns.Msg) {
 		m := new(dns.Msg)
 		m.SetReply(r)
 		if _, ok := w.RemoteAddr().(*net.TCPAddr); !ok {

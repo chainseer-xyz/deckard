@@ -127,7 +127,7 @@ func transfer(ctx context.Context, zone, ns, addr string, dial DialFunc) AXFRAtt
 		at.Outcome, at.Note = AXFRSkipped, err.Error()
 		return at
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	dl := time.Now().Add(axfrTimeout)
 	if d, ok := ctx.Deadline(); ok && d.Before(dl) {
 		dl = d

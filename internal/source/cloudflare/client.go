@@ -104,7 +104,8 @@ func (c *client) get(ctx context.Context, path string, q url.Values) (*envelope,
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		if attempt > 0 {
 			wait := c.backoff << (attempt - 1)
-			if ra, ok := lastErr.(*retryAfterError); ok && ra.wait > 0 {
+			var ra *retryAfterError
+			if errors.As(lastErr, &ra) && ra.wait > 0 {
 				wait = ra.wait
 			}
 			if wait > maxRetryWait {
@@ -165,7 +166,7 @@ func (c *client) do(ctx context.Context, u, path string) (*envelope, error) {
 		// anything token-like.
 		return nil, &retryAfterError{err: fmt.Errorf("cloudflare: GET %s: %s", path, c.redact(err.Error()))}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 	if err != nil {
 		if ctx.Err() != nil {
