@@ -35,8 +35,9 @@ rather than at the next full cadence.
   `nuclei.extra_templates_dirs` are validated independently; a bad pack is skipped and logged.
 - Staleness metric: `deckard_nuclei_templates_age_seconds`, compared with
   `deckard_nuclei_templates_max_age_warn_seconds` (`nuclei.update.max_age_warn`,
-  default 72h) by the `DeckardNucleiTemplatesStale` rule. The `DeckardNucleiCheckStale` rule fires when no
-  clean nuclei run has completed for six hours; tune it if the active cadence is intentionally slower.
+  default 72h) by the `DeckardNucleiTemplatesStale` rule. The `DeckardNucleiCheckStale` rule fires when a
+  target-bearing process was attempted recently but no clean nuclei run has completed for six hours. It
+  stays quiet when the deployment has no eligible targets; tune it if the active cadence is intentionally slower.
 
 ### 2. Reference data (`refdata.*`)
 
