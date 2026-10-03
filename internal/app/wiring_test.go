@@ -80,7 +80,8 @@ func TestQueueWorkersFromConfig(t *testing.T) {
 	cfg.Scheduling.QueueWorkers["active"] = 9
 	got := queueWorkers(cfg)
 	if got[engine.QueueActive] != 9 || got[engine.QueuePassive] != 10 || got[engine.QueueExpand] != 1 ||
-		got[engine.QueueSync] != 2 || got[engine.QueueIntrusive] != 1 || got[engine.QueueDefault] != 2 {
+		got[engine.QueueSync] != 2 || got[engine.QueueIntrusive] != 1 || got[engine.QueueDefault] != 2 ||
+		got[engine.QueueIntel] != 8 {
 		t.Fatalf("queue workers: %v", got)
 	}
 }

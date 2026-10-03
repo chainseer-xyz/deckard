@@ -97,6 +97,10 @@ func (*Check) Name() string                   { return Name }
 func (*Check) Tier() model.Tier               { return model.TierPassive }
 func (*Check) DefaultInterval() time.Duration { return DefaultInterval }
 
+// SlowLookups: every run waits on the rate-limited Wayback CDX API (about half
+// a minute per asset), so it runs in the intel queue.
+func (*Check) SlowLookups() bool { return true }
+
 // Applies matches owned hostnames (IP addresses are not archived by name).
 func (*Check) Applies(a model.Asset) bool {
 	return a.Kind == model.KindHostname && a.Scope == model.ScopeOwned

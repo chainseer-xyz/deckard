@@ -31,6 +31,8 @@ type options struct {
 	vi           vulnintelOpts
 	// reclaimSpread staggers reclaimed jobs (see WithReclaimSpread).
 	reclaimSpread time.Duration
+	// moveBatch bounds the rows one move of slow-lookup jobs touches.
+	moveBatch int
 }
 
 // Option customises an Engine.
@@ -39,8 +41,18 @@ type Option func(*options)
 // WithRoles overrides the roles (default: config server.roles, else all).
 func WithRoles(roles ...string) Option { return func(o *options) { o.roles = roles } }
 
-// WithQueueWorkers sets max concurrent jobs per queue (sync, passive, active,
-// intrusive, default); unspecified queues keep their defaults.
+// DefaultQueueWorkers is the max concurrent jobs per queue when none is
+// configured. Every queue the engine runs has an entry: it is the engine's
+// list of queues. A fresh map each call.
+func DefaultQueueWorkers() map[string]int {
+	return map[string]int{
+		QueueSync: 2, QueuePassive: 10, QueueActive: 4, QueueIntrusive: 1,
+		QueueIntel: 8, QueueExpand: 1, QueueMaintenance: 1, QueueDefault: 2,
+	}
+}
+
+// WithQueueWorkers sets max concurrent jobs per queue (see DefaultQueueWorkers);
+// unspecified queues keep their defaults.
 func WithQueueWorkers(m map[string]int) Option {
 	return func(o *options) {
 		for k, v := range m {
@@ -119,13 +131,14 @@ func New(d Deps, opts ...Option) (*Engine, error) {
 		return nil, errors.New("engine: Findings is required")
 	}
 	o := options{
-		queueWorkers: map[string]int{QueueSync: 2, QueuePassive: 10, QueueActive: 4, QueueIntrusive: 1, QueueExpand: 1, QueueMaintenance: 1, QueueDefault: 2},
+		queueWorkers: DefaultQueueWorkers(),
 		tick:         30 * time.Second,
 		gaugeEvery:   15 * time.Second,
 		syncJitter:   0.1,
 		// A crashed instance's jobs come back together; retrying all of
 		// them in the same second is what OOMKilled the replacement pod.
 		reclaimSpread: 60 * time.Second,
+		moveBatch:     moveSlowBatch,
 	}
 	for _, f := range opts {
 		f(&o)
@@ -170,7 +183,7 @@ func New(d Deps, opts ...Option) (*Engine, error) {
 			return nil, err
 		}
 		e.client = c
-		e.r.q = riverQueue{c}
+		e.r.q = riverQueue{c: c, route: e.r.scanQueue}
 	}
 	return e, nil
 }
@@ -340,6 +353,12 @@ func (e *Engine) Start(ctx context.Context) error {
 	// belongs to a registered, heartbeating instance.
 	if err := e.heartbeat(ctx); err != nil {
 		return fmt.Errorf("engine: start: %w", err)
+	}
+	// Before River fetches anything, so this instance does not start the
+	// pending slow-lookup jobs of an older version in the wrong queue. The
+	// instance loop repeats the move; a failure here is not fatal.
+	if _, err := e.moveSlowJobs(ctx); err != nil {
+		e.r.log.Warn("move slow-lookup scan jobs", "err", err)
 	}
 	if err := e.client.Start(ctx); err != nil {
 		e.deregisterQuietly()

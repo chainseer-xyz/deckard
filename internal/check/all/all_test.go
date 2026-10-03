@@ -1,8 +1,10 @@
 package all
 
 import (
+	"slices"
 	"testing"
 
+	"github.com/chainseer-xyz/deckard/internal/check"
 	"github.com/chainseer-xyz/deckard/internal/check/registry"
 	"github.com/chainseer-xyz/deckard/internal/model"
 )
@@ -24,5 +26,22 @@ func TestRegisterAllPassive(t *testing.T) {
 	}
 	if got := len(r.ForTier(model.TierPassive)); got != len(want) {
 		t.Errorf("ForTier passive = %d", got)
+	}
+}
+
+// TestSlowLookupChecks pins which built-in checks run in the intel queue. The
+// fast local DNS checks (the takeover signal) must never be among them; adding
+// a check that waits on a remote service means adding it here on purpose.
+func TestSlowLookupChecks(t *testing.T) {
+	want := []string{"cloud.bucket", "domain.expiry", "domain.lookalike", "intel.internetdb", "web.history"}
+	var got []string
+	for _, c := range Checks(nil) {
+		if s, ok := c.(check.SlowLookups); ok && s.SlowLookups() {
+			got = append(got, c.Name())
+		}
+	}
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Errorf("slow-lookup checks = %v, want %v", got, want)
 	}
 }

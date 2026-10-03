@@ -35,6 +35,7 @@ type runner struct {
 	now      func() time.Time
 	q        queue
 	checks   []check.Check
+	slow     map[string]bool // names of checks that implement check.SlowLookups
 	sources  map[string]source.Source
 	limiters *limiterSet
 	sems     *keyedSem
@@ -54,6 +55,7 @@ func newRunner(d Deps) *runner {
 		rec:      d.Recorder,
 		now:      d.Now,
 		checks:   d.Checks,
+		slow:     slowChecks(d.Checks),
 		sources:  map[string]source.Source{},
 		limiters: newLimiterSet(),
 		sems:     newKeyedSem(),
@@ -75,6 +77,26 @@ func newRunner(d Deps) *runner {
 		r.sources[s.Name()] = s
 	}
 	return r
+}
+
+// slowChecks names the checks that declare check.SlowLookups.
+func slowChecks(checks []check.Check) map[string]bool {
+	out := map[string]bool{}
+	for _, c := range checks {
+		if s, ok := c.(check.SlowLookups); ok && s.SlowLookups() {
+			out[c.Name()] = true
+		}
+	}
+	return out
+}
+
+// scanQueue is the River queue for a scan job. It is decided here, when the
+// job is inserted, and stays with the row: River retries and reclaim of
+// orphaned jobs only change its state, so a job always comes back to the queue
+// it was routed to. A job that names no check runs every check of its tier and
+// follows the tier.
+func (r *runner) scanQueue(j scanJob) string {
+	return queueForScan(j.Tier, j.Check != "" && r.slow[j.Check])
 }
 
 // withQueue returns a shallow copy that enqueues to q.
