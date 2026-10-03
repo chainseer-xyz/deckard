@@ -400,6 +400,41 @@ func TestOutOfScopeTransitionResolvesFindingsButPartialSyncDoesNot(t *testing.T)
 	}
 }
 
+func TestPartialSyncHealsFindingsAlreadyOutOfScope(t *testing.T) {
+	ctx := context.Background()
+	st := pgtest.New(t)
+	cls := &fakeCls{sharedPfx: pfx("198.51.100.0/24")}
+	svc := inventory.New(st, cls, quiet)
+	src := &fakeSrc{name: "static", typ: "static", d: &source.Discovery{
+		Partial: true, PartialReasons: []string{"source unavailable"},
+		Assets: []model.AssetInput{ip("198.51.100.7", map[string]any{"origin": true})},
+	}}
+	if _, err := svc.Sync(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+	a, err := st.GetAssetByKey(ctx, model.KindIP, "198.51.100.7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Scope != model.ScopeShared {
+		t.Fatalf("precondition: asset scope = %s, want shared", a.Scope)
+	}
+	proc := finding.NewProcessor(st, finding.ProcessorConfig{ResolveAfter: 1, StableAfter: 1}, quiet)
+	if _, err := proc.Process(ctx, *a, "intel.internetdb", &check.Result{Findings: []model.FindingInput{{
+		Check: "intel.internetdb", Key: "port:443", Severity: model.SeverityMedium, Title: "stale finding",
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.Sync(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+	fs, _, err := st.ListFindings(ctx, store.FindingFilter{AssetID: a.ID, Check: "intel.internetdb"})
+	if err != nil || len(fs) != 1 || fs[0].Status != model.StatusResolved {
+		t.Fatalf("partial out-of-scope sync findings = %+v err=%v, want resolved", fs, err)
+	}
+}
+
 func TestOwnedPrefixCIDRKey(t *testing.T) {
 	ctx := context.Background()
 	st := pgtest.New(t)

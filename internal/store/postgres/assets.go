@@ -60,6 +60,13 @@ func (s *Store) applySnapshot(ctx context.Context, source string, assets []store
 		if err := upsertRelations(ctx, tx, rels); err != nil {
 			return err
 		}
+		// Heal findings left behind by older versions that classified an asset
+		// out of scope without resolving its findings. Partial snapshots retain
+		// earlier ownership registrations before classification, so an asset that
+		// is still owned cannot enter this set just because discovery was partial.
+		if err := resolveOutOfScopeFindings(ctx, tx, seen, now); err != nil {
+			return err
+		}
 		if !remove {
 			return nil
 		}
@@ -222,10 +229,42 @@ func removeAssets(ctx context.Context, tx pgx.Tx, in []model.Asset, now time.Tim
 	return append(removed, cascade...), nil
 }
 
+// resolveOutOfScopeFindings resolves findings for every seen asset that the
+// completed classification step says is not owned. The EXISTS clause keeps the
+// common no-finding path cheap and makes this an idempotent legacy-state repair.
+func resolveOutOfScopeFindings(ctx context.Context, tx pgx.Tx, seen []int64, now time.Time) error {
+	if len(seen) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT a.id FROM assets a
+		WHERE a.id = ANY($1::bigint[]) AND a.scope <> 'owned'
+		AND EXISTS (SELECT 1 FROM findings f WHERE f.asset_id = a.id AND f.status IN ('open', 'acknowledged'))
+		ORDER BY a.id`, seen)
+	if err != nil {
+		return err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := resolveFindings(ctx, tx, ids, now); err != nil {
+		return fmt.Errorf("resolve out-of-scope findings: %w", err)
+	}
+	return nil
+}
+
 // resolveFindings resolves open findings when an asset is no longer in the
-// operator's owned scope. A partial source sync cannot cause this transition,
-// because it retains the previous ownership registrations and never calls this
-// with an incomplete asset classification.
+// operator's owned scope. Snapshot reconciliation also calls this for assets
+// that older versions had already classified out of scope.
 func resolveFindings(ctx context.Context, tx pgx.Tx, ids []int64, now time.Time) error {
 	if len(ids) == 0 {
 		return nil
