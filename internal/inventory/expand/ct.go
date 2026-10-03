@@ -180,7 +180,11 @@ func (c *CT) once(ctx context.Context, u string) (body []byte, retry bool, err e
 		return nil, true, &UnavailableError{fmt.Errorf("ct: request: %w", err)}
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+	// crt.sh answers 200 with an empty list for a zone it has no certificates for;
+	// in practice it also returns 404 and 408 when it is overloaded or its backend
+	// is down, so those mean "try again later", not "this zone is unknown".
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusNotFound ||
+		resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode >= 500 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
 		return nil, true, &UnavailableError{fmt.Errorf("ct: status %d", resp.StatusCode)}
 	}

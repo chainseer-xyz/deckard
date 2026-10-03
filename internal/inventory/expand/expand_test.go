@@ -81,7 +81,9 @@ func TestCTFailures(t *testing.T) {
 		{"always 503 exhausts retries", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(503) }, 3, "status 503", true},
 		{"502 from crt.sh", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(502) }, 3, "ct: status 502", true},
 		{"429 retried", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(429) }, 3, "status 429", true},
-		{"404 not retried", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(404) }, 1, "unexpected status 404", false},
+		{"404 from an overloaded crt.sh is retried", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(404) }, 3, "ct: status 404", true},
+		{"408 is retried", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(408) }, 3, "ct: status 408", true},
+		{"403 not retried", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(403) }, 1, "unexpected status 403", false},
 		{"html body not retried", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("<html>busy</html>")) }, 1, "decode", false},
 	}
 	for _, tc := range tests {
