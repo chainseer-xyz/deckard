@@ -276,6 +276,10 @@ type AlertmanagerConfig struct {
 	URLs    []string      `koanf:"urls"`
 	Resend  time.Duration `koanf:"resend"`
 	Timeout time.Duration `koanf:"timeout"`
+	// MinSeverity is the lowest finding severity sent to Alertmanager
+	// (info|low|medium|high|critical). Findings below it are still stored and
+	// shown; they are only not notified.
+	MinSeverity string `koanf:"min_severity"`
 	// BasicAuth credentials, optional.
 	Username    string `koanf:"username"`
 	PasswordEnv string `koanf:"password_env"`
@@ -385,6 +389,7 @@ func Defaults() map[string]any {
 		"findings.resolve_after":                  2,
 		"notify.alertmanager.resend":              "4m",
 		"notify.alertmanager.timeout":             "10s",
+		"notify.alertmanager.min_severity":        "info",
 		"vulnintel.enabled":                       true,
 		"vulnintel.interval":                      "6h",
 		"vulnintel.dir":                           "/var/lib/deckard/vulnintel",
@@ -511,6 +516,7 @@ var (
 	validLevels      = map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
 	validTiers       = map[string]bool{"passive": true, "active": true, "intrusive": true}
 	validAuthModes   = map[string]bool{"none": true, "token": true, "oidc": true}
+	validSeverities  = map[string]bool{"info": true, "low": true, "medium": true, "high": true, "critical": true}
 )
 
 // Validate checks the configuration and returns all problems joined.
@@ -592,6 +598,9 @@ func (c *Config) Validate() error {
 		if _, _, err := CheckOnNewAsset(opts); err != nil {
 			add("checks.%s.on_new_asset: %v", name, err)
 		}
+	}
+	if !validSeverities[c.Notify.Alertmanager.MinSeverity] {
+		add("notify.alertmanager.min_severity %q: must be info|low|medium|high|critical", c.Notify.Alertmanager.MinSeverity)
 	}
 	c.validateNuclei(add)
 	c.validateSources(add)

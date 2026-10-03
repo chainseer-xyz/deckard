@@ -53,6 +53,20 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Profiles.Intrusive.OnInventoryChange {
 		t.Error("intrusive.on_inventory_change must default to false")
 	}
+	if cfg.Notify.Alertmanager.MinSeverity != "info" {
+		t.Errorf("notify.alertmanager.min_severity must default to info (notify everything), got %q", cfg.Notify.Alertmanager.MinSeverity)
+	}
+}
+
+func TestNotifyMinSeverityFromFileAndEnv(t *testing.T) {
+	cfg, err := Load(writeCfg(t, "notify: {alertmanager: {min_severity: medium}}"), nil)
+	if err != nil || cfg.Notify.Alertmanager.MinSeverity != "medium" {
+		t.Fatalf("file: %v %q", err, cfg.Notify.Alertmanager.MinSeverity)
+	}
+	cfg, err = Load("", []string{"DECKARD_NOTIFY__ALERTMANAGER__MIN_SEVERITY=high"})
+	if err != nil || cfg.Notify.Alertmanager.MinSeverity != "high" {
+		t.Fatalf("env: %v", err)
+	}
 }
 
 func TestCheckOptions(t *testing.T) {
@@ -139,6 +153,8 @@ func TestValidateErrors(t *testing.T) {
 		{"vulnintel epss out of range", "vulnintel: {epss_high: 1.5}", "vulnintel.epss_high"},
 		{"vulnintel epss order", "vulnintel: {epss_high: 0.2, epss_medium: 0.5}", "vulnintel.epss_medium"},
 		{"bad on_new_asset", "checks: {x: {on_new_asset: maybe}}", "on_new_asset"},
+		{"bad notify floor", "notify: {alertmanager: {min_severity: urgent}}", "notify.alertmanager.min_severity \"urgent\": must be info|low|medium|high|critical"},
+		{"empty notify floor", "notify: {alertmanager: {min_severity: \"\"}}", "notify.alertmanager.min_severity"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

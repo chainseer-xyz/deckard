@@ -78,6 +78,11 @@ config:
   notify:
     alertmanager:
       urls: []
+      # Lowest severity sent to Alertmanager (info|low|medium|high|critical).
+      # Findings below it stay in the store, UI, API and metrics; only the
+      # alert (and its resolution notice) is not sent. Unlike
+      # checks.http.headers.min_severity, which drops findings entirely.
+      min_severity: info
   auth:
     mode: token
     token_env: DECKARD_ADMIN_TOKEN

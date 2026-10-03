@@ -277,7 +277,7 @@ ignored):
 
 | Check | Key | Default | Effect |
 |---|---|---|---|
-| `http.headers` | `min_severity` | `info` | Drop findings below this severity (`info`, `low`, `medium`, ...). Set `low` to silence the info-level noise such as a missing `Referrer-Policy`. The security-header set is evaluated on `https://` URLs only; `http://` URLs are checked only for "does not redirect to HTTPS". |
+| `http.headers` | `min_severity` | `info` | Drop findings below this severity (`info`, `low`, `medium`, ...). Set `low` to silence the info-level noise such as a missing `Referrer-Policy`. Dropped findings are never stored; to keep them visible but not alerted on, use `notify.alertmanager.min_severity` instead. The security-header set is evaluated on `https://` URLs only; `http://` URLs are checked only for "does not redirect to HTTPS". |
 | `http.headers` | `required_headers`, `hsts_min_age`, `timeout_seconds` | see check docs | Which header classes to require and the minimum HSTS max-age. |
 | `dns.hygiene` | `expects_mail` | `false` | Force mail treatment of a zone. Without it, a zone with MX records gets medium for a missing DMARC/SPF record and a zone without MX (parked) gets low, with a null-sender recommendation (`v=spf1 -all`, `v=DMARC1; p=reject;`). |
 | `dns.takeover` | `timeout_seconds` | `10` | Per-request timeout. Before reporting, the check handshakes with the owned hostname over HTTPS: a certificate valid for the host that is not the provider's default certificate suppresses the finding. |
@@ -461,8 +461,27 @@ Discord, ntfy, email or PagerDuty there. See `deploy/examples/alertmanager.yml`.
 
 ```yaml
 notify:
-  alertmanager: { urls: ["http://alertmanager:9093"], resend: 4m, timeout: 10s }
+  alertmanager:
+    urls: ["http://alertmanager:9093"]
+    resend: 4m
+    timeout: 10s
+    min_severity: info   # info|low|medium|high|critical
 ```
+
+| Key | Default | Description |
+|---|---|---|
+| `notify.alertmanager.urls` | | Alertmanager base URLs (deckard posts to `/api/v2/alerts`). Credentials in the URL are redacted from logs |
+| `notify.alertmanager.resend` | `4m` | How often every open finding is re-asserted |
+| `notify.alertmanager.timeout` | `10s` | Per-request timeout |
+| `notify.alertmanager.min_severity` | `info` | Lowest severity sent to Alertmanager. Open findings below it are not sent, and neither are their resolution notices (a notice is sent exactly when the finding's severity is at or above the floor, so nothing that was never sent gets "resolved"). Everything below the floor is still stored, shown in the UI and API, and counted in `deckard_findings_open`. The default sends everything |
+
+`min_severity` only silences notification. It differs from the per-check
+`checks.http.headers.min_severity`, which drops the findings entirely, so they
+never reach the store, the UI or the metrics. Use the check option to stop
+recording noise you never want to see, and this one to keep low-severity
+findings visible in deckard without routing them to Slack. A finding whose
+severity is later raised above the floor (for example by KEV enrichment) is
+sent from the next notification cycle on.
 
 ## Auth
 
