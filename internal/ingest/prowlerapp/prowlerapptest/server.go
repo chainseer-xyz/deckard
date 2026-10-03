@@ -90,6 +90,12 @@ type Server struct {
 	// Intercept, if set, is consulted first: n counts the requests so far to
 	// the same path (1-based). A nil result lets the normal handler run.
 	Intercept func(r *http.Request, n int) *Reply
+	// CountDelta is added to the announced meta.pagination.count (a server
+	// whose count disagrees with its pages).
+	CountDelta int
+	// ShiftPages serves page n's items for page n+1 (the result set shifting
+	// while a client pages through it), so items repeat.
+	ShiftPages bool
 	// PlantSecrets adds raw_result and resource tags carrying sentinel values.
 	PlantSecrets bool
 
@@ -114,6 +120,31 @@ func New(t testing.TB) *Server {
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
 	t.Cleanup(s.Close)
 	return s
+}
+
+type data struct {
+	Providers []Provider
+	Scans     []Scan
+	Findings  []Finding
+	Resources []Resource
+}
+
+// data snapshots the mutable data (handlers run on their own goroutines).
+func (s *Server) data() data {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return data{
+		Providers: append([]Provider(nil), s.Providers...), Scans: append([]Scan(nil), s.Scans...),
+		Findings: append([]Finding(nil), s.Findings...), Resources: append([]Resource(nil), s.Resources...),
+	}
+}
+
+// Mutate changes the served data safely while the server is running, for
+// example to complete a new scan in the middle of a run.
+func (s *Server) Mutate(fn func(s *Server)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fn(s)
 }
 
 // Requests returns "METHOD path?query" of every request served, in order.
@@ -249,7 +280,11 @@ func (s *Server) page(r *http.Request, total int) (lo, hi int, links, meta map[s
 		num = 1
 	}
 	pages := (total + size - 1) / size
-	lo = min((num-1)*size, total)
+	served := num
+	if s.ShiftPages && num > 1 {
+		served = num - 1
+	}
+	lo = min((served-1)*size, total)
 	hi = min(lo+size, total)
 	link := func(n int) any {
 		v := url.Values{}
@@ -266,14 +301,15 @@ func (s *Server) page(r *http.Request, total int) (lo, hi int, links, meta map[s
 	if num > 1 {
 		links["prev"] = link(num - 1)
 	}
-	meta = map[string]any{"pagination": map[string]any{"page": num, "pages": pages, "count": total}}
+	meta = map[string]any{"pagination": map[string]any{"page": num, "pages": pages, "count": total + s.CountDelta}}
 	return lo, hi, links, meta
 }
 
 func (s *Server) providers(w http.ResponseWriter, r *http.Request) {
-	lo, hi, links, meta := s.page(r, len(s.Providers))
+	d := s.data()
+	lo, hi, links, meta := s.page(r, len(d.Providers))
 	data := []map[string]any{}
-	for _, p := range s.Providers[lo:hi] {
+	for _, p := range d.Providers[lo:hi] {
 		attrs := map[string]any{"provider": p.Type, "uid": p.UID, "alias": nil}
 		if !p.OmitConnection {
 			attrs["connection"] = map[string]any{"connected": p.Connected, "last_checked_at": "2026-10-03T06:00:00Z"}
@@ -284,9 +320,10 @@ func (s *Server) providers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) scans(w http.ResponseWriter, r *http.Request) {
+	d := s.data()
 	prov := r.URL.Query().Get("filter[provider]")
 	var scans []Scan
-	for _, sc := range s.Scans {
+	for _, sc := range d.Scans {
 		if prov == "" || sc.ProviderID == prov {
 			scans = append(scans, sc)
 		}
@@ -310,6 +347,7 @@ func (s *Server) scans(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
+	d := s.data()
 	q := r.URL.Query()
 	prov := q.Get("filter[provider]")
 	sevs := map[string]bool{}
@@ -319,7 +357,7 @@ func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var fs []Finding
-	for _, f := range s.Findings {
+	for _, f := range d.Findings {
 		switch {
 		case prov != "" && f.ProviderID != prov:
 			continue
@@ -340,7 +378,7 @@ func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
 	})
 	lo, hi, links, meta := s.page(r, len(fs))
 	byID := map[string]Resource{}
-	for _, res := range s.Resources {
+	for _, res := range d.Resources {
 		byID[res.ID] = res
 	}
 	include := strings.Contains(q.Get("include"), "resources")
