@@ -89,7 +89,8 @@ database:
     storage:
       size: 5Gi
       storageClass: ""
-    # -- Extra spec fields merged into the Cluster (e.g. backup, monitoring).
+    # -- Extra spec fields added to the Cluster (e.g. backup, monitoring). A
+    # `bootstrap` or `storage` key replaces the default one (e.g. bootstrap.recovery).
     extraSpec: {}
   # -- Use an existing Secret holding the connection URL when cnpg is disabled.
   existingSecret: ""

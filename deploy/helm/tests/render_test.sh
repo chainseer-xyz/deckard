@@ -24,6 +24,17 @@ check "read-only rootfs"             "readOnlyRootFilesystem: true" "$cnpg"
 absent "no cpu limit by default"     "cpu: " "$(print -r -- "$cnpg" | awk "/limits:/{f=1} f&&/cpu/{print} /requests:/{f=0}")"
 check "roles env"                    "api,scheduler,worker" "$cnpg"
 
+# extraSpec may replace bootstrap (e.g. recovery from a backup) or storage:
+# appending them after the defaults would render duplicate mapping keys.
+cnpgrec=$(helm template t deckard --set database.cnpg.enabled=true \
+  --set database.cnpg.extraSpec.bootstrap.recovery.source=old \
+  --set database.cnpg.extraSpec.storage.size=20Gi)
+if [[ $(print -r -- "$cnpgrec" | grep -c "^  bootstrap:") == 1 ]]; then print "ok   cnpg extraSpec bootstrap replaces the default"; else print "FAIL cnpg extraSpec bootstrap duplicated"; fail=1; fi
+if [[ $(print -r -- "$cnpgrec" | grep -c "^  storage:") == 1 ]]; then print "ok   cnpg extraSpec storage replaces the default"; else print "FAIL cnpg extraSpec storage duplicated"; fail=1; fi
+check  "cnpg recovery bootstrap kept"  "source: old" "$cnpgrec"
+absent "cnpg no initdb with recovery"  "initdb:" "$cnpgrec"
+check  "cnpg default bootstrap"        "initdb:" "$cnpg"
+
 ext=$(helm template t deckard --set database.existingSecret=pg --set database.existingSecretKey=dsn)
 absent "no cnpg when disabled"       "postgresql.cnpg.io/v1" "$ext"
 check "external secret key"          "key: dsn" "$ext"
