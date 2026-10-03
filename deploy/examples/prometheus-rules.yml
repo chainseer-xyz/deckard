@@ -98,6 +98,23 @@ groups:
           summary: "deckard has not sent a successful heartbeat for 30 minutes"
           description: "Results are error (the ping failed: check egress to the heartbeat URL) or unhealthy (withheld: the database is unreachable or no check completed within two heartbeat intervals). See the deckard logs for the reason."
 
+      # A reclaim means an instance died without a graceful stop (OOMKilled,
+      # SIGKILL, node loss) while running jobs. The jobs recover by themselves;
+      # the crash deserves a look. The series exist at 0 from engine start, but
+      # a replacement pod reclaims at startup, possibly before its first scrape:
+      # increase() cannot see a series' first value, so the second branch
+      # catches a series that is new within the hour and already non-zero.
+      - alert: DeckardJobsReclaimed
+        expr: |
+          sum by (kind) (increase(deckard_jobs_reclaimed_total[1h])) > 0
+            or
+          sum by (kind) (deckard_jobs_reclaimed_total unless deckard_jobs_reclaimed_total offset 1h) > 0
+        labels:
+          severity: medium
+        annotations:
+          summary: "deckard reclaimed {{ $value | humanize }} running {{ $labels.kind }} job(s) from a dead instance"
+          description: "An instance stopped heartbeating while running jobs; a peer moved them back to the queue. Look for an OOMKill or a forced restart (kubectl get pods, kubectl describe pod: Last State). See docs/operations.md, Crashes, restarts and orphaned jobs."
+
       - alert: DeckardDown
         expr: absent(up{job="deckard"} == 1)
         for: 5m

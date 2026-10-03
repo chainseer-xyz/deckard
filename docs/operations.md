@@ -234,6 +234,7 @@ ships ready-made rules (all metrics below exist in the binary):
 | `DeckardVulnintelRefreshFailing` / `DeckardVulnintelNeverLoaded` | 3+ failed refreshes in 6h / empty KEV catalog | tunable |
 | `DeckardKnownExploitedOpen` | `deckard_findings_kev_open` > 0 | informational |
 | `DeckardHeartbeatFailing` | heartbeat attempts in the last 30m were all `error` or `unhealthy` | only exists when `notify.heartbeat.url` is set |
+| `DeckardJobsReclaimed` | `deckard_jobs_reclaimed_total` increased in the last hour (or a pod that started within the hour reclaimed before its first scrape) | an instance died while running jobs; see [Crashes, restarts and orphaned jobs](#crashes-restarts-and-orphaned-jobs) |
 
 Air-gapped installs (`*.enabled: false`) never produce the refdata, vulnintel or
 template-age series, so those rules stay silent; drop them or alert on your own
@@ -264,10 +265,83 @@ snapshot refresh.
 | `deckard_checks_skipped_total` | `check`, `tier`, `reason` = shared_destination, external_destination, private_destination | checks skipped before touching the network (see [Skipped checks](#skipped-checks)); neither runs nor errors |
 | `deckard_scope_refusals_total` | `tier`, `class`, `reason` | every scope-guard refusal, including those logged at DEBUG (see [Scope refusals](#scope-refusals)) |
 | `deckard_heartbeat_total` | `result` = ok, error, unhealthy | external heartbeat attempts; absent unless `notify.heartbeat.url` is set |
+| `deckard_jobs_reclaimed_total` | `kind` (job kind) | running jobs taken back from an instance that died; 0 for every kind from engine start |
 
 Only the heartbeat gets an example alert (`DeckardHeartbeatFailing`): skips
 and expected refusals are steady by design on a proxied estate, so alerting on
 their volume would be noise. Watch them on a dashboard instead.
+
+## Crashes, restarts and orphaned jobs
+
+A job is `running` in `river_job` from the moment an instance fetches it
+until that instance records the result. If the process dies first (OOMKilled,
+SIGKILL at the end of the pod's grace period, node loss) the row stays
+`running`. Jobs are unique per arguments, so an orphaned `sync_source` or
+`update_templates` row also blocks the next run of that job: the source stops
+syncing (`DeckardSourceSyncStale`) until the row is cleared. deckard clears
+such rows in three layers.
+
+**Instance heartbeat and reclaim (about a minute).** Every instance with the
+`worker` or `scheduler` role registers its River client id (`<host>_<start
+time>`, what River records in `river_job.attempted_by`) in the
+`deckard_instances` table when it starts, refreshes `seen_at` every 10s and
+deletes its row on a clean stop. Each such instance runs one reclaim statement
+at startup and every 30s: running jobs whose latest attempt belongs to a
+registered instance not seen for 60s are moved back exactly as River's own
+rescuer would (retryable, or discarded when out of attempts, or cancelled when
+a cancel was requested; one error entry `Running job reclaimed from dead
+instance ...` is appended and no attempt is used). Retried jobs are due at a
+random point in the next 60s rather than all at once, so a replacement pod is
+not hit by the dead pod's whole workload in the same second. Each batch logs
+one WARN line with the count per kind and increments
+`deckard_jobs_reclaimed_total{kind}` (alert: `DeckardJobsReclaimed`).
+
+What is never touched: jobs of an instance with a fresh heartbeat, and jobs of
+a client that never registered (an older deckard during a rolling update);
+those fall to the next layer. Staleness is judged by the database clock, so
+clock skew between nodes does not matter.
+
+**River's rescue (backstop, 35 minutes).** River rescues any job running
+longer than `RescueStuckJobsAfter`, set to the longest job timeout (30m, scans)
+plus 5 minutes. It must exceed every job timeout, or River would re-run slow
+but healthy jobs; it is derived from the workers' timeouts in code.
+
+**Graceful shutdown (no orphans at all).** On SIGTERM deckard stops fetching,
+gives in-flight jobs 30s to finish, then cancels the rest and waits up to
+about 12s more for River to record them as retryable and for the instance to
+deregister. The chart's `terminationGracePeriodSeconds` (default 60) must
+cover that; the Kubernetes default of 30s does not. The binary refuses to
+build if the drain plus cancel window no longer fits 60s, and a test ties that
+to the chart default: raise both together. A pod killed before the cancel
+completes falls back to the reclaim above.
+
+To see who holds the running jobs (read-only):
+
+```sql
+SELECT j.id, j.kind, j.queue, j.attempt, j.max_attempts, j.attempted_at,
+       j.attempted_by[array_upper(j.attempted_by, 1)] AS owner,
+       now() - i.seen_at AS owner_silent_for     -- NULL: owner never registered
+FROM river_job j
+LEFT JOIN deckard_instances i
+       ON i.client_id = j.attempted_by[array_upper(j.attempted_by, 1)]
+WHERE j.state = 'running'
+ORDER BY j.attempted_at;
+```
+
+`owner_silent_for` above a minute means the next reclaim (within 30s) takes
+the job back; NULL means River's rescue does, 35 minutes after
+`attempted_at`. Jobs reclaimed recently carry the reclaim message as their
+last error:
+
+```sql
+SELECT id, kind, state, scheduled_at, errors[array_upper(errors, 1)] ->> 'error' AS last_error
+FROM river_job
+WHERE errors[array_upper(errors, 1)] ->> 'error' LIKE 'Running job reclaimed from dead instance%'
+ORDER BY id DESC LIMIT 50;
+```
+
+Do not edit `river_job` by hand: a job that looks stuck is either about to be
+reclaimed or still running on a live instance.
 
 ## Runbooks
 
