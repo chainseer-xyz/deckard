@@ -61,13 +61,13 @@ func ipAsset(ip string) model.Asset {
 // net.ports baseline holding own (nil own = no baseline).
 func run(t *testing.T, f check.Intel, own any, cfg map[string]any) *check.Result {
 	t.Helper()
-	tg := checktest.NewTarget(ipAsset(testIP), checktest.WithConfig(cfg))
+	tg := checktest.NewTarget(ipAsset(testIP), checktest.WithConfig(cfg), checktest.WithOwnedZones("example.com"))
 	if f != nil {
 		tg.Intel = f
 	}
 	tg.Baseline = map[string]map[string]any{}
 	if own != nil {
-		tg.Baseline[portsCheck] = map[string]any{"ports": own}
+		tg.Baseline[portsCheck] = map[string]any{"ports": own, "scanned_ports": []any{22, 80, 443, 2222, 8443}, "address_families": []any{"ipv4", "ipv6"}}
 	}
 	res, err := New(nil).Run(context.Background(), tg)
 	if err != nil {
@@ -447,7 +447,7 @@ func TestIPv6AndMappedKeys(t *testing.T) {
 		f.bodies[url(want)] = fmt.Sprintf(`{"ip":%q,"ports":[22],"vulns":[],"tags":[]}`, want)
 		tg := checktest.NewTarget(ipAsset(key))
 		tg.Intel = f
-		tg.Baseline = map[string]map[string]any{portsCheck: {"ports": []any{22.0}}}
+		tg.Baseline = map[string]map[string]any{portsCheck: {"ports": []any{22.0}, "scanned_ports": []any{22.0}, "address_families": []any{"ipv4", "ipv6"}}}
 		res, err := New(nil).Run(context.Background(), tg)
 		if err != nil || res.Partial || len(res.Findings) != 0 || len(f.calls) != 1 || f.calls[0] != "internetdb "+url(want) {
 			t.Errorf("key %q: err=%v partial=%v calls=%v", key, err, res != nil && res.Partial, f.calls)
@@ -463,6 +463,60 @@ func TestNonPublicAddressMakesNoRequest(t *testing.T) {
 	res, err := New(nil).Run(context.Background(), tg)
 	if err != nil || !res.Partial || len(f.calls) != 0 || len(res.Findings) != 0 {
 		t.Errorf("err=%v partial=%v calls=%v", err, res != nil && res.Partial, f.calls)
+	}
+}
+
+func TestSharedGoogleAddressesAreSkippedButOwnedAddressIsReported(t *testing.T) {
+	for _, ip := range []string{"216.239.32.21", "2001:4860:4802:32::15"} {
+		t.Run(ip, func(t *testing.T) {
+			f := newFakeIntel()
+			f.bodies[url(ip)] = fmt.Sprintf(`{"ip":%q,"ports":[80],"hostnames":["www.example.com"],"vulns":["CVE-2021-41773"],"tags":["malware"]}`, ip)
+			tg := checktest.NewTarget(model.Asset{Kind: model.KindIP, Key: ip, Scope: model.ScopeShared}, checktest.WithOwnedZones("example.com"))
+			tg.Intel = f
+			res, err := New(nil).Run(context.Background(), tg)
+			if err != nil || !res.Partial || len(res.Findings) != 0 || len(f.calls) != 0 {
+				t.Fatalf("shared %s: err=%v partial=%v findings=%v calls=%v", ip, err, res.Partial, keys(res), f.calls)
+			}
+			o := obsOf(t, res)
+			if o["internetdb"] != StateSkipped || o["internetdb_note"] != "shared" {
+				t.Fatalf("shared observation = %v", o)
+			}
+		})
+	}
+
+	f := newFakeIntel()
+	f.bodies[url(testIP)] = answerJSON(`[80]`, `[]`, `["malware"]`)
+	res := run(t, f, []any{80.0}, nil)
+	if !slices.Contains(keys(res), "tag:malware") {
+		t.Fatalf("owned address findings = %v", keys(res))
+	}
+}
+
+func TestInternetDBSharedHostnameEvidenceSuppressesFindings(t *testing.T) {
+	f := newFakeIntel()
+	f.bodies[url(testIP)] = fmt.Sprintf(`{"ip":%q,"ports":[80],"hostnames":["www.example.com","*.1e100.net","bizopsportal.com"],"vulns":["CVE-2021-41773"],"tags":["malware"]}`, testIP)
+	tg := checktest.NewTarget(ipAsset(testIP), checktest.WithOwnedZones("example.com"))
+	tg.Intel = f
+	tg.Baseline = map[string]map[string]any{portsCheck: {"ports": []any{80}, "scanned_ports": []any{80}, "address_families": []any{"ipv4", "ipv6"}}}
+	res, err := New(nil).Run(context.Background(), tg)
+	if err != nil || !res.Partial || len(res.Findings) != 0 {
+		t.Fatalf("shared-host result: err=%v partial=%v findings=%v", err, res.Partial, keys(res))
+	}
+	o := obsOf(t, res)
+	if o["shared_host"] != true || o["internetdb_note"] != "shared_host" {
+		t.Fatalf("shared-host observation = %v", o)
+	}
+}
+
+func TestInternetDBSkipsPortsOutsideScannedCoverage(t *testing.T) {
+	f := newFakeIntel()
+	f.bodies[url(testIP)] = answerJSON(`[2222]`, `[]`, `[]`)
+	tg := checktest.NewTarget(ipAsset(testIP), checktest.WithOwnedZones("example.com"))
+	tg.Intel = f
+	tg.Baseline = map[string]map[string]any{portsCheck: {"ports": []any{}, "scanned_ports": []any{80}, "address_families": []any{"ipv4", "ipv6"}}}
+	res, err := New(nil).Run(context.Background(), tg)
+	if err != nil || res.Partial || len(res.Findings) != 0 {
+		t.Fatalf("unscanned port result: err=%v partial=%v findings=%v", err, res.Partial, keys(res))
 	}
 }
 
@@ -513,7 +567,7 @@ func TestChecksWiring(t *testing.T) {
 	f.bodies[url(testIP)] = answerJSON(`[22]`, `[]`, `[]`)
 	tg := checktest.NewTarget(ipAsset(testIP))
 	tg.Intel = f
-	tg.Baseline = map[string]map[string]any{portsCheck: {"ports": []any{}}}
+	tg.Baseline = map[string]map[string]any{portsCheck: {"ports": []any{}, "scanned_ports": []any{22}, "address_families": []any{"ipv4", "ipv6"}}}
 	res, err := cs[0].Run(context.Background(), tg)
 	if err != nil || len(res.Findings) != 0 {
 		t.Errorf("global config not applied: err=%v findings=%v", err, res.Findings)

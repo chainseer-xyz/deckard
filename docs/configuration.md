@@ -314,7 +314,7 @@ strings never appear in logs, errors or warnings.
 
 ```yaml
 scope:
-  include: ["*.example.com"]          # extra hostnames treated as yours
+  include: ["*.example.com", "203.0.113.0/24"] # extra names or owned IP/CIDR space
   exclude: ["legacy.example.com", "198.51.100.5", "198.51.100.0/24"]  # always wins
   max_cidr_hosts: 1024                # static CIDRs larger than this are rejected
   resolvers: ["1.1.1.1", "8.8.8.8"]   # optional: DNS servers every scan uses (IP or IP:port)
@@ -332,9 +332,13 @@ source calls (for example an in-cluster Alertmanager URL) are not affected and
 keep using the system resolver.
 
 deckard only actively probes assets it can show are yours: names under zones from
-your sources, IPs from your static lists, origins, load balancers and cluster
-endpoints. Third-party CNAME targets (S3, Heroku, GitHub Pages, ...) are only
-fingerprinted by requesting *your* hostname. They are never port-scanned.
+your sources, IPs with ownership evidence from AWS, Kubernetes or static
+inventory, and addresses declared in `scope.include` as IPs or CIDRs. DNS
+records and origin discovery create relationships but do not prove that the
+address belongs to you; known provider ranges are classified as shared and
+other such addresses stay external for IP checks. Third-party CNAME targets
+(S3, Heroku, GitHub Pages, ...) are only fingerprinted by requesting *your*
+hostname. They are never port-scanned.
 
 ## Profiles (tiers and cadence)
 
@@ -653,7 +657,7 @@ always the fallback.
 | Dataset | Sources | Merge rule |
 |---|---|---|
 | `takeover_fingerprints` | [can-i-take-over-xyz](https://github.com/EdOverflow/can-i-take-over-xyz) `fingerprints.json`: only `Vulnerable` / `Edge case` entries with a usable CNAME suffix and a plain-text body fingerprint or NXDOMAIN | The hand-curated entries (and their `default_cert` lists) win on provider-name conflicts; refreshed entries add new providers. Precision rules (valid-certificate suppression, unconfirmed edge case = medium) apply to every entry |
-| `shared_ranges` | Cloudflare `ips-v4`/`ips-v6`, AWS `ip-ranges.json` (**only** `CLOUDFRONT`, `GLOBALACCELERATOR`, `S3`; never `EC2`/`AMAZON`, which hold customers' own addresses), Fastly `public-ip-list`, GitHub `meta` (`pages`) | Added to the embedded list. Classification order is unchanged: excluded > owned > shared > external, so an address you declare owned stays owned |
+| `shared_ranges` | Cloudflare `ips-v4`/`ips-v6`, AWS `ip-ranges.json` (**only** `CLOUDFRONT`, `GLOBALACCELERATOR`, `S3`; never `EC2`/`AMAZON`, which hold customers' own addresses), Fastly `public-ip-list`, GitHub `meta` (`pages`), Google `goog.json` and Google Cloud `cloud.json` (IPv4 and IPv6) | Added to the embedded list. Classification order is unchanged: excluded > owned > shared > external, so an address you declare owned stays owned |
 
 How a refresh stays safe:
 

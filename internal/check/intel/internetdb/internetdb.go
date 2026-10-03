@@ -59,6 +59,7 @@ import (
 
 	"github.com/chainseer-xyz/deckard/internal/check"
 	"github.com/chainseer-xyz/deckard/internal/check/checkutil"
+	"github.com/chainseer-xyz/deckard/internal/check/domain/expiry"
 	"github.com/chainseer-xyz/deckard/internal/intel"
 	"github.com/chainseer-xyz/deckard/internal/model"
 	"github.com/chainseer-xyz/deckard/internal/vulnintel"
@@ -111,6 +112,10 @@ func (*Check) SlowLookups() bool { return true }
 // BaselineChecks asks the engine for net.ports' learned observation.
 func (*Check) BaselineChecks() []string { return []string{portsCheck} }
 
+// WantsOwnedZones supplies the zones needed to reject reverse names that show
+// this address is a shared host rather than one of the operator's addresses.
+func (*Check) WantsOwnedZones() bool { return true }
+
 // Applies matches owned IPs that are public addresses.
 func (*Check) Applies(a model.Asset) bool {
 	if a.Kind != model.KindIP || a.Scope != model.ScopeOwned {
@@ -155,6 +160,12 @@ func (c *Check) Run(ctx context.Context, t check.Target) (*check.Result, error) 
 	if !ok {
 		return skip(StateSkipped, "not a public IP address")
 	}
+	if t.Asset.Scope == model.ScopeShared {
+		return skip(StateSkipped, "shared")
+	}
+	if t.Asset.Scope != model.ScopeOwned {
+		return skip(StateSkipped, "not_owned")
+	}
 	if t.Intel == nil {
 		return skip(StateSkipped, "metadata client not available")
 	}
@@ -179,6 +190,11 @@ func (c *Check) Run(ctx context.Context, t check.Target) (*check.Result, error) 
 		}
 	}
 	obs["internetdb"] = StateOK
+	if shared := sharedHostnames(a.Hostnames, t.OwnedZones); len(shared) > 0 {
+		obs["shared_host"] = true
+		obs["shared_hostnames"] = shared
+		return skip(StateSkipped, "shared_host")
+	}
 
 	ev := newEvidence(ip, &a)
 	cves, truncated := cveIDs(a.Vulns, checkutil.Int(cfg, "max_cves", DefaultMaxCVEs))
@@ -198,10 +214,32 @@ func (c *Check) Run(ctx context.Context, t check.Target) (*check.Result, error) 
 		obs["ports_baseline"] = "missing"
 		obs["ports_note"] = "no net.ports observation of this IP yet; open-port comparison skipped"
 	default:
-		res.Findings = append(res.Findings, portFindings(ip, a.Ports, own, expectedPorts(cfg), ev)...)
+		scanned, familyOK, note := scannedPorts(t.Baseline[portsCheck], addr)
+		if !familyOK {
+			res.Partial = true
+			obs["ports_note"] = note
+		} else if scanned == nil {
+			res.Partial = true
+			obs["ports_note"] = "net.ports observation lacks scan coverage; open-port comparison skipped"
+		} else {
+			res.Findings = append(res.Findings, portFindings(ip, a.Ports, own, scanned, expectedPorts(cfg), ev)...)
+		}
 	}
 	res.Observations = []model.ObservationInput{{Check: Name, Data: obs}}
 	return res, nil
+}
+
+func sharedHostnames(hostnames, zones []string) []string {
+	var out []string
+	for _, raw := range hostnames {
+		h := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(raw)), "*.")
+		reg, ok := expiry.Registrable(h)
+		if ok && checkutil.ZoneOf(reg, zones) == "" {
+			out = append(out, h)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // classify maps an intel error onto an observation state and note. None of
@@ -326,6 +364,42 @@ func ownPorts(b map[string]any) (ports []int, have bool) {
 	return nil, false
 }
 
+func scannedPorts(b map[string]any, addr netip.Addr) (ports []int, familyOK bool, note string) {
+	raw, ok := b["scanned_ports"]
+	if !ok {
+		return nil, true, ""
+	}
+	switch v := raw.(type) {
+	case []int:
+		ports = portList(v)
+	case []any:
+		for _, e := range v {
+			if p, ok := toPort(e); ok {
+				ports = append(ports, p)
+			}
+		}
+		ports = portList(ports)
+	default:
+		return nil, true, ""
+	}
+	if rawFamilies, ok := b["address_families"].([]any); ok {
+		want := "ipv4"
+		if addr.Is6() {
+			want = "ipv6"
+		}
+		found := false
+		for _, f := range rawFamilies {
+			if s, ok := f.(string); ok && s == want {
+				found = true
+			}
+		}
+		if !found {
+			return nil, false, "net.ports does not scan this address family; open-port comparison skipped"
+		}
+	}
+	return ports, true, ""
+}
+
 func toPort(v any) (int, bool) {
 	var n int
 	switch x := v.(type) {
@@ -363,10 +437,10 @@ func expectedPorts(cfg map[string]any) []int {
 	return portList(checkutil.Ints(cfg, "expected_ports", nil))
 }
 
-func portFindings(ip string, seen, own, expected []int, ev map[string]any) []model.FindingInput {
+func portFindings(ip string, seen, own, scanned, expected []int, ev map[string]any) []model.FindingInput {
 	var out []model.FindingInput
 	for _, p := range portList(seen) {
-		if slices.Contains(own, p) || slices.Contains(expected, p) {
+		if !slices.Contains(scanned, p) || slices.Contains(own, p) || slices.Contains(expected, p) {
 			continue
 		}
 		out = append(out, finding(fmt.Sprintf("unexpected-port:%d", p), model.SeverityMedium,
