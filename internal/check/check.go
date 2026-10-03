@@ -158,6 +158,19 @@ type DefaultTimeouter interface {
 	DefaultTimeout() time.Duration
 }
 
+// SlowLookups is an optional Check interface. A check returning true spends
+// most of a run waiting on rate-limited network lookups it does not control
+// (third-party intel services, object-storage providers, a long sweep of DNS
+// queries about names the operator does not own), so a run can hold a worker
+// for tens of seconds. The engine routes its scan jobs to the dedicated intel
+// queue, so that waiting can never delay a fast local check (dns.dangling,
+// dns.takeover) that shares its tier. Checks that implement it must keep
+// returning the same answer for the life of the process: queued jobs are
+// moved between queues on that basis.
+type SlowLookups interface {
+	SlowLookups() bool
+}
+
 // WantsBaselines is an optional Check interface. A check returning check names
 // receives those other checks' learned baselines for the same asset in
 // Target.Baseline (keyed by check name, absent when none was learned yet), next

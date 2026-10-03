@@ -202,6 +202,22 @@ func (e *Engine) reclaimOrphans(ctx context.Context) (reclaimed, error) {
 	return out, nil
 }
 
+// maintainJobs is one pass of the periodic job upkeep: reclaim, prune, and
+// the move of slow-lookup scan jobs out of the tier queues (instances of a
+// version without the intel queue keep inserting there until a rolling update
+// has replaced them). Failures are logged; the next pass retries.
+func (e *Engine) maintainJobs(ctx context.Context) {
+	if _, err := e.reclaimOrphans(ctx); err != nil && ctx.Err() == nil {
+		e.r.log.Warn("reclaim orphaned jobs", "err", err)
+	}
+	if err := e.pruneInstances(ctx); err != nil && ctx.Err() == nil {
+		e.r.log.Warn("prune instances", "err", err)
+	}
+	if _, err := e.moveSlowJobs(ctx); err != nil && ctx.Err() == nil {
+		e.r.log.Warn("move slow-lookup scan jobs", "err", err)
+	}
+}
+
 // instanceLoop heartbeats, reclaims and prunes until ctx is cancelled. Start
 // has already registered the instance; the first reclaim runs immediately.
 func (e *Engine) instanceLoop(ctx context.Context, done chan struct{}) {
@@ -211,14 +227,7 @@ func (e *Engine) instanceLoop(ctx context.Context, done chan struct{}) {
 	rc := time.NewTicker(reclaimEvery)
 	defer rc.Stop()
 	failing := false
-	maintain := func() {
-		if _, err := e.reclaimOrphans(ctx); err != nil && ctx.Err() == nil {
-			e.r.log.Warn("reclaim orphaned jobs", "err", err)
-		}
-		if err := e.pruneInstances(ctx); err != nil && ctx.Err() == nil {
-			e.r.log.Warn("prune instances", "err", err)
-		}
-	}
+	maintain := func() { e.maintainJobs(ctx) }
 	maintain()
 	for {
 		select {

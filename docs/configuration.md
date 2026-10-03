@@ -23,9 +23,30 @@ variable by name (`token_env`, `password_env`, `client_secret_env`).
 | `database.max_conns` | `10` | Connection pool size |
 | `sync.interval` | `10m` | How often each source is re-synced |
 | `scheduling.error_retry` | `10m` | A check is due when its last *successful* run is older than its interval. After a *failed* attempt it is retried no sooner than `min(interval, error_retry)`, so a broken target is not hammered every tick. Must be > 0 |
-| `scheduling.queue_workers` | `sync: 2, passive: 10, active: 4, intrusive: 1, default: 2, expand: 1, maintenance: 1` | Max concurrent jobs per queue (positive integers; unknown queue names are rejected). Per-host concurrency and rate limits still apply. Everything shares one Postgres pool (`database.max_conns`), so size it above the busiest replica's total |
+| `scheduling.queue_workers` | `sync: 2, passive: 10, active: 4, intrusive: 1, default: 2, expand: 1, intel: 8, maintenance: 1` | Max concurrent jobs per queue (positive integers; unknown queue names are rejected). Per-host concurrency and rate limits still apply. The `intel` queue runs the checks that wait on slow remote lookups (see below); the other scan queues follow the tier. Everything shares one Postgres pool (`database.max_conns`), so size it above the busiest replica's total (the defaults add up to 29, but jobs mostly wait on the network, not the database) |
 | `retention.scans` | `168h` | Scan history older than this is deleted by housekeeping. Due-computation uses a per-(asset, check) index, not the history, so this only bounds table size. Must be > 0 |
 | `retention.relations` | `720h` | Relations touching an asset removed longer ago than this are deleted by housekeeping. Must be > 0 |
+
+### Queues and slow checks
+
+Scan jobs run in the queue of their tier (`passive`, `active`, `intrusive`),
+with one exception: a check that spends its run waiting on rate-limited remote
+services runs in the `intel` queue whatever its tier. Today these are
+`web.history` (Wayback), `domain.expiry` (RDAP), `intel.internetdb`,
+`cloud.bucket` (the object-storage provider) and `domain.lookalike` (up to 600
+DNS queries behind one shared rate ceiling). A run of such a check can take
+half a minute or more, and in the shared `passive` queue a few of them used to
+hold most of its workers while the fast DNS checks (`dns.dangling`,
+`dns.takeover`) waited behind them. The queue is chosen when the job is
+inserted and stays with the job through retries and crash recovery. Raise
+`intel` if `deckard_queue_depth{queue="intel"}` stays high; it never competes
+with `passive` for workers, only for the database pool.
+
+After an upgrade from a version without this queue, each instance moves the
+still-pending (`available`, `scheduled`, `retryable`) scan jobs of these checks
+from the old queue to `intel` when it starts, and again every 30 seconds while
+older instances of a rolling update are still inserting into `passive`. Running
+jobs are never touched.
 
 ## nuclei and CVE templates
 

@@ -276,7 +276,7 @@ func (a *App) Close() {
 func queueWorkers(cfg *config.Config) map[string]int {
 	out := map[string]int{}
 	for _, q := range []string{engine.QueueSync, engine.QueuePassive, engine.QueueActive,
-		engine.QueueIntrusive, engine.QueueDefault, engine.QueueExpand, engine.QueueMaintenance} {
+		engine.QueueIntrusive, engine.QueueDefault, engine.QueueExpand, engine.QueueIntel, engine.QueueMaintenance} {
 		if n, ok := cfg.Scheduling.QueueWorkers[q]; ok {
 			out[q] = n
 		}

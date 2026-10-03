@@ -337,6 +337,10 @@ func TestTimeoutRetriedThenUnavailable(t *testing.T) {
 		case <-r.Context().Done():
 		case <-time.After(5 * time.Second):
 		}
+		// Returning normally would send an implicit 200 OK: if the server's request
+		// context ended before the client's own timeout fired (a loaded CI runner),
+		// the client would read that as a success. Abort the connection instead.
+		panic(http.ErrAbortHandler)
 	})
 	c := l.client(Options{Services: map[string]ServiceConfig{ServiceWayback: {Timeout: 50 * time.Millisecond}}})
 	start := time.Now()

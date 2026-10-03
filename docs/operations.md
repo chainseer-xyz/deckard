@@ -364,6 +364,7 @@ snapshot refresh.
 | `deckard_checks_skipped_total` | `check`, `tier`, `reason` = shared_destination, external_destination, private_destination | checks skipped before touching the network (see [Skipped checks](#skipped-checks)); neither runs nor errors |
 | `deckard_scope_refusals_total` | `tier`, `class`, `reason` | every scope-guard refusal, including those logged at DEBUG (see [Scope refusals](#scope-refusals)) |
 | `deckard_heartbeat_total` | `result` = ok, error, unhealthy | external heartbeat attempts; absent unless `notify.heartbeat.url` is set |
+| `deckard_queue_depth` | `queue` = sync, passive, active, intrusive, default, expand, intel, maintenance | jobs waiting (available or retryable) per queue, reported as 0 for an empty queue; a backlog in `intel` (slow remote lookups) never delays `passive` (alert: `DeckardQueueBacklog`, per queue) |
 | `deckard_jobs_reclaimed_total` | `kind` (job kind) | running jobs taken back from an instance that died; 0 for every kind from engine start |
 
 **Ingest metrics** (see [ingest.md](ingest.md#metrics-and-alerts))

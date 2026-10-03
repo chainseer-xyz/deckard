@@ -144,7 +144,7 @@ type SchedulingConfig struct {
 	// is retried (capped at the check's own interval).
 	ErrorRetry time.Duration `koanf:"error_retry"`
 	// QueueWorkers is the max concurrent jobs per River queue: sync, passive,
-	// active, intrusive, default, expand.
+	// active, intrusive, default, expand, intel, maintenance.
 	QueueWorkers map[string]int `koanf:"queue_workers"`
 }
 
@@ -155,7 +155,7 @@ type RetentionConfig struct {
 }
 
 // QueueNames are the valid scheduling.queue_workers keys.
-var QueueNames = []string{"sync", "passive", "active", "intrusive", "default", "expand", "maintenance"}
+var QueueNames = []string{"sync", "passive", "active", "intrusive", "default", "expand", "intel", "maintenance"}
 
 // SourceConfig is a union of every source type's settings; unused fields are
 // ignored by the other types.
@@ -420,6 +420,7 @@ func Defaults() map[string]any {
 		"scheduling.queue_workers.intrusive":      1,
 		"scheduling.queue_workers.default":        2,
 		"scheduling.queue_workers.expand":         1,
+		"scheduling.queue_workers.intel":          8,
 		"scheduling.queue_workers.maintenance":    1,
 		"retention.scans":                         "168h",
 		"retention.relations":                     "720h",
