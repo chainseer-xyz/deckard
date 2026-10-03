@@ -1,0 +1,18 @@
+{
+  "description": "RDAP bootstrap file for Domain Name System registrations (test fixture)",
+  "publication": "2026-09-30T19:00:01Z",
+  "version": "1.0",
+  "services": [
+    [["com", "net"], ["https://rdap.example.net/com/v1/"]],
+    [["org", "ORG."], ["http://rdap.example.org/", "https://rdap.example.org"]],
+    [["uk"], ["http://rdap.example.uk/"]],
+    [["io"], ["https://203.0.113.5/rdap/"]],
+    [["ch"], ["https://rdap.example.ch:8443/"]],
+    [["de"], ["https://user@rdap.example.de/"]],
+    [["fr"], ["https://rdap.example.fr/?q=1"]],
+    [["co.example"], ["https://rdap.example.org/co/"]],
+    [["bad label", "-x", ""], ["https://rdap.example.net/bad/"]],
+    [["only-one-array"]],
+    "not an array"
+  ]
+}

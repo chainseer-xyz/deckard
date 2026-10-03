@@ -71,6 +71,10 @@ config:
   # kept under /var/lib/deckard/vulnintel (the data volume). Set enabled: false
   # when the pod has no egress to www.cisa.gov / api.first.org.
   # vulnintel: { enabled: true, interval: 6h, timeout: 30s, kev_floor: critical, epss_high: 0.7, epss_medium: 0.3 }
+  # Third-party metadata lookups about your own domains (RDAP for domain.expiry).
+  # Reaches only data.iana.org and the RDAP servers it lists (see
+  # docs/operations.md, Network egress). Set enabled: false when air-gapped.
+  # intel: { enabled: true, user_agent_contact: security@example.com }
   # Per-check cadence overrides; on_new_asset (default true) can only turn
   # immediate scans on discovery off for a check.
   # checks:

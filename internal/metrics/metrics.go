@@ -65,6 +65,7 @@ type Metrics struct {
 	newTemplates    prometheus.Counter
 	templates       *templateState
 	vi              *vulnintelMetrics
+	intel           *intelMetrics
 }
 
 var _ Recorder = (*Metrics)(nil)
@@ -72,7 +73,7 @@ var _ Recorder = (*Metrics)(nil)
 // New builds a registry with Go/process collectors, build info and the
 // engine-fed metrics. Call RegisterState to add the store-backed gauges.
 func New(version, commit string) *Metrics {
-	m := &Metrics{reg: prometheus.NewRegistry(), ref: newRefdataMetrics(), vi: newVulnintelMetrics()}
+	m := &Metrics{reg: prometheus.NewRegistry(), ref: newRefdataMetrics(), vi: newVulnintelMetrics(), intel: newIntelMetrics()}
 	buckets := []float64{.1, .5, 1, 2.5, 5, 10, 30, 60, 120, 300}
 	m.scanDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "deckard_scan_duration_seconds", Help: "Duration of check executions.", Buckets: buckets,
@@ -119,6 +120,7 @@ func New(version, commit string) *Metrics {
 		m.queueDepth, m.invChanges, m.reclaimed, m.collectErrors, build,
 		m.ref.entries, m.ref.total, m.ref,
 		m.vi.refresh, m.vi.kevOpen, m.vi,
+		m.intel.requests, m.intel.duration,
 	)
 	m.initTemplateMetrics()
 	return m

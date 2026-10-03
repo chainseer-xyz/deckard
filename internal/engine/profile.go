@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chainseer-xyz/deckard/internal/check"
 	"github.com/chainseer-xyz/deckard/internal/config"
 	"github.com/chainseer-xyz/deckard/internal/model"
 )
@@ -101,6 +102,23 @@ func ResolveProfile(cfg config.Config, asset model.Asset, tier model.Tier) Resol
 // values are ignored here (config.Validate rejects them at load).
 func ResolveCheck(cfg config.Config, asset model.Asset, tier model.Tier, checkName string) Resolved {
 	r := ResolveProfile(cfg, asset, tier)
+	return applyCheckOverrides(cfg, r, checkName)
+}
+
+// resolveFor is ResolveCheck for a check instance: a check implementing
+// check.DefaultIntervaler replaces the tier (and asset-group) interval with its
+// own before the checks.<name> overrides apply.
+func resolveFor(cfg config.Config, asset model.Asset, tier model.Tier, c check.Check) Resolved {
+	r := ResolveProfile(cfg, asset, tier)
+	if di, ok := c.(check.DefaultIntervaler); ok {
+		if d := di.DefaultInterval(); d > 0 {
+			r.Interval = d
+		}
+	}
+	return applyCheckOverrides(cfg, r, c.Name())
+}
+
+func applyCheckOverrides(cfg config.Config, r Resolved, checkName string) Resolved {
 	opts := cfg.Checks[checkName]
 	if d, ok, err := config.CheckInterval(opts); err == nil && ok {
 		r.Interval = d

@@ -1,0 +1,13 @@
+{
+  "objectClassName": "domain",
+  "ldhName": "example.org",
+  "status": ["ok"],
+  "entities": [
+    {
+      "objectClassName": "entity",
+      "handle": "9999",
+      "roles": ["registrar"]
+    }
+  ],
+  "nameservers": [{"ldhName": "ns.example.org"}]
+}

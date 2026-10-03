@@ -36,6 +36,7 @@ func testConfig(t *testing.T, dbURL string, port int) *config.Config {
 	cfg.Nuclei.Enabled = false
 	cfg.Expansion.CTLogs = false
 	cfg.Vulnintel.Enabled = false // never reach cisa.gov or api.first.org from tests
+	cfg.Intel.Enabled = false     // never reach RDAP registries from tests
 	cfg.Server.Roles = []string{"scheduler", "worker"}
 	cfg.Server.MetricsAddr = "127.0.0.1:0"
 	cfg.Server.HTTPAddr = "127.0.0.1:0"

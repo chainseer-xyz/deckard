@@ -11,6 +11,7 @@ import (
 	"github.com/chainseer-xyz/deckard/internal/check/dns/dangling"
 	"github.com/chainseer-xyz/deckard/internal/check/dns/hygiene"
 	"github.com/chainseer-xyz/deckard/internal/check/dns/takeover"
+	"github.com/chainseer-xyz/deckard/internal/check/domain/expiry"
 	"github.com/chainseer-xyz/deckard/internal/check/http/headers"
 	"github.com/chainseer-xyz/deckard/internal/check/http/probe"
 	"github.com/chainseer-xyz/deckard/internal/check/origin/correlation"
@@ -25,7 +26,7 @@ func Checks(cfg map[string]map[string]any) []check.Check {
 	var out []check.Check
 	for _, ctor := range []func(map[string]map[string]any) []check.Check{
 		dangling.Checks, takeover.Checks, hygiene.Checks, cert.Checks,
-		probe.Checks, headers.Checks, exposed.Checks, correlation.Checks,
+		probe.Checks, headers.Checks, exposed.Checks, correlation.Checks, expiry.Checks,
 	} {
 		out = append(out, ctor(cfg)...)
 	}

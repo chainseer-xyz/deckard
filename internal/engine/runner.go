@@ -276,6 +276,7 @@ func (r *runner) runCheck(ctx context.Context, c check.Check, asset model.Asset,
 		Dialer:     dialer,
 		Resolver:   r.Guard.Resolver(tier, class, limiter),
 		HTTP:       r.Guard.HTTPClient(tier, class, limiter, scope.WithHTTPTimeout(timeout)),
+		Intel:      r.Intel,
 		Config:     r.Config.Checks[c.Name()],
 	}
 	// The scope-guarded rcode-aware DNS client is optional: guards that do not
@@ -475,7 +476,7 @@ func (r *runner) enqueueImmediate(ctx context.Context, groups ...[]model.Asset) 
 					continue
 				}
 				for _, c := range r.checksFor(a, tier, "") {
-					if !ResolveCheck(r.Config, a, tier, c.Name()).OnInventoryChange {
+					if !resolveFor(r.Config, a, tier, c).OnInventoryChange {
 						continue
 					}
 					if _, err := r.q.enqueueScan(ctx, scanJob{AssetID: a.ID, Tier: tier, Check: c.Name()}); err != nil {
@@ -563,7 +564,7 @@ func (r *runner) scheduleTier(ctx context.Context, tier model.Tier) (int, error)
 				if !c.Applies(a) {
 					continue
 				}
-				interval := ResolveCheck(r.Config, a, tier, c.Name()).Interval
+				interval := resolveFor(r.Config, a, tier, c).Interval
 				if interval <= 0 {
 					continue
 				}

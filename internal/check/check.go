@@ -1,5 +1,7 @@
 // Package check defines the probe contract. Checks never open their own
-// network connections: they use the scope-guarded clients in Target.
+// network connections: they use the scope-guarded clients in Target, and
+// Target.Intel (a separate, allow-listed client) for third-party metadata about
+// the operator's own domains and IPs.
 package check
 
 import (
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/chainseer-xyz/deckard/internal/dnsx"
+	"github.com/chainseer-xyz/deckard/internal/intel"
 	"github.com/chainseer-xyz/deckard/internal/model"
 )
 
@@ -55,6 +58,21 @@ type DNSQuerier interface {
 	AXFR(ctx context.Context, zone string) (dnsx.AXFRReport, error)
 }
 
+// Intel is the restricted client for third-party metadata services
+// (internal/intel): RDAP registries and similar sources that answer questions
+// about the operator's own domains and IPs. It is not a probe and does not go
+// through the scope guard; it reaches only a fixed allow-list of hosts and
+// never a URL derived from anything but the asset itself. Errors (including
+// intel.ErrDisabled) are never evidence about the asset: a check that cannot
+// get an answer records an observation and marks its run partial.
+type Intel interface {
+	// Get fetches rawURL from the named service (intel.ServiceRDAP, ...).
+	Get(ctx context.Context, service, rawURL string) (intel.Response, error)
+	// RDAPBase returns the RDAP base URL (ending in "/") for domain's TLD,
+	// or intel.ErrUnsupported when the TLD publishes no RDAP service.
+	RDAPBase(ctx context.Context, domain string) (string, error)
+}
+
 // Neighbour is an asset connected to the target by a relation.
 type Neighbour struct {
 	Asset    model.Asset
@@ -72,7 +90,11 @@ type Target struct {
 	Resolver   Resolver
 	DNS        DNSQuerier // optional; nil means use Resolver only
 	HTTP       *http.Client
-	Config     map[string]any
+	// Intel is the third-party metadata client. Nil means not available:
+	// checks that need it treat the run as skipped (an observation, a partial
+	// result, never an error or a finding).
+	Intel  Intel
+	Config map[string]any
 	// OpenFindings are this asset's unresolved findings (open, acknowledged,
 	// suppressed, false_positive) of the running check, newest severity first,
 	// capped at MaxOpenFindings. The engine fills it only for checks that
@@ -100,6 +122,14 @@ type OpenFinding struct {
 // scan for it and skips the query for every other check.
 type WantsOpenFindings interface {
 	WantsOpenFindings() bool
+}
+
+// DefaultIntervaler is an optional Check interface for checks whose natural
+// cadence differs from their tier's (slow-moving registry data, for
+// example). The interval replaces the tier and asset-group interval;
+// checks.<name>.interval still overrides it.
+type DefaultIntervaler interface {
+	DefaultInterval() time.Duration
 }
 
 // Result is what a check returns.

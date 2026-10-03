@@ -153,6 +153,9 @@ func WithDialer(d check.Dialer) Option { return func(t *check.Target) { t.Dialer
 // WithHTTP sets the target HTTP client.
 func WithHTTP(c *http.Client) Option { return func(t *check.Target) { t.HTTP = c } }
 
+// WithIntel sets the third-party metadata client.
+func WithIntel(i check.Intel) Option { return func(t *check.Target) { t.Intel = i } }
+
 // WithConfig sets per-check config.
 func WithConfig(c map[string]any) Option { return func(t *check.Target) { t.Config = c } }
 

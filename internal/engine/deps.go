@@ -131,7 +131,10 @@ type Deps struct {
 	Templates TemplateManager
 	// Delta runs template-limited nuclei scans (new templates, CVE-targeted).
 	// Nil disables them.
-	Delta  DeltaScanner
+	Delta DeltaScanner
+	// Intel is the third-party metadata client handed to checks as
+	// Target.Intel. Nil means not available (checks that need it skip).
+	Intel  check.Intel
 	Logger *slog.Logger
 	// Now overrides time.Now in tests.
 	Now func() time.Time

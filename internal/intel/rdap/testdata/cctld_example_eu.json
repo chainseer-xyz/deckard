@@ -1,0 +1,35 @@
+{
+  "rdapConformance": ["rdap_level_0"],
+  "objectClassName": "domain",
+  "ldhName": "example.eu",
+  "unicodeName": "example.eu",
+  "status": ["active", "clientTransferProhibited", "client_delete_prohibited", "autoRenewPeriod"],
+  "events": [
+    {"eventAction": "registration", "eventDate": "2006-04-07T00:00:00"},
+    {"eventAction": "lastChanged", "eventDate": "2026-03-02T10:15:30.123+01:00"},
+    {"eventAction": "registrar expiration", "eventDate": "2027-04-30"},
+    {"eventAction": "transfer", "eventDate": "2019-11-20T12:00:00Z"},
+    {"eventAction": "expiration", "eventDate": "not a date"}
+  ],
+  "entities": [
+    {
+      "objectClassName": "entity",
+      "handle": "c-reg-1234",
+      "roles": ["sponsor"],
+      "entities": [
+        {
+          "objectClassName": "entity",
+          "handle": "REG-EXAMPLE",
+          "roles": ["Registrar"],
+          "vcardArray": ["vcard", [["version", {}, "text", "4.0"], ["org", {}, "text", ["Example Domains SA", "Registry Services"]]]]
+        }
+      ]
+    }
+  ],
+  "nameservers": [
+    {"objectClassName": "nameserver", "ldhName": "ns2.dns.example.net"},
+    {"objectClassName": "nameserver", "ldhName": "NS1.dns.example.net"},
+    {"objectClassName": "nameserver", "ldhName": "ns1.dns.example.net."}
+  ],
+  "secureDNS": {"delegationSigned": false}
+}
