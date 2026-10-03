@@ -3,6 +3,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { mockServer, renderRoute } from '../test/utils';
+import { makeFindings } from '../../mock/data';
 import { clearToken } from '../api/auth';
 import { configureClient } from '../api/client';
 import Dashboard from './Dashboard';
@@ -30,20 +31,105 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
   server.resetHandlers();
   clearToken();
+  state.canWrite = true;
+  state.findings = makeFindings(); // actions mutate the shared mock state
 });
 afterAll(() => server.close());
 
 describe('Dashboard', () => {
-  it('shows severity tiles, checks, changes and source health with stale highlighting', async () => {
+  it('leads with needs-attention: takeover and expiry first, each row complete', async () => {
     renderRoute(<Dashboard />);
-    expect(await screen.findByLabelText('2 open critical findings')).toBeInTheDocument();
-    expect(screen.getByLabelText('3 open high findings')).toBeInTheDocument();
-    expect(screen.getByText('tls.cert')).toBeInTheDocument();
-    expect((await screen.findAllByText('Finding opened')).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText('Healthy')).length).toBeGreaterThan(0);
-    expect(screen.getByText('Failing')).toBeInTheDocument();
-    expect(screen.getAllByText('Stale').length).toBeGreaterThan(0);
-    expect(screen.getByText(/AccessDenied/)).toBeInTheDocument();
+    const panel = await screen.findByRole('region', { name: 'Needs attention' });
+    const rows = await within(panel).findAllByRole('listitem');
+    expect(rows.map((r) => within(r).getAllByRole('link')[0]?.textContent)).toEqual([
+      'possible subdomain takeover via Azure App Service',
+      expect.stringMatching(/CNAME chain ends in NXDOMAIN/),
+      expect.stringMatching(/TLS certificate on 203.0.113.10:443 expires in 6 days/),
+      expect.stringMatching(/Log4j2/),
+      'SSH exposed to the internet',
+    ]);
+    const first = rows[0] as HTMLElement;
+    expect(within(first).getByText('critical')).toBeInTheDocument(); // severity as text
+    expect(within(first).getByText('Takeover')).toBeInTheDocument();
+    expect(within(first).getByRole('link', { name: 'promo.example.com' })).toHaveAttribute('href', '/assets/11');
+    expect(within(first).getByText('dns.takeover')).toBeInTheDocument();
+    expect(within(first).getByText(/first seen 3d ago/)).toBeInTheDocument();
+    expect(within(first).getByText(/Remove the CNAME for promo.example.com if it is unused/)).toBeInTheDocument();
+    expect(within(rows[2] as HTMLElement).getByText('Expiry')).toBeInTheDocument();
+    expect(within(rows[3] as HTMLElement).getByText('KEV')).toBeInTheDocument();
+    expect(within(rows[3] as HTMLElement).getByText(/New/)).toBeInTheDocument();
+    // medium findings do not belong here
+    expect(within(panel).queryByText(/Strict-Transport-Security/)).not.toBeInTheDocument();
+  });
+
+  it('links each severity tile to the pre-filtered findings with open counts', async () => {
+    renderRoute(<Dashboard />);
+    const crit = await screen.findByLabelText('2 open critical findings');
+    expect(crit).toHaveAttribute('href', '/findings?severity=critical');
+    expect(crit).toHaveTextContent('+1 new in 24h'); // the KEV finding is 5h old
+    expect(screen.getByLabelText('3 open high findings')).toHaveAttribute('href', '/findings?severity=high');
+    expect(screen.getByLabelText('5 open medium findings')).toBeInTheDocument();
+    expect(screen.getByLabelText('3 open low findings')).toBeInTheDocument();
+    expect(screen.getByLabelText('1 open info findings')).toBeInTheDocument();
+  });
+
+  it('shows change-feed counts for the last 24h', async () => {
+    renderRoute(<Dashboard />);
+    const card = await screen.findByRole('region', { name: 'Last 24 hours' });
+    await waitFor(() => expect(card).toHaveTextContent('2 findings opened · 1 reopened · 1 resolved · 2 assets added · 1 removed · 1 changed'));
+  });
+
+  it('ranks the top zones and checks above low and links them to filtered findings', async () => {
+    renderRoute(<Dashboard />);
+    const zones = await screen.findByRole('region', { name: /Top zones/ });
+    await waitFor(() => expect(within(zones).getByRole('link', { name: /example.com: 9 open/ })).toHaveAttribute('href', '/findings?zone=example.com'));
+    expect(within(zones).getByRole('link', { name: /example.org: 1 open/ })).toBeInTheDocument();
+    const checks = screen.getByRole('region', { name: /Top checks/ });
+    const link = await within(checks).findByRole('link', { name: /^tls.cert: 2 open/ });
+    expect(link).toHaveAttribute('href', '/findings?check=tls.cert');
+    expect(within(checks).queryByRole('link', { name: /http.tech/ })).not.toBeInTheDocument(); // info only
+  });
+
+  it('shows source health with PARTIAL, stale and failing states and last successful sync', async () => {
+    renderRoute(<Dashboard />);
+    const strip = await screen.findByRole('region', { name: 'Source health' });
+    const card = (name: string) => within(strip).getByText(name, { selector: 'span.font-medium' }).closest('li') as HTMLElement;
+    await waitFor(() => expect(card('kubernetes')).toBeInTheDocument());
+    expect(within(card('kubernetes')).getByText('Partial')).toBeInTheDocument();
+    expect(within(card('kubernetes')).getByText(/partial discovery, removals skipped: cluster prod-eu unreachable/)).toBeInTheDocument();
+    expect(within(card('cloudflare')).queryByText('Partial')).not.toBeInTheDocument();
+    expect(within(card('cloudflare')).getByText('Healthy')).toBeInTheDocument();
+    expect(within(card('cloudflare')).getByText(/last successful sync 4m ago/)).toBeInTheDocument();
+    expect(within(card('gcp')).getByText('Stale')).toBeInTheDocument();
+    expect(card('gcp').className).toContain('border-warn');
+    expect(within(card('azure')).getByText('Stale')).toBeInTheDocument(); // 50m > 3 x 10m
+    expect(within(card('aws')).getByText('Failing')).toBeInTheDocument();
+    expect(within(card('aws')).getByText(/AccessDenied/)).toBeInTheDocument();
+    expect(within(card('aws')).getByText(/last successful sync 1d ago/)).toBeInTheDocument();
+  });
+
+  it('shows scan freshness with the last failure', async () => {
+    renderRoute(<Dashboard />);
+    const card = await screen.findByRole('region', { name: 'Scan freshness' });
+    await waitFor(() => expect(card).toHaveTextContent(/9 scans in the last hour/));
+    expect(card).toHaveTextContent('Last failure');
+    expect(card).toHaveTextContent('dial tcp 203.0.113.10:443: i/o timeout');
+    expect(within(card).getByRole('link', { name: 'asset #3' })).toHaveAttribute('href', '/assets/3');
+  });
+
+  it('has empty states that say what to do', async () => {
+    server.use(
+      http.get('*/api/v1/findings', () => HttpResponse.json({ items: [], total: 0, limit: 500, offset: 0 })),
+      http.get('*/api/v1/sources', () => HttpResponse.json({ items: [], total: 0, limit: 50, offset: 0 })),
+      http.get('*/api/v1/scans', () => HttpResponse.json({ items: [], total: 0, limit: 500, offset: 0 })),
+      http.get('*/api/v1/changes', () => HttpResponse.json({ items: [], total: 0, limit: 500, offset: 0 })),
+    );
+    renderRoute(<Dashboard />);
+    expect(await screen.findByText(/Nothing needs attention/)).toBeInTheDocument();
+    expect(await screen.findByText(/No sources configured/)).toBeInTheDocument();
+    expect(await screen.findByText(/No scans have completed yet/)).toBeInTheDocument();
+    expect((await screen.findAllByText('No changes in the last 24 hours.')).length).toBe(2);
+    expect((await screen.findAllByText('No open findings above low severity.')).length).toBe(2);
   });
 
   it('shows an error with retry when stats fail', async () => {

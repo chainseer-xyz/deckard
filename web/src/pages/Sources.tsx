@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { RefreshCw } from 'lucide-react';
 import { useMe, useScans, useSources, useSyncSource } from '../api/hooks';
 import { Card, Empty, ErrorBox, Loading, PageHeader, Pagination } from '../components/ui';
-import { HealthBadge } from './Dashboard';
+import { SourceStatus } from '../components/SourceHealth';
 import { absTime, fmtDuration, relTime, syncHealth } from '../lib/format';
 
 const LIMIT = 50;
@@ -30,7 +30,7 @@ export default function Sources() {
                   <tr>
                     <th className="th">Source</th><th className="th">Type</th><th className="th">Health</th>
                     <th className="th">Last run</th><th className="th">Last OK</th><th className="th">Assets</th>
-                    <th className="th">Duration</th><th className="th">Error</th><th className="th"><span className="sr-only">Actions</span></th>
+                    <th className="th">Duration</th><th className="th">Error / warning</th><th className="th"><span className="sr-only">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -40,12 +40,14 @@ export default function Sources() {
                       <tr key={s.source} className={`border-b border-line/60 ${h === 'failing' ? 'bg-bad/5' : h === 'stale' ? 'bg-warn/5' : ''}`}>
                         <td className="td font-medium">{s.source}</td>
                         <td className="td text-xs">{s.type}</td>
-                        <td className="td"><HealthBadge s={s} /></td>
+                        <td className="td"><SourceStatus s={s} /></td>
                         <td className="td text-xs" title={absTime(s.last_run)}>{relTime(s.last_run)}</td>
                         <td className="td text-xs" title={absTime(s.last_ok)}>{relTime(s.last_ok)}</td>
                         <td className="td tabular-nums">{s.asset_count}</td>
                         <td className="td text-xs">{fmtDuration(s.duration_ms)}</td>
-                        <td className="td max-w-xs break-words text-xs text-bad">{s.error}</td>
+                        <td className="td max-w-xs break-words text-xs">
+                          {s.error ? <span className="text-bad">{s.error}</span> : s.warning ? <span className="text-warn">{s.warning}</span> : null}
+                        </td>
                         <td className="td">
                           <button
                             className="btn btn-sm"

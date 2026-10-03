@@ -2,7 +2,8 @@ import { SEVERITIES, severityRank } from '../api/types';
 import type { Finding, Severity } from '../api/types';
 import { intelOf } from './intel';
 
-export const DAY_MS = 24 * 3600 * 1000;
+export const HOUR_MS = 3600 * 1000;
+export const DAY_MS = 24 * HOUR_MS;
 
 export const isKev = (f: Pick<Finding, 'tags' | 'evidence'>): boolean => intelOf(f)?.kev ?? false;
 
