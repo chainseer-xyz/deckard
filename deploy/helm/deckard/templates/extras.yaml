@@ -70,6 +70,17 @@ spec:
           {{- with .Values.networkPolicy.ingressController.podSelector }}
           podSelector: {{- toYaml . | nindent 12 }}
           {{- end }}
+        {{- if .Values.httpRoute.enabled }}
+        {{- /* Gateway API: admit each namespace a parentRef points at (the data plane lives there). */}}
+        {{- $seen := dict }}
+        {{- range .Values.httpRoute.parentRefs }}
+        {{- if and .namespace (not (hasKey $seen .namespace)) }}
+        {{- $_ := set $seen .namespace true }}
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ .namespace | quote }} }
+        {{- end }}
+        {{- end }}
+        {{- end }}
         {{- with .Values.networkPolicy.ingressFrom }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

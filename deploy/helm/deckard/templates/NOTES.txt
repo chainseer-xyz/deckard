@@ -14,6 +14,8 @@ shown in the UI but no alerts are sent.
 Open the UI:
 {{- if .Values.ingress.enabled }}
   https://{{ (index .Values.ingress.hosts 0).host }}
+{{- else if and .Values.httpRoute.enabled .Values.httpRoute.hostnames }}
+  https://{{ index .Values.httpRoute.hostnames 0 }}
 {{- else }}
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "deckard.fullname" . }} 8080:{{ .Values.service.port }}
   open http://localhost:8080
