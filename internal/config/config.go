@@ -53,7 +53,50 @@ type Config struct {
 	// intelKeyErrs are unknown keys found under intel.* at load (the block is
 	// closed; see unknownIntelKeys). Validate reports them.
 	intelKeyErrs []string
+	Ingest       IngestConfig              `koanf:"ingest"`
 }
+
+// IngestConfig controls POST /api/v1/ingest, through which external scanners
+// post findings (see docs/ingest.md). Any identity that may write (acknowledge,
+// suppress) may ingest while Enabled.
+type IngestConfig struct {
+	Enabled bool `koanf:"enabled"`
+	// RateLimit is the per-identity request rate ("N/s", "N/m" or "N/h");
+	// Burst requests may be made at once.
+	RateLimit string `koanf:"rate_limit"`
+	Burst     int    `koanf:"burst"`
+	// MaxConcurrent bounds ingest requests processed at once per API
+	// process (each may carry up to 10 MiB); more are answered 429.
+	MaxConcurrent int `koanf:"max_concurrent"`
+	// Timeout bounds one ingest request (large requests write thousands of
+	// rows in one transaction).
+	Timeout time.Duration `koanf:"timeout"`
+	// MaxScopesPerTool bounds the scope label of
+	// deckard_ingest_last_success_timestamp; further scopes of a tool are
+	// reported together as scope="other".
+	MaxScopesPerTool int `koanf:"max_scopes_per_tool"`
+	// Tools holds per-tool settings keyed by tool name. Tools not listed may
+	// still ingest with the defaults (external assets, 5000 findings).
+	Tools map[string]IngestToolConfig `koanf:"tools"`
+}
+
+// IngestToolConfig is the per-tool ingest policy.
+type IngestToolConfig struct {
+	// Owned labels the cloud_resource assets the tool creates as owned
+	// rather than external. It never makes them probable: deckard never
+	// scans an ingested asset.
+	Owned bool `koanf:"owned"`
+	// MaxFindings caps findings per request (0 = 5000, the hard limit).
+	MaxFindings int `koanf:"max_findings"`
+	// ExpectedInterval is how often the tool is expected to post a complete
+	// run per scope; it is exported as deckard_ingest_expected_interval_seconds
+	// and DeckardIngestStale fires after twice that without one. 0 = no
+	// expectation.
+	ExpectedInterval time.Duration `koanf:"expected_interval"`
+}
+
+// MaxIngestFindings is the hard per-request findings limit.
+const MaxIngestFindings = 5000
 
 // VulnintelConfig configures exploit-intelligence enrichment (CISA KEV and
 // FIRST EPSS). Feeds are fetched from cisa.gov and api.first.org; set
@@ -430,6 +473,12 @@ func Defaults() map[string]any {
 		"vulnintel.epss_high":                     0.7,
 		"vulnintel.epss_medium":                   0.3,
 		"intel.enabled":                           true,
+		"ingest.enabled":                          true,
+		"ingest.rate_limit":                       "60/m",
+		"ingest.burst":                            10,
+		"ingest.max_concurrent":                   4,
+		"ingest.timeout":                          "2m",
+		"ingest.max_scopes_per_tool":              50,
 		"auth.mode":                               "token",
 		"auth.oidc.groups_claim":                  "groups",
 	}
@@ -583,6 +632,7 @@ func (c *Config) Validate() error {
 	}
 	c.validateVulnintel(add)
 	c.validateIntel(add)
+	c.validateIngest(add)
 	if c.Scheduling.ErrorRetry <= 0 {
 		add("scheduling.error_retry must be > 0")
 	}
@@ -834,6 +884,53 @@ func (c *Config) validatePlugins(add func(string, ...any)) {
 			add("plugins[%s]: invalid tier %q", p.Name, p.Tier)
 		}
 	}
+}
+
+func (c *Config) validateIngest(add func(string, ...any)) {
+	in := c.Ingest
+	if r, err := ParseRate(in.RateLimit); err != nil || r == 0 {
+		add("ingest.rate_limit %q: want N/s, N/m or N/h", in.RateLimit)
+	}
+	if in.Burst < 1 {
+		add("ingest.burst must be >= 1")
+	}
+	if in.MaxConcurrent < 1 {
+		add("ingest.max_concurrent must be >= 1")
+	}
+	if in.Timeout <= 0 {
+		add("ingest.timeout must be > 0")
+	}
+	if in.MaxScopesPerTool < 1 {
+		add("ingest.max_scopes_per_tool must be >= 1")
+	}
+	for name, t := range in.Tools {
+		if !validIngestTool(name) {
+			add("ingest.tools: invalid tool name %q (want ^[a-z0-9][a-z0-9-]{1,31}$)", name)
+		}
+		if t.MaxFindings < 0 || t.MaxFindings > MaxIngestFindings {
+			add("ingest.tools.%s.max_findings must be between 0 and %d", name, MaxIngestFindings)
+		}
+		if t.ExpectedInterval < 0 {
+			add("ingest.tools.%s.expected_interval must be >= 0", name)
+		}
+	}
+}
+
+// validIngestTool mirrors model.ValidIngestTool (config does not import the
+// domain packages).
+func validIngestTool(name string) bool {
+	if len(name) < 2 || len(name) > 32 {
+		return false
+	}
+	for i, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+		case r == '-' && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // prefixHosts returns the number of addresses in p, saturating at MaxUint64.

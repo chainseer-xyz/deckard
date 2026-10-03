@@ -9,7 +9,7 @@
 #   E2E_AM_PODS   space-separated Alertmanager pod names, ONE PER REPLICA; the alert-delivery
 #                 test is skipped when empty (Alertmanager replicas do not share alerts, so
 #                 every one must be queried)
-#   DECKARD_E2E_MUTATE=1   also run the tests that change finding state (acknowledge/reopen/rescan/sync)
+#   DECKARD_E2E_MUTATE=1   also run the tests that change state (acknowledge/reopen/rescan/sync, ingest self-test)
 #   DECKARD_NOTIFY_MIN_SEVERITY  the configured notification floor (default info)
 # Extra arguments are passed to `go test` (for example: -run TestPagination -v).
 set -eu

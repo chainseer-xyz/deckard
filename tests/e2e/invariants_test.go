@@ -11,8 +11,10 @@ import (
 	"time"
 )
 
-// The safety invariant, observed on the live system: a finding exists only on
-// an asset deckard may probe, i.e. an owned one.
+// The safety invariant, observed on the live system: a finding of deckard's own
+// checks exists only on an asset deckard may probe, i.e. an owned one.
+// Findings posted by external scanners (check ext.<tool>) are exempt: deckard
+// probed nothing to make them; TestIngestedAssetsAreNeverScanned covers them.
 func TestFindingsExistOnlyOnOwnedAssets(t *testing.T) {
 	e := loadEnv(t)
 	findings := e.listAll(t, "/api/v1/findings", nil)
@@ -21,6 +23,9 @@ func TestFindingsExistOnlyOnOwnedAssets(t *testing.T) {
 	}
 	ids := map[int][]string{}
 	for _, f := range findings {
+		if strings.HasPrefix(str(f, "check"), "ext.") {
+			continue
+		}
 		ids[num(f, "asset_id")] = append(ids[num(f, "asset_id")], str(f, "check"))
 	}
 	type res struct {
@@ -82,7 +87,9 @@ func TestFindingFieldInvariants(t *testing.T) {
 				bad = append(bad, tag+": empty "+k)
 			}
 		}
-		if sevRank[str(f, "severity")] >= sevRank["medium"] && strings.TrimSpace(str(f, "remediation")) == "" {
+		// External scanners do not always say how to fix what they report.
+		if sevRank[str(f, "severity")] >= sevRank["medium"] && strings.TrimSpace(str(f, "remediation")) == "" &&
+			!strings.HasPrefix(str(f, "check"), "ext.") {
 			bad = append(bad, tag+": medium+ finding without remediation")
 		}
 		if _, ok := f["evidence"].(obj); !ok {

@@ -197,6 +197,14 @@ func TestValidateErrors(t *testing.T) {
 		{"gcpdns empty zone entry", "sources: [{name: g, type: gcpdns, projects: [my-project-a], zones: [\"\"]}]", "zones must not contain empty"},
 		{"gcpdns projects wrong type", "sources: [{name: g, type: gcpdns, projects: {a: b}}]", "projects"},
 		{"gcpdns include_private wrong type", "sources: [{name: g, type: gcpdns, projects: [my-project-a], include_private: sometimes}]", "include_private"},
+		{"ingest bad rate", "ingest: {rate_limit: lots}", "ingest.rate_limit"},
+		{"ingest zero burst", "ingest: {burst: 0}", "ingest.burst"},
+		{"ingest zero concurrency", "ingest: {max_concurrent: 0}", "ingest.max_concurrent"},
+		{"ingest zero timeout", "ingest: {timeout: 0s}", "ingest.timeout"},
+		{"ingest zero scopes", "ingest: {max_scopes_per_tool: 0}", "ingest.max_scopes_per_tool"},
+		{"ingest bad tool", "ingest: {tools: {Prowler: {owned: true}}}", "invalid tool name \"Prowler\""},
+		{"ingest max findings", "ingest: {tools: {prowler: {max_findings: 9000}}}", "ingest.tools.prowler.max_findings"},
+		{"ingest negative interval", "ingest: {tools: {prowler: {expected_interval: -1h}}}", "ingest.tools.prowler.expected_interval"},
 		{"reserved source prefix", "sources: [{name: \"ingest:prowler\", type: static}]", "reserved for assets created by the ingest API"},
 		{"reserved plugin prefix", "plugins: [{name: ext.prowler, exec: [/bin/true], tier: passive}]", "reserved for findings posted to the ingest API"},
 		{"empty notify floor", "notify: {alertmanager: {min_severity: \"\"}}", "notify.alertmanager.min_severity"},
@@ -304,5 +312,27 @@ func TestVulnintelDefaultsAndOptOut(t *testing.T) {
 	}
 	if cfg.Vulnintel.Enabled {
 		t.Fatal("opt-out ignored")
+	}
+}
+
+func TestIngestConfig(t *testing.T) {
+	cfg, err := Load(writeCfg(t, "ingest:\n  tools:\n    prowler: {owned: true, max_findings: 2000, expected_interval: 24h}\n    e2e-selftest: {}\n"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := cfg.Ingest
+	if !in.Enabled || in.RateLimit != "60/m" || in.Burst != 10 || in.MaxConcurrent != 4 || in.Timeout != 2*time.Minute || in.MaxScopesPerTool != 50 {
+		t.Fatalf("defaults: %+v", in)
+	}
+	p := in.Tools["prowler"]
+	if !p.Owned || p.MaxFindings != 2000 || p.ExpectedInterval != 24*time.Hour {
+		t.Fatalf("prowler: %+v", p)
+	}
+	if _, ok := in.Tools["e2e-selftest"]; !ok {
+		t.Fatal("hyphenated tool name lost")
+	}
+	off, err := Load("", []string{"DECKARD_INGEST__ENABLED=false"})
+	if err != nil || off.Ingest.Enabled {
+		t.Fatalf("env opt-out: %+v %v", off.Ingest, err)
 	}
 }

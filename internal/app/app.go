@@ -197,6 +197,8 @@ func (a *App) build() error {
 		Logger:      a.log,
 		Registry:    a.metrics.Registry(),
 		Broadcaster: api.NewBroadcaster(),
+		Ingester:    a.proc,
+		Ingest:      cfg.Ingest,
 	})
 	return nil
 }

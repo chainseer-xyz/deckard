@@ -212,10 +212,47 @@ func (p *Processor) Process(ctx context.Context, asset model.Asset, checkName st
 		out.Resolved = append(out.Resolved, r.Resolved...)
 	}
 
-	if err := p.applySuppressions(ctx, asset.ID, &out, now); err != nil {
+	lapsed := store.FindingFilter{AssetID: asset.ID, Statuses: []model.FindingStatus{model.StatusSuppressed}}
+	if err := p.applySuppressions(ctx, lapsed, &out, now); err != nil {
 		return out, err
 	}
 	return out, nil
+}
+
+// Ingest applies one run reported by an external scanner (POST
+// /api/v1/ingest) with the same rules as Process: exploit intelligence raises
+// severities, store.IngestFindings reconciles the (tool, scope) set with the
+// built-in lifecycle and findings.resolve_after, and YAML suppressions apply
+// (and lapse) exactly as for built-in checks. The caller fills everything
+// in except Now and ResolveAfter, which come from the processor.
+func (p *Processor) Ingest(ctx context.Context, in store.IngestInput) (store.IngestResult, error) {
+	now := p.opts.now()
+	in.Now, in.ResolveAfter = now, p.cfg.ResolveAfter
+	if p.opts.intel != nil && len(in.Items) > 0 {
+		fis := make([]model.FindingInput, len(in.Items))
+		for i, it := range in.Items {
+			fis[i] = it.Finding
+		}
+		fis = p.applyIntel(fis)
+		items := make([]store.IngestItem, len(in.Items))
+		for i, it := range in.Items {
+			it.Finding = fis[i]
+			items[i] = it
+		}
+		in.Items = items
+	}
+	res, err := p.st.IngestFindings(ctx, in)
+	if err != nil {
+		return res, fmt.Errorf("ingest %s: %w", in.Check, err)
+	}
+	if res.Replay {
+		return res, nil
+	}
+	lapsed := store.FindingFilter{Check: in.Check, Statuses: []model.FindingStatus{model.StatusSuppressed}}
+	if err := p.applySuppressions(ctx, lapsed, &res.ReconcileResult, now); err != nil {
+		return res, err
+	}
+	return res, nil
 }
 
 // applySuppressions suppresses newly open findings that match YAML rules and
@@ -224,7 +261,10 @@ func (p *Processor) Process(ctx context.Context, asset model.Asset, checkName st
 // open are suppressed, and only suppressions this package made (marked with
 // ConfigNotePrefix) are lifted. Acknowledged and false-positive findings are
 // not open, so they are left alone.
-func (p *Processor) applySuppressions(ctx context.Context, assetID int64, r *store.ReconcileResult, now time.Time) error {
+//
+// lapsed selects the suppressed findings whose config suppression is
+// re-evaluated: the scanned asset's for a check run, the tool's for an ingest.
+func (p *Processor) applySuppressions(ctx context.Context, lapsed store.FindingFilter, r *store.ReconcileResult, now time.Time) error {
 	for _, list := range []*[]model.Finding{&r.Opened, &r.Reopened, &r.Updated} {
 		for i := range *list {
 			f := &(*list)[i]
@@ -244,7 +284,7 @@ func (p *Processor) applySuppressions(ctx context.Context, assetID int64, r *sto
 		}
 	}
 
-	sup, _, err := p.st.ListFindings(ctx, store.FindingFilter{AssetID: assetID, Statuses: []model.FindingStatus{model.StatusSuppressed}})
+	sup, _, err := p.st.ListFindings(ctx, lapsed)
 	if err != nil {
 		return fmt.Errorf("list suppressed: %w", err)
 	}
