@@ -30,6 +30,15 @@ check "external secret key"          "key: dsn" "$ext"
 
 split=$(helm template t deckard --set database.cnpg.enabled=true --set worker.enabled=true --set "roles={api,scheduler}")
 check "worker deployment"            "name: t-deckard-worker" "$split"
+# Only the api role listens on the http port; a worker probing /healthz there
+# is refused and restart-looped. Workers probe the metrics listener instead.
+splitworker=$(print -r -- "$split" | awk 'function emit(){ if (d ~ /kind: Deployment/ && d ~ /name: t-deckard-worker\n/) print d }
+  /^---/{ emit(); d=""; next } { d = d $0 "\n" } END { emit() }')
+absent "worker does not probe the api port" "/healthz" "$splitworker"
+check  "worker probes the metrics port" "tcpSocket" "$splitworker"
+if [[ $(print -r -- "$split" | grep -c "path: /healthz") == 1 ]]; then print "ok   server keeps http probes"; else print "FAIL server keeps http probes"; fail=1; fi
+noapi=$(helm template t deckard --set database.cnpg.enabled=true --set "roles={scheduler,worker}")
+absent "api-less server does not probe the api port" "/healthz" "$noapi"
 
 sm=$(helm template t deckard --set database.cnpg.enabled=true --set metrics.serviceMonitor.enabled=true)
 check "servicemonitor"               "kind: ServiceMonitor" "$sm"

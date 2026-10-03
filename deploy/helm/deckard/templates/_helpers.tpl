@@ -134,8 +134,19 @@ spec:
         {{- with $root.Values.extraEnvFrom }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+      {{- if has "api" .roles }}
       livenessProbe: {{- toYaml $root.Values.livenessProbe | nindent 8 }}
       readinessProbe: {{- toYaml $root.Values.readinessProbe | nindent 8 }}
+      {{- else }}
+      {{- /* Only the api role serves /healthz and /readyz on the http port; a
+           pod without it listens on the metrics port alone. */}}
+      livenessProbe:
+        tcpSocket: { port: metrics }
+        periodSeconds: {{ default 20 $root.Values.livenessProbe.periodSeconds }}
+      readinessProbe:
+        tcpSocket: { port: metrics }
+        periodSeconds: {{ default 10 $root.Values.readinessProbe.periodSeconds }}
+      {{- end }}
       resources: {{- toYaml .resources | nindent 8 }}
       volumeMounts:
         - { name: config, mountPath: /etc/deckard, readOnly: true }
