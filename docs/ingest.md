@@ -442,11 +442,220 @@ trufflehog's output file contains the raw secrets while the pod runs. It stays i
 pod's memory-backed `emptyDir` (gone with the pod, never on the node's disk), and `deckard
 ingest` hashes the values before anything is sent.
 
+## Prowler App
+
+If you already run **Prowler App** (its API, UI, worker and database, typically in
+Kubernetes), you do not need the Prowler CLI adapter above: Prowler App keeps scanning, and
+`deckard ingest prowler-app` **pulls** the current results from its REST API and posts them
+to the ingest API, one run per provider. deckard never runs Prowler and never touches the
+scanned accounts; it only reads what Prowler already found. Prowler App scans AWS, but also
+Azure, GCP, GitHub, Kubernetes and more, so adding a provider in Prowler App adds it to
+deckard on the next run with no deckard change.
+
+```sh
+export PROWLER_API_KEY=...   # see below
+export DECKARD_TOKEN=...
+deckard ingest prowler-app \
+  --api-url http://prowler-api.prowler.svc:8080 --api-key-env PROWLER_API_KEY \
+  --url https://deckard.example.com --token-env DECKARD_TOKEN \
+  [--provider-type aws,gcp,...] [--provider-uid 123456789012,...] \
+  [--min-severity medium] [--max-scan-age 48h] [--include-muted=false] [--dry-run]
+```
+
+Add `--dry-run` first: it prints the request of every provider (validated with the server's
+rules, never containing a credential) to stdout and the summary lines to stderr, and posts
+nothing.
+
+### Credentials
+
+Everything secret comes from environment variables named by flags; there is no flag that
+takes a secret, and none is ever printed, logged or put in an error or a request (errors
+that echo the server's text are scrubbed of every credential the command knows).
+
+| Flag | Variable holds |
+| --- | --- |
+| `--api-key-env` | a Prowler API key (preferred) |
+| `--email-env` and `--password-env` | a Prowler user; deckard exchanges them for a JWT at `POST /api/v1/tokens` (use instead of a key) |
+| `--token-env` | the deckard API token (not needed with `--dry-run`) |
+
+To create the API key, sign in to Prowler App as a user who may manage API keys, open your
+profile, create an API key and copy it when it is shown (it is shown once; revoke it there
+to cut access). Give the key a **read-only role**: a role with none of the `manage_*`
+permissions (users, account, billing, providers, integrations, scans) and with
+`unlimited_visibility`, or with access to exactly the provider groups you want pulled.
+deckard only issues `GET` requests (and the login `POST` for the JWT path). Menu and
+permission labels vary a little between Prowler versions.
+
+### Flags
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--api-url` | required | Prowler App API base URL (a trailing `/api/v1` is accepted) |
+| `--url`, `--token-env` | required unless `--dry-run` | deckard base URL and the variable holding its token |
+| `--provider-type` | all | comma list: `aws`, `gcp`, `azure`, `github`, `kubernetes`, ... |
+| `--provider-uid` | all | comma list: account ids, project ids, subscription ids, organisations, cluster names |
+| `--min-severity` | `medium` | `info`, `low`, `medium`, `high` or `critical`; lower findings are not reported |
+| `--max-scan-age` | `48h` | a completed scan older than this never makes a complete run |
+| `--include-muted` | `false` | also report findings muted in Prowler |
+| `--timeout` | `15m` | time limit of the whole run |
+| `--max-requests` | `1000` | request budget against the Prowler API for the whole run (retries count) |
+| `--proxy-from-env` | off | honour `HTTP_PROXY`/`HTTPS_PROXY` for the Prowler API |
+
+The Prowler side is a plain, careful HTTP client: TLS verification on for `https`, no
+redirect to another origin, `links.next` re-rooted on the configured host (a link naming
+another host is never contacted), no proxy from the environment unless asked for, a
+30 s timeout and a 16 MiB bound per response, and retries with backoff on network errors,
+429 and 5xx that honour `Retry-After` (at most a minute per wait, four attempts).
+
+### What is posted
+
+For every provider Prowler lists (optionally filtered), in a stable order:
+
+1. The **scope** is `<provider type>:<provider uid>`, for example `aws:123456789012` or
+   `gcp:my-project`; the tool is `prowler`, so findings are `ext.prowler`. This is a
+   different scope from the CLI adapter's `aws:<account>:<region>`: choose one source per
+   account, because a pull does not resolve what a CLI run posted under another scope.
+2. The **latest scan** is the newest scan of the provider that has run. `scheduled` and
+   `available` entries are placeholders for scans that have not started, so the next
+   scheduled scan does not count. It must be `completed`.
+3. Its findings come from `GET /api/v1/findings/latest` filtered to the provider, status
+   `FAIL`, not muted (unless `--include-muted`) and the severities at or above the floor,
+   with their resources included, following `links.next` until it ends.
+4. Each finding becomes one ingest finding per resource:
+
+| Ingest field | From |
+| --- | --- |
+| `key` | `<check id>:<resource uid>`, stable across scans |
+| `asset` | `cloud_resource` keyed by the resource uid; for a finding about no resource, `prowler:<type>:<provider uid>:<finding uid>` |
+| `title` | the check title (the check id if none) |
+| `description` | the finding's `status_extended`, plus the check's risk |
+| `remediation` | the recommendation text and its URL |
+| `severity` | Prowler's (`informational` becomes `info`; an unrecognised value is `medium`) |
+| `tags` | provider type, service, region, check id, `prowler` |
+| `evidence` | region, service, resource type, scan id, `first_seen_at`, Prowler's `delta` |
+| `observed_at` | the scan's `completed_at` |
+
+Evidence is an explicit allow-list. Raw results, resource tags, details and metadata are not
+read at all (the query asks Prowler for sparse fields, and the decoder ignores the rest
+anyway), so a sensitive detail of a scanned resource cannot reach deckard.
+
+### When a run is complete
+
+`complete: true` is sent **only when every one of these holds**; the rule is that an
+uncertain run is an incomplete run, and an incomplete run only opens and refreshes findings
+(see [Reconciliation](#reconciliation-semantics-and-why)), so a stale or failed scan can
+never resolve anything:
+
+1. the provider is connected (`connection.connected` is `true`);
+2. the newest scan that has run is `completed`, not executing, failed or cancelled, and has a
+   `completed_at`;
+3. that scan completed no more than `--max-scan-age` ago;
+4. every page was fetched without error, the number of findings equals the total the server
+   announced, no finding appeared on two pages and every finding belongs to that scan;
+5. no newer scan completed while the findings were being fetched;
+6. no finding was unmappable or mapped from doubtful data (an undecodable finding, a
+   resource missing from the response, a finding without a resources relationship); and
+7. the run fits in one request: at most 5000 findings (or the tool's `max_findings`) and
+   10 MiB after the severity floor.
+
+Otherwise the run is posted with `complete: false` whenever there is something valid to post
+(an API failure on page 2 posts page 1; a disconnected provider or a stale scan posts what
+Prowler last found), and the reasons are printed on stderr and in the summary line. When
+nothing valid can be posted (the provider never completed a scan, the first page failed), the
+provider is reported and skipped. Posting the same scan again is a replay the server
+ignores; a changed set for the same scan updates the findings but, not being newer, resolves
+nothing. Duplicate keys within a run (Prowler reporting one check twice for a resource) are
+merged deterministically, keeping the most severe; the key set, which is what absence is
+judged on, is unchanged, so this does not make a run incomplete.
+
+Resolution then works as for any producer: a finding that a **complete** run of a newer scan
+no longer reports accrues a miss and resolves after `findings.resolve_after` consecutive
+complete misses. A finding fixed, or muted, in Prowler therefore resolves in deckard after
+that many Prowler scans. Keep the flags stable: raising `--min-severity` or leaving out
+`--include-muted` makes the findings that fall out of scope resolve the same way.
+
+### The cap
+
+A request is one run of one scope: the server applies a run atomically and does not support
+a run spread over several requests, so a provider whose failing findings exceed 5000 (or
+10 MiB) cannot be posted as a complete run. The default floor of `medium` keeps real estates
+under the cap. If a provider is still over, the connector does **not** truncate silently: it
+posts the most severe findings that fit as an **incomplete** run (opening and refreshing
+only), says so, and exits 4 with a message to raise `--min-severity` (or split the estate
+with `--provider-uid`). It also stops reading pages once the cap is clearly exceeded. The
+connector assumes the default cap: if the server sets a lower `ingest.tools.prowler.max_findings`,
+a bigger run is rejected whole (exit 2) until that is raised or the floor is.
+
+### Exit codes and output
+
+One line per provider goes to stdout (to stderr with `--dry-run`, where stdout carries the
+requests), for example:
+
+```text
+prowler-app: scope=aws:123456789012 scan=0191f3a2-... findings=41 complete=true posted=true accepted=41 opened=2 reopened=0 refreshed=39 resolved_pending=3 resolved=1 applied_as_complete=true replay=false
+prowler-app: scope=gcp:my-project scan=0191f3a9-... findings=7 complete=false posted=true accepted=7 ... reason="the provider is not connected"
+```
+
+| Code | Meaning |
+| --- | --- |
+| 0 | every provider was posted complete (or the server replayed the run) |
+| 1 | usage, configuration or credential error (including Prowler refusing the credentials); nothing further is posted |
+| 2 | deckard rejected a request, or some of its items |
+| 3 | Prowler or deckard could not be reached |
+| 4 | a run was posted incomplete, or a provider could not be pulled, because of a condition in Prowler (stale or failed scan, disconnected provider, run over the cap, an API error) |
+
+A provider that fails does not stop the others. With several providers the worst code wins
+(2 over 3 over 4). A server that downgrades a complete run only because it is not newer than
+one it already accepted (the same scan, changed since) is not an error.
+
+### CronJob
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: prowler-app-ingest, namespace: security }
+spec:
+  schedule: "0 */6 * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          automountServiceAccountToken: false
+          securityContext: { runAsNonRoot: true, runAsUser: 65532, fsGroup: 65532, seccompProfile: { type: RuntimeDefault } }
+          containers:
+            - name: ingest
+              image: ghcr.io/chainseer-xyz/deckard:latest   # pin
+              args: ["ingest", "prowler-app",
+                     "--api-url", "http://prowler-api.prowler.svc:8080", "--api-key-env", "PROWLER_API_KEY",
+                     "--url", "http://deckard.deckard.svc:8080", "--token-env", "DECKARD_TOKEN"]
+              env:
+                - name: PROWLER_API_KEY
+                  valueFrom: { secretKeyRef: { name: prowler-api-key, key: key } }
+                - name: DECKARD_TOKEN
+                  valueFrom: { secretKeyRef: { name: deckard-ingest, key: token } }
+              resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 512Mi } }
+              securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+```
+
+Create the Secrets first (`kubectl -n security create secret generic prowler-api-key
+--from-literal=key="$PROWLER_API_KEY"`). There is no CPU limit and no scratch volume: the
+command keeps everything in memory. A non-zero exit fails the pod and `restartPolicy:
+OnFailure` retries it up to `backoffLimit` times (a retry of a good run is a replay, so it
+is harmless); a Job that ends failed is the signal to alert on, for example with
+`kube_job_status_failed` from kube-state-metrics, and the exit code in the pod's logs says
+whether to look at Prowler (4), the network (3) or deckard (2). Allow the pod egress to the
+Prowler API Service and to deckard. `DeckardIngestStale` still fires if no complete run of a
+scope lands within twice `ingest.tools.prowler.expected_interval`.
+
 ## Limits and operational notes
 
 - At most 5000 findings and 10 MiB per request. A larger run fails locally (exit 1); split
   the scope (per account, region, cluster or repository) rather than posting part of it as
-  complete.
+  complete. (`deckard ingest prowler-app` instead posts the most severe findings that fit as
+  an incomplete run and exits 4; see [Prowler App](#prowler-app).)
 - Re-labelling a tool as owned (or not) re-asserts the class on its assets at its next run.
 - Ingested assets stay in the inventory after their findings resolve.
 - Run each producer with stable flags and scope (see [Reconciliation](#reconciliation-semantics-and-why)).
