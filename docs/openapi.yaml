@@ -575,7 +575,13 @@ components:
         type: {type: string}
         last_run: {type: string, format: date-time}
         last_ok: {type: string, format: date-time}
-        error: {type: string}
+        error: {type: string, description: Present when the last run failed}
+        warning:
+          type: string
+          description: >-
+            Present when the last run completed but was partial (for example a
+            permission was missing for part of the source). Removals are skipped
+            while a source reports a warning, so the inventory may be incomplete.
         asset_count: {type: integer}
         duration_ms: {type: integer, format: int64}
     ScanRun:
