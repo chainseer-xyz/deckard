@@ -59,6 +59,11 @@ func helperPlugin(mode string) int {
 			},
 		}
 		_ = json.NewEncoder(os.Stdout).Encode(out)
+	case "noisy": // verbose logging must not fail an otherwise good run
+		for i := 0; i < 64; i++ {
+			_, _ = os.Stderr.WriteString(strings.Repeat("x", 1023) + "\n")
+		}
+		_, _ = os.Stdout.WriteString(`{"findings":[{"severity":"low","title":"ok"}]}`)
 	case "badjson":
 		_, _ = os.Stdout.WriteString("not json at all")
 	case "twoobjects":
@@ -294,5 +299,16 @@ func TestAssetHost(t *testing.T) {
 		if got := assetHost(tc.a); got != tc.want {
 			t.Errorf("%+v: %q", tc.a, got)
 		}
+	}
+}
+
+func TestVerboseStderrDoesNotFailRun(t *testing.T) {
+	c := New(cfgFor("noisy", nil), scope("app.example.com"))
+	res, err := c.Run(context.Background(), urlTarget())
+	if err != nil {
+		t.Fatalf("64 KiB of stderr failed the run: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("findings %+v", res.Findings)
 	}
 }

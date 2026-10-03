@@ -200,6 +200,21 @@ func (l *limitWriter) Write(b []byte) (int, error) {
 	return l.buf.Write(b)
 }
 
+// truncWriter keeps the first max bytes and silently drops the rest: a
+// write error would make os/exec stop draining the pipe, killing the child
+// with SIGPIPE or failing Wait, so log volume alone would fail a good run.
+type truncWriter struct {
+	buf bytes.Buffer
+	max int
+}
+
+func (l *truncWriter) Write(b []byte) (int, error) {
+	if room := l.max - l.buf.Len(); room > 0 {
+		l.buf.Write(b[:min(len(b), room)])
+	}
+	return len(b), nil
+}
+
 func (p *pluginCheck) exec(ctx context.Context, stdin []byte) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, p.timeout())
 	defer cancel()
@@ -214,7 +229,7 @@ func (p *pluginCheck) exec(ctx context.Context, stdin []byte) ([]byte, error) {
 	cmd.Env = p.env()
 	cmd.Stdin = bytes.NewReader(stdin)
 	stdout := &limitWriter{max: maxStdout, cancel: cancel}
-	stderr := &limitWriter{max: maxStderr}
+	stderr := &truncWriter{max: maxStderr}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	setProcessGroup(cmd)
 	cmd.WaitDelay = 2 * time.Second
