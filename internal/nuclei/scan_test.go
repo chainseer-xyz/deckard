@@ -372,11 +372,11 @@ func TestScanWithFakeBinary(t *testing.T) {
 	}
 }
 
-func TestScaledRunTimeoutGrowsWithBatch(t *testing.T) {
-	if got := scaledRunTimeout(10*time.Second, 1); got != 10*time.Second {
+func TestProcessTimeoutGrowsWithBatch(t *testing.T) {
+	if got := ProcessTimeout(map[string]any{"run_timeout": "10s"}, 1); got != 10*time.Second {
 		t.Errorf("one target timeout = %s", got)
 	}
-	if got := scaledRunTimeout(10*time.Second, 20); got != 10*time.Second+19*30*time.Second {
+	if got := ProcessTimeout(map[string]any{"run_timeout": "10s"}, 20); got != 10*time.Second+19*30*time.Second {
 		t.Errorf("twenty target timeout = %s, want %s", got, 10*time.Second+19*30*time.Second)
 	}
 }

@@ -281,14 +281,14 @@ func (s *Scanner) runSettings(req ScanRequest, hosts int) (args []string, runTim
 	if cfg["interactsh"] != true {
 		args = append(args, "-no-interactsh")
 	}
-	base := time.Duration(secondsOf(cfg["run_timeout"], 600)) * time.Second
-	return args, scaledRunTimeout(base, hosts), nil
+	return args, ProcessTimeout(cfg, hosts), nil
 }
 
-func scaledRunTimeout(base time.Duration, targets int) time.Duration {
-	if base <= 0 {
-		base = 10 * time.Minute
-	}
+// ProcessTimeout returns the outer deadline for one template-limited nuclei
+// process. Engine workers use the same calculation for their River backstop so
+// an operator-raised run_timeout cannot be cut short by a fixed job timeout.
+func ProcessTimeout(cfg map[string]any, targets int) time.Duration {
+	base := time.Duration(secondsOf(cfg["run_timeout"], 600)) * time.Second
 	if targets < 1 {
 		targets = 1
 	}

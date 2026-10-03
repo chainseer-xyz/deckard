@@ -72,6 +72,7 @@ type Metrics struct {
 	nucleiErrors    *prometheus.CounterVec
 	nucleiSource    *prometheus.GaugeVec
 	nucleiLastClean prometheus.Gauge
+	nucleiMu        sync.Mutex
 }
 
 var _ Recorder = (*Metrics)(nil)
@@ -157,7 +158,15 @@ func (m *Metrics) ObserveNucleiRun(d time.Duration, targets int, source string, 
 	if source != "downloaded" && source != "baked" && source != "configured" {
 		source = "configured"
 	}
-	m.nucleiSource.WithLabelValues(source).Set(1)
+	m.nucleiMu.Lock()
+	for _, known := range []string{"downloaded", "baked", "configured"} {
+		value := float64(0)
+		if known == source {
+			value = 1
+		}
+		m.nucleiSource.WithLabelValues(known).Set(value)
+	}
+	m.nucleiMu.Unlock()
 	if d > 0 {
 		m.nucleiDuration.WithLabelValues(source).Observe(d.Seconds())
 	}

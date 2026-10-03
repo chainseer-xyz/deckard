@@ -34,6 +34,19 @@ type fakeTemplates struct {
 	skip bool
 }
 
+func TestDeltaWorkerTimeoutTracksConfiguredNucleiRuntime(t *testing.T) {
+	r := newRunner(Deps{Config: config.Config{Checks: map[string]map[string]any{
+		nuclei.NameActive: {"run_timeout": "30m"},
+	}}})
+	want := nuclei.ProcessTimeout(r.Config.Checks[nuclei.NameActive], deltaAssetBatch) + deltaWorkerMargin
+	if got := (&scanNewTemplatesWorker{r: r}).Timeout(nil); got != want {
+		t.Errorf("new-template worker timeout = %s, want %s", got, want)
+	}
+	if got := (&scanCVEsWorker{r: r}).Timeout(nil); got != want {
+		t.Errorf("CVE worker timeout = %s, want %s", got, want)
+	}
+}
+
 func (f *fakeTemplates) Update(context.Context) (updater.Update, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

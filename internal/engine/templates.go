@@ -36,8 +36,9 @@ const (
 const DeltaCheck = "cve.nuclei.delta"
 
 const (
-	deltaTemplateChunk = 500 // templates per job (keeps job args small)
-	deltaAssetBatch    = 50  // assets per job (bounds nuclei process count)
+	deltaTemplateChunk = 500              // templates per job (keeps job args small)
+	deltaAssetBatch    = 50               // assets per job (bounds nuclei process count)
+	deltaWorkerMargin  = 10 * time.Minute // storage/reconciliation time after the nuclei process
 	deltaNotReadyMax   = 12 * time.Hour
 	deltaNotReadySnooz = 5 * time.Minute
 )
@@ -163,7 +164,7 @@ func (w *scanNewTemplatesWorker) Work(ctx context.Context, j *river.Job[ScanNewT
 	return notReadyResult(err, j.CreatedAt, w.r.now())
 }
 func (w *scanNewTemplatesWorker) Timeout(*river.Job[ScanNewTemplatesArgs]) time.Duration {
-	return 30 * time.Minute
+	return w.deltaTimeout()
 }
 
 type scanCVEsWorker struct {
@@ -175,7 +176,25 @@ func (w *scanCVEsWorker) Work(ctx context.Context, j *river.Job[ScanCVEsArgs]) e
 	err := w.r.runDelta(ctx, deltaJob{Kind: KindScanCVEs, CVEs: j.Args.CVEs, AssetIDs: j.Args.AssetIDs})
 	return notReadyResult(err, j.CreatedAt, w.r.now())
 }
-func (w *scanCVEsWorker) Timeout(*river.Job[ScanCVEsArgs]) time.Duration { return 30 * time.Minute }
+func (w *scanCVEsWorker) Timeout(*river.Job[ScanCVEsArgs]) time.Duration {
+	return w.deltaTimeout()
+}
+
+func (w *scanNewTemplatesWorker) deltaTimeout() time.Duration {
+	return deltaTimeout(w.r)
+}
+
+func (w *scanCVEsWorker) deltaTimeout() time.Duration {
+	return deltaTimeout(w.r)
+}
+
+func deltaTimeout(r *runner) time.Duration {
+	var cfg map[string]any
+	if r != nil {
+		cfg = r.Config.Checks[nuclei.NameActive]
+	}
+	return nuclei.ProcessTimeout(cfg, deltaAssetBatch) + deltaWorkerMargin
+}
 
 // notReadyResult turns "this node lacks the templates" into a snooze (the node's
 // own updater or catch-up loop will install them), cancelling a job that has

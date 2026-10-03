@@ -190,7 +190,7 @@ and a 20-target single process was still running after 265.92s at about 746 MiB 
 New-template and CVE-targeted scans batch up to 50 targets per process; the process gate defaults to one.
 The active check timeout is scaled for batched targets, while the generic two-minute engine timeout is not
 used for `cve.nuclei`. If runs time out, inspect `deckard_nuclei_run_duration_seconds`,
-`deckard_nuclei_errors_total{reason}`, pod memory and the active queue; lower batch size or concurrency,
+`deckard_nuclei_errors_total{reason}`, pod memory and the active queue; lower concurrency,
 raise `checks.cve.nuclei.run_timeout`, and size the pod above the measured per-process memory.
 
 ### CVE-targeted scans

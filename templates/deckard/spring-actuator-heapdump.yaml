@@ -8,6 +8,7 @@ info:
   remediation: Disable heapdump in production or protect actuator endpoints with strong authentication.
 http:
   - method: GET
+    max-size: 1024
     path:
       - "{{BaseURL}}/actuator/heapdump"
     matchers:

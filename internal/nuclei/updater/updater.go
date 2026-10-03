@@ -608,8 +608,12 @@ func (u *Updater) ScanEnv() ([]string, func(), error) {
 			return nil, func() {}, err
 		}
 	}
-	cur, _ := u.CurrentDir()
-	return nucleiEnv(root, cur), func() { _ = os.RemoveAll(root) }, nil
+	active, _, err := u.ActiveDir()
+	if err != nil {
+		_ = os.RemoveAll(root)
+		return nil, func() {}, err
+	}
+	return nucleiEnv(root, active), func() { _ = os.RemoveAll(root) }, nil
 }
 
 func tail(b []byte) string {

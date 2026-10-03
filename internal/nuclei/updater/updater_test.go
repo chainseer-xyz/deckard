@@ -127,6 +127,25 @@ func TestActiveDirUsesDownloadedThenBakedFallback(t *testing.T) {
 	}
 }
 
+func TestScanEnvUsesBakedFallbackAsTemplateRoot(t *testing.T) {
+	baked := release(t)
+	e := newEnv(t, func(c *updater.Config) { c.BakedDir = baked })
+
+	env, cleanup, err := e.u.ScanEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	vars := map[string]string{}
+	for _, kv := range env {
+		key, value, _ := strings.Cut(kv, "=")
+		vars[key] = value
+	}
+	if got, want := vars["NUCLEI_TEMPLATES_DIR"], resolve(t, baked); got != want {
+		t.Fatalf("NUCLEI_TEMPLATES_DIR = %q, want baked fallback %q", got, want)
+	}
+}
+
 func TestFirstInstall(t *testing.T) {
 	e := newEnv(t, nil)
 	e.publish("v10.0.0", release(t), "http/misconfiguration/filler-1.yaml")

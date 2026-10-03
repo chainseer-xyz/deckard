@@ -159,7 +159,7 @@ groups:
           description: "cve.nuclei cannot run until the first template update succeeds."
 
       - alert: DeckardNucleiCheckStale
-        expr: absent(deckard_nuclei_last_clean_run_timestamp) or time() - deckard_nuclei_last_clean_run_timestamp > 6 * 3600
+        expr: absent(deckard_nuclei_last_clean_run_timestamp) or max(deckard_nuclei_last_clean_run_timestamp) == 0 or time() - max(deckard_nuclei_last_clean_run_timestamp) > 6 * 3600
         for: 30m
         labels:
           severity: high

@@ -82,6 +82,23 @@ func TestRecorderMetrics(t *testing.T) {
 	}
 }
 
+func TestNucleiTemplateSourceIsOneHot(t *testing.T) {
+	m := metrics.New("dev", "none")
+	m.ObserveNucleiRun(time.Second, 1, "baked", nil)
+	m.ObserveNucleiRun(time.Second, 1, "downloaded", nil)
+
+	out := scrape(t, m)
+	for _, want := range []string{
+		`deckard_nuclei_templates_source{source="baked"} 0`,
+		`deckard_nuclei_templates_source{source="configured"} 0`,
+		`deckard_nuclei_templates_source{source="downloaded"} 1`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in scrape", want)
+		}
+	}
+}
+
 func TestStateCollector(t *testing.T) {
 	fs := fakestore.New()
 	fs.StatsVal = store.Stats{

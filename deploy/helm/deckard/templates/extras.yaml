@@ -31,9 +31,6 @@ spec:
   storageClassName: {{ . }}
   {{- end }}
 {{- end }}
-{{- if and .Values.nuclei.customTemplates.existingClaim (not .Values.nuclei.customTemplates.configMap) }}
-{{- /* The claim is operator-owned; never create or mutate it here. */}}
-{{- end }}
 {{- if .Values.podDisruptionBudget.enabled }}
 ---
 apiVersion: policy/v1
