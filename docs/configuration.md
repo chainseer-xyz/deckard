@@ -178,6 +178,7 @@ Each entry needs a unique `name` and a `type`.
 sources:
   - { name: cf, type: cloudflare, token_env: CF_API_TOKEN }       # read-only token
   - { name: aws, type: route53, region: us-east-1, role_arn: "" }  # default AWS credential chain
+  - { name: gcp, type: gcpdns, projects: [my-project-a] }          # Application Default Credentials
   - { name: prod, type: kubernetes, kubeconfig: /etc/deckard/kc, contexts: [prod] }
   - { name: this, type: kubernetes, in_cluster: true }
   - { name: extra, type: static, hostnames: [a.example.com], ips: [203.0.113.5], cidrs: [203.0.113.0/28] }
@@ -202,6 +203,91 @@ Multiple accounts are multiple entries, one `role_arn` each. See
 ```
 
 A source that fails never causes its assets to be marked removed.
+
+### Google Cloud DNS (`type: gcpdns`)
+
+Discovers Cloud DNS managed zones and their record sets and produces the same
+assets and relations as the Route 53 source (zones, hostnames in their zone,
+`resolves_to` and `cname_to` relations, `record_types`), so every check works on
+it unchanged. In addition the zone asset carries `dnssec` (`on`, `off` or
+`transfer`, from the zone's `dnssecConfig.state`), every target of a weighted,
+geo or primary/backup routing policy is discovered (not just the first), and
+internal load balancers named by a policy are recorded as `cloud_resource`
+assets. CNAME targets that are Google-hosted endpoints (Cloud Run, App Engine,
+Cloud Storage, Cloud Functions, Firebase) get an `alias_target_type`.
+
+```yaml
+sources:
+  - name: gcp
+    type: gcpdns
+    projects: [my-project-a, my-project-b]   # required: project ids to scan (projects are not discovered)
+    include_private: false                   # private zones are skipped unless true
+    zones: []                                # optional allow-list of zone names or DNS names; empty = all
+```
+
+- `projects` is required. Each entry is a project **id** (not the number or
+  display name); a malformed id is rejected at startup.
+- Private zones are skipped by default: their names are not visible from the
+  internet. With `include_private: true` they are inventoried too; a private
+  zone with the same DNS name as a public one is never merged into it.
+  Peering zones serve no records and are always skipped.
+- `zones` matches either the managed zone name (`prod-zone`) or its DNS name
+  (`example.com`, case and trailing dot ignored). It only narrows the set:
+  private zones still need `include_private`.
+
+**Credentials** are Application Default Credentials only: Workload Identity on
+GKE, a service-account key named by `GOOGLE_APPLICATION_CREDENTIALS`, or
+`gcloud auth application-default login` locally. There is no key or token
+setting in the config. Credentials are looked up when a sync runs, so a missing
+identity shows up as a failed sync in the source's status, not as a failed start.
+
+**IAM**: grant `roles/dns.reader` to the identity on each project listed. It
+includes `dns.managedZones.list` and `dns.resourceRecordSets.list`, which is all
+the source calls; nothing is ever written. The Cloud DNS API must be enabled in
+each project.
+
+**Workload Identity on GKE**: bind the Kubernetes ServiceAccount the chart
+creates to a Google service account that has `roles/dns.reader`, and annotate
+it through the chart:
+
+```sh
+gcloud iam service-accounts add-iam-policy-binding \
+  deckard-dns@my-project-a.iam.gserviceaccount.com \
+  --role roles/iam.workloadIdentityUser \
+  --member "serviceAccount:my-project-a.svc.id.goog[deckard/deckard]"
+```
+
+```yaml
+# values.yaml
+serviceAccount:
+  annotations:
+    iam.gke.io/gcp-service-account: deckard-dns@my-project-a.iam.gserviceaccount.com
+config:
+  sources:
+    - { name: gcp, type: gcpdns, projects: [my-project-a, my-project-b] }
+```
+
+(The member is `PROJECT.svc.id.goog[NAMESPACE/SERVICEACCOUNT]`; adjust the
+namespace and the ServiceAccount name to your release.)
+
+**Partial discovery.** A project the identity cannot read (HTTP 403, or 404 for
+a wrong id or a disabled API) or a zone whose record sets cannot be listed does
+not fail the sync. The rest is still returned and the source reports
+
+```
+partial discovery, removals skipped: gcpdns project my-project-b: managed zones not listed (HTTP 403 ...; needs dns.managedZones.list, grant roles/dns.reader)
+```
+
+naming the project or zone and the missing permission. A partial sync updates
+what it saw but never marks unseen assets removed, so a permission gap cannot
+make assets vanish from the inventory. The sync fails outright (and also
+removes nothing) when the credentials do not work, when listing zones fails for
+a reason other than a permission or missing-project error, or when no listed
+project could be read at all.
+
+Requests are rate limited (5 per second), time-limited, size-limited and retried
+with backoff on 429 and 5xx, honouring `Retry-After`. Tokens and URL query
+strings never appear in logs, errors or warnings.
 
 ## Scope
 
