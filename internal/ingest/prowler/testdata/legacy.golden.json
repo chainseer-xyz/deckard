@@ -1,0 +1,61 @@
+{
+  "tool": "prowler",
+  "scope": "test:scope",
+  "complete": true,
+  "observed_at": "2026-10-03T07:00:00Z",
+  "findings": [
+    {
+      "key": "cloudtrail_multi_region_enabled:prowler:aws:123456789012:us-east-1:cloudtrail_multi_region_enabled",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "prowler:aws:123456789012:us-east-1:cloudtrail_multi_region_enabled"
+      },
+      "title": "No CloudTrail trails enabled and logging were found.",
+      "description": "Ensure CloudTrail is enabled in all regions.\n\nRisk: AWS CloudTrail records API activity; without it incidents cannot be investigated.",
+      "severity": "low",
+      "remediation": "Enable a multi-region CloudTrail trail.",
+      "tags": [
+        "prowler",
+        "cloudtrail_multi_region_enabled",
+        "cloudtrail",
+        "aws"
+      ],
+      "evidence": {
+        "account": "123456789012",
+        "check_id": "cloudtrail_multi_region_enabled",
+        "finding_uid": "prowler-aws-cloudtrail_multi_region_enabled-123456789012-us-east-1-123456789012",
+        "provider": "aws",
+        "region": "us-east-1",
+        "resource_type": "AwsCloudTrailTrail",
+        "service": "cloudtrail"
+      }
+    },
+    {
+      "key": "ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_22:arn:aws:ec2:us-west-2:123456789012:security-group/sg-0123456789abcdef0",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "arn:aws:ec2:us-west-2:123456789012:security-group/sg-0123456789abcdef0"
+      },
+      "title": "Security group example-bastion (sg-0123456789abcdef0) has SSH port 22 open to the Internet.",
+      "description": "Ensure no security groups allow ingress from 0.0.0.0/0 or ::/0 to SSH port 22.\n\nRisk: If Security groups are not properly configured the attack surface is increased.",
+      "severity": "high",
+      "remediation": "Apply Zero Trust approach. Implement a process to scan and remediate unrestricted or overly permissive security groups.\n\nReference: https://docs.aws.amazon.com/vpc/latest/userguide/VPC_SecurityGroups.html\n\nCLI: aws ec2 revoke-security-group-ingress --group-id sg-0123456789abcdef0 --protocol tcp --port 22 --cidr 0.0.0.0/0",
+      "tags": [
+        "prowler",
+        "ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_22",
+        "ec2",
+        "aws"
+      ],
+      "evidence": {
+        "account": "123456789012",
+        "check_id": "ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_22",
+        "finding_uid": "prowler-aws-ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_22-123456789012-us-west-2-sg-0123456789abcdef0",
+        "provider": "aws",
+        "region": "us-west-2",
+        "resource_name": "sg-0123456789abcdef0",
+        "resource_type": "AwsEc2SecurityGroup",
+        "service": "ec2"
+      }
+    }
+  ]
+}

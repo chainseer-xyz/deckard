@@ -1,0 +1,50 @@
+{
+  "clusterName": "prod-example",
+  "customerGUID": "",
+  "generationTime": "2026-10-03T07:00:00Z",
+  "summaryDetails": {
+    "complianceScore": 61.5,
+    "status": "failed",
+    "frameworks": [{"name": "NSA", "complianceScore": 61.5, "status": "failed"}],
+    "controls": {
+      "C-0017": {"name": "Immutable container filesystem", "status": "failed", "controlID": "C-0017", "scoreFactor": 3, "complianceScore": 50, "ResourceCounters": {"passedResources": 1, "failedResources": 1, "skippedResources": 0}, "category": {"name": "Workload", "id": "Cat-5"}},
+      "C-0057": {"name": "Privileged container", "status": "failed", "controlID": "C-0057", "scoreFactor": 8, "complianceScore": 50, "ResourceCounters": {"passedResources": 1, "failedResources": 1, "skippedResources": 0}, "category": {"name": "Workload", "id": "Cat-5"}},
+      "C-0035": {"name": "Administrative Roles", "status": "failed", "controlID": "C-0035", "scoreFactor": 6, "complianceScore": 0, "category": {"name": "Access control", "id": "Cat-2"}},
+      "C-0013": {"name": "Non-root containers", "status": "passed", "controlID": "C-0013", "scoreFactor": 6}
+    }
+  },
+  "resources": [
+    {"resourceID": "path=1/api=apps/v1/payments/Deployment/api", "object": {"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "api", "namespace": "payments"}}},
+    {"resourceID": "path=2/api=apps/v1/kube-system/DaemonSet/node-agent", "object": {"apiVersion": "apps/v1", "kind": "DaemonSet", "metadata": {"name": "node-agent", "namespace": "kube-system"}}},
+    {"resourceID": "rbac.authorization.k8s.io/v1//ClusterRoleBinding/ci-deployer", "object": {"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRoleBinding", "metadata": {"name": "ci-deployer"}}}
+  ],
+  "results": [
+    {
+      "resourceID": "path=1/api=apps/v1/payments/Deployment/api",
+      "controls": [
+        {"controlID": "C-0017", "name": "Immutable container filesystem", "status": {"status": "failed"},
+         "rules": [{"name": "immutable-container-filesystem", "status": "failed", "paths": [
+           {"failedPath": "", "fixPath": {"path": "spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem", "value": "true"}},
+           {"failedPath": "", "fixPath": {"path": "spec.template.spec.containers[1].securityContext.readOnlyRootFilesystem", "value": "true"}}
+         ]}]},
+        {"controlID": "C-0013", "name": "Non-root containers", "status": {"status": "passed"}, "rules": []}
+      ]
+    },
+    {
+      "resourceID": "path=2/api=apps/v1/kube-system/DaemonSet/node-agent",
+      "controls": [
+        {"controlID": "C-0057", "name": "Privileged container", "status": {"status": "failed"},
+         "rules": [{"name": "rule-privilege-escalation", "status": "failed", "paths": [{"failedPath": "spec.template.spec.containers[0].securityContext.privileged", "fixPath": {"path": "", "value": ""}}]}]},
+        {"controlID": "C-0017", "name": "Immutable container filesystem", "status": {"status": "skipped", "subStatus": "configuration"}, "rules": []}
+      ]
+    },
+    {
+      "resourceID": "rbac.authorization.k8s.io/v1//ClusterRoleBinding/ci-deployer",
+      "controls": [
+        {"controlID": "C-0035", "name": "Administrative Roles", "status": "failed",
+         "rules": [{"name": "rule-list-all-cluster-admins", "paths": [{"reviewPath": "roleRef.name"}, {"reviewPath": "subjects[0]"}]}]}
+      ]
+    }
+  ],
+  "metadata": {"scanMetadata": {"format": "json", "formatVersion": "v2", "targetType": "cluster"}}
+}

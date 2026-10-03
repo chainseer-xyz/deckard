@@ -1,0 +1,137 @@
+{
+  "tool": "s3scanner",
+  "scope": "test:scope",
+  "complete": true,
+  "observed_at": "2026-10-03T07:00:00Z",
+  "findings": [
+    {
+      "key": "aws:example-public-site:all-users-read",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "arn:aws:s3:::example-public-site"
+      },
+      "title": "Bucket example-public-site grants READ to everyone",
+      "description": "s3scanner found that anyone on the internet can list the objects of the aws bucket example-public-site (region us-west-2): its ACL grants READ to everyone.",
+      "severity": "high",
+      "remediation": "Remove the AllUsers/AuthenticatedUsers grant from the bucket ACL, enable S3 Block Public Access on the bucket and the account, and set Object Ownership to BucketOwnerEnforced so ACLs no longer apply.",
+      "tags": [
+        "s3scanner",
+        "all-users-read",
+        "aws"
+      ],
+      "evidence": {
+        "bucket": "example-public-site",
+        "date_scanned": "2026-10-03T07:00:00Z",
+        "grantee": "everyone",
+        "num_objects": 0,
+        "objects_enumerated": false,
+        "permission": "READ",
+        "provider": "aws",
+        "region": "us-west-2"
+      }
+    },
+    {
+      "key": "aws:example-public-site:auth-users-read",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "arn:aws:s3:::example-public-site"
+      },
+      "title": "Bucket example-public-site grants READ to any authenticated user",
+      "description": "s3scanner found that any authenticated cloud account can list the objects of the aws bucket example-public-site (region us-west-2): its ACL grants READ to any authenticated user.",
+      "severity": "medium",
+      "remediation": "Remove the AllUsers/AuthenticatedUsers grant from the bucket ACL, enable S3 Block Public Access on the bucket and the account, and set Object Ownership to BucketOwnerEnforced so ACLs no longer apply.",
+      "tags": [
+        "s3scanner",
+        "auth-users-read",
+        "aws"
+      ],
+      "evidence": {
+        "bucket": "example-public-site",
+        "date_scanned": "2026-10-03T07:00:00Z",
+        "grantee": "any authenticated user",
+        "num_objects": 0,
+        "objects_enumerated": false,
+        "permission": "READ",
+        "provider": "aws",
+        "region": "us-west-2"
+      }
+    },
+    {
+      "key": "aws:example-uploads:all-users-write",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "arn:aws:s3:::example-uploads"
+      },
+      "title": "Bucket example-uploads grants WRITE to everyone",
+      "description": "s3scanner found that anyone on the internet can write objects to the aws bucket example-uploads (region us-east-1): its ACL grants WRITE to everyone.",
+      "severity": "critical",
+      "remediation": "Remove the AllUsers/AuthenticatedUsers grant from the bucket ACL, enable S3 Block Public Access on the bucket and the account, and set Object Ownership to BucketOwnerEnforced so ACLs no longer apply.",
+      "tags": [
+        "s3scanner",
+        "all-users-write",
+        "aws"
+      ],
+      "evidence": {
+        "bucket": "example-uploads",
+        "date_scanned": "2026-10-03T07:00:01Z",
+        "grantee": "everyone",
+        "num_objects": 0,
+        "objects_enumerated": false,
+        "permission": "WRITE",
+        "provider": "aws",
+        "region": "us-east-1"
+      }
+    },
+    {
+      "key": "aws:example-uploads:auth-users-write",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "arn:aws:s3:::example-uploads"
+      },
+      "title": "Bucket example-uploads grants WRITE to any authenticated user",
+      "description": "s3scanner found that any authenticated cloud account can write objects to the aws bucket example-uploads (region us-east-1): its ACL grants WRITE to any authenticated user.",
+      "severity": "high",
+      "remediation": "Remove the AllUsers/AuthenticatedUsers grant from the bucket ACL, enable S3 Block Public Access on the bucket and the account, and set Object Ownership to BucketOwnerEnforced so ACLs no longer apply.",
+      "tags": [
+        "s3scanner",
+        "auth-users-write",
+        "aws"
+      ],
+      "evidence": {
+        "bucket": "example-uploads",
+        "date_scanned": "2026-10-03T07:00:01Z",
+        "grantee": "any authenticated user",
+        "num_objects": 0,
+        "objects_enumerated": false,
+        "permission": "WRITE",
+        "provider": "aws",
+        "region": "us-east-1"
+      }
+    },
+    {
+      "key": "digitalocean:example-assets:all-users-read",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "digitalocean://example-assets"
+      },
+      "title": "Bucket example-assets grants READ to everyone",
+      "description": "s3scanner found that anyone on the internet can list the objects of the digitalocean bucket example-assets (region nyc3): its ACL grants READ to everyone.",
+      "severity": "high",
+      "remediation": "Remove the public grant from the bucket ACL (and any bucket policy that grants the same), then confirm with s3scanner.",
+      "tags": [
+        "s3scanner",
+        "all-users-read",
+        "digitalocean"
+      ],
+      "evidence": {
+        "bucket": "example-assets",
+        "grantee": "everyone",
+        "num_objects": 120,
+        "objects_enumerated": true,
+        "permission": "READ",
+        "provider": "digitalocean",
+        "region": "nyc3"
+      }
+    }
+  ]
+}

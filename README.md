@@ -286,6 +286,8 @@ automation: list and filter findings and assets, acknowledge or suppress, trigge
 sync, and stream changes over server-sent events. An end-to-end suite in [tests/e2e](tests/e2e) checks a
 deployed instance against that spec.
 
+External scanners (Prowler, Kubescape, trufflehog, gitleaks, s3scanner, any SARIF producer) can post their findings into the same lifecycle with `deckard ingest`, without deckard ever reaching their targets: see [docs/ingest.md](docs/ingest.md).
+
 ## Development
 
 ```sh

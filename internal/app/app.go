@@ -102,6 +102,15 @@ func (a *App) build() error {
 	cfg := a.cfg
 	a.metrics = metrics.New(a.opts.Version, a.opts.Commit)
 	a.metrics.RegisterState(a.st, 15*time.Second)
+	expected := map[string]time.Duration{}
+	for tool, tc := range cfg.Ingest.Tools {
+		if tc.ExpectedInterval > 0 {
+			expected[tool] = tc.ExpectedInterval
+		}
+	}
+	a.metrics.RegisterIngest(a.st, metrics.IngestOptions{
+		Expected: expected, MaxScopesPerTool: cfg.Ingest.MaxScopesPerTool, TTL: 15 * time.Second, Logger: a.log,
+	})
 	g, err := scope.NewGuard(cfg.Scope, scope.WithLogger(a.log), scope.WithRefusalObserver(a.metrics.ScopeRefusal))
 	if err != nil {
 		return fmt.Errorf("scope: %w", err)
@@ -197,6 +206,8 @@ func (a *App) build() error {
 		Logger:      a.log,
 		Registry:    a.metrics.Registry(),
 		Broadcaster: api.NewBroadcaster(),
+		Ingester:    a.proc,
+		Ingest:      cfg.Ingest,
 	})
 	return nil
 }

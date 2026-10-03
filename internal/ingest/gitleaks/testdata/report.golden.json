@@ -1,0 +1,62 @@
+{
+  "tool": "gitleaks",
+  "scope": "test:scope",
+  "complete": true,
+  "observed_at": "2026-10-03T07:00:00Z",
+  "findings": [
+    {
+      "key": "generic-api-key:services/billing/settings.py:12:1f2e3d4c5b6a79881726354a5b6c7d8e9f012345:sha256:cedc88c172c2",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "https://github.com/example/billing"
+      },
+      "title": "Possible generic-api-key secret in services/billing/settings.py:12",
+      "description": "Detected a Generic API Key, potentially exposing access to various services and sensitive operations.\n\ngitleaks rule generic-api-key matched in services/billing/settings.py:12 (commit 1f2e3d4c5b6a79881726354a5b6c7d8e9f012345) of https://github.com/example/billing. This is an unverified pattern match. The secret value is not stored; its hash prefix is sha256:cedc88c172c2.",
+      "severity": "medium",
+      "remediation": "Check whether the match is a real credential. If it is, rotate it (removing it from the history alone does not reach existing clones), remove it from the repository and load it from a secret manager; if not, mark this finding as a false positive or add a gitleaks allowlist entry.",
+      "tags": [
+        "gitleaks",
+        "generic-api-key",
+        "secret"
+      ],
+      "evidence": {
+        "commit": "1f2e3d4c5b6a79881726354a5b6c7d8e9f012345",
+        "date": "2026-09-28T09:30:00Z",
+        "end_line": 12,
+        "entropy": 4.1,
+        "file": "services/billing/settings.py",
+        "fingerprint": "1f2e3d4c5b6a79881726354a5b6c7d8e9f012345:services/billing/settings.py:generic-api-key:12",
+        "line": 12,
+        "link": "https://github.com/example/billing/blob/1f2e3d4c5b6a79881726354a5b6c7d8e9f012345/services/billing/settings.py",
+        "rule_id": "generic-api-key",
+        "secret_hash": "sha256:cedc88c172c2"
+      }
+    },
+    {
+      "key": "slack-webhook-url:ops/alerts.env:3::sha256:4b90053f831a",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "test:scope"
+      },
+      "title": "Possible slack-webhook-url secret in ops/alerts.env:3",
+      "description": "Discovered a Slack Webhook, which could lead to unauthorized message posting and data leakage in Slack channels.\n\ngitleaks rule slack-webhook-url matched in ops/alerts.env:3 of test:scope. This is an unverified pattern match. The secret value is not stored; its hash prefix is sha256:4b90053f831a.",
+      "severity": "medium",
+      "remediation": "Check whether the match is a real credential. If it is, rotate it (removing it from the history alone does not reach existing clones), remove it from the repository and load it from a secret manager; if not, mark this finding as a false positive or add a gitleaks allowlist entry.",
+      "tags": [
+        "gitleaks",
+        "slack-webhook-url",
+        "secret",
+        "webhook"
+      ],
+      "evidence": {
+        "end_line": 3,
+        "entropy": 4.6,
+        "file": "ops/alerts.env",
+        "fingerprint": "ops/alerts.env:slack-webhook-url:3",
+        "line": 3,
+        "rule_id": "slack-webhook-url",
+        "secret_hash": "sha256:4b90053f831a"
+      }
+    }
+  ]
+}

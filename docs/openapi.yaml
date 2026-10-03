@@ -337,6 +337,59 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
         '501': {$ref: '#/components/responses/Error'}
+  /api/v1/ingest:
+    post:
+      summary: Ingest findings from an external scanner
+      description: |
+        Posts one run of an external scanner (Prowler, Kubescape, trufflehog, gitleaks, s3scanner, any SARIF producer; see
+        `deckard ingest` and docs/ingest.md) for one `(tool, scope)`. Findings are stored under check `ext.<tool>` with
+        source `ingest:<tool>` and follow the normal lifecycle (dedup, open/resolved, acknowledge/suppress, Alertmanager,
+        metrics). deckard never probes anything an ingest names.
+
+        Requires a write-capable identity (the same rule as acknowledge/suppress; cookie sessions must send
+        `X-CSRF-Token`). The body is at most 10 MiB and parsed strictly (unknown fields are 400). A request that fails
+        validation is rejected whole with 422 and changes nothing.
+
+        Reconciliation: a request with `complete: true` is the full truth for its `(tool, scope)`, so previously ingested
+        findings of that pair that are absent accrue a miss and resolve after `findings.resolve_after` consecutive
+        complete misses, exactly like a built-in check. Absence is applied only when the request is complete, no item was
+        rejected (an `asset.ref` that does not name a live owned asset rejects the item and is reported in `rejected`)
+        and `observed_at` is newer than every run already accepted for the pair; otherwise the request only opens,
+        reopens and refreshes, and `complete` in the response is false with a `note`. Re-posting the last accepted body is
+        a no-op (`replay: true`). Requests for one pair are serialised.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IngestRequest'}
+      responses:
+        '200':
+          description: Applied (possibly with rejected items, see `rejected` and `complete`)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IngestResponse'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403':
+          description: CSRF token missing (cookie sessions) or ingest disabled (`ingest.enabled`; code `ingest_disabled`)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '415': {$ref: '#/components/responses/Error'}
+        '422':
+          description: Validation failed; nothing was changed. `rejected` lists every problem (index -1 is the request itself).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IngestError'}
+        '429':
+          description: Per-identity rate limit (`ingest.rate_limit`) or too many concurrent ingests; see `Retry-After`
+          headers:
+            Retry-After: {schema: {type: integer}, description: Seconds to wait}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501': {$ref: '#/components/responses/Error'}
   /api/v1/scans:
     get:
       summary: Recent scan runs
@@ -554,6 +607,77 @@ components:
         reopened_count: {type: integer}
         suppressed_until: {type: string, format: date-time, nullable: true}
         suppression_note: {type: string}
+        ingest_scope: {type: string, description: 'Scope an ingested finding (check ext.<tool>) was reported for; absent for built-in checks'}
+    IngestRequest:
+      type: object
+      additionalProperties: false
+      required: [tool, scope, observed_at, findings]
+      properties:
+        tool: {type: string, pattern: '^[a-z0-9][a-z0-9-]{1,31}$', description: 'Producer name; findings are stored under check ext.<tool>'}
+        scope: {type: string, minLength: 1, maxLength: 200, description: 'What was scanned (aws:<account>:<region>, a cluster, a GitHub org); findings reconcile per (tool, scope)'}
+        complete: {type: boolean, default: false, description: 'true asserts findings is everything the tool found in scope, so absent findings may resolve'}
+        observed_at: {type: string, format: date-time, description: 'When the run happened; identifies the run (no more than 5 minutes in the future)'}
+        findings: {type: array, maxItems: 5000, items: {$ref: '#/components/schemas/IngestFinding'}, description: 'Required; [] is an empty run. ingest.tools.<tool>.max_findings may lower the limit.'}
+    IngestFinding:
+      type: object
+      additionalProperties: false
+      required: [key, asset, title, description, severity]
+      properties:
+        key: {type: string, minLength: 1, maxLength: 512, description: 'Stable producer id, unique within the request; the fingerprint derives from (tool, scope, key)'}
+        asset: {$ref: '#/components/schemas/IngestAsset'}
+        title: {type: string, minLength: 1, maxLength: 300}
+        description: {type: string, minLength: 1, maxLength: 8000}
+        severity: {$ref: '#/components/schemas/Severity'}
+        remediation: {type: string, maxLength: 4000}
+        tags: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 64}}
+        evidence: {type: object, additionalProperties: true, description: 'At most 16 KiB of JSON, 8 levels deep'}
+    IngestAsset:
+      type: object
+      additionalProperties: false
+      description: >-
+        Either kind and key (created with source ingest:<tool> when missing; only cloud_resource, a kind deckard never
+        probes) or ref (an existing, live, owned asset of any kind, never modified).
+      properties:
+        kind: {type: string, enum: [cloud_resource]}
+        key: {type: string, minLength: 1, maxLength: 512}
+        ref:
+          type: object
+          additionalProperties: false
+          required: [kind, key]
+          properties:
+            kind: {$ref: '#/components/schemas/AssetKind'}
+            key: {type: string, minLength: 1, maxLength: 512}
+    IngestRejection:
+      type: object
+      required: [index, reason]
+      properties:
+        index: {type: integer, description: 'Position in findings; -1 for the request itself'}
+        reason: {type: string}
+    IngestResponse:
+      type: object
+      required: [accepted, opened, reopened, refreshed, resolved_pending, resolved, complete, replay, rejected]
+      properties:
+        accepted: {type: integer, description: Findings applied (not rejected); 0 for a replay}
+        opened: {type: integer}
+        reopened: {type: integer, description: Resolved findings seen again}
+        refreshed: {type: integer, description: Known findings seen again (operator statuses are kept)}
+        resolved_pending: {type: integer, description: Absent findings that accrued a miss and resolve after findings.resolve_after consecutive complete misses}
+        resolved: {type: integer}
+        complete: {type: boolean, description: Whether absence was applied}
+        note: {type: string, description: Why a complete request was not applied as complete, or that it was a replay}
+        replay: {type: boolean, description: The request repeated the last accepted one for its (tool, scope); nothing changed}
+        rejected: {type: array, items: {$ref: '#/components/schemas/IngestRejection'}}
+    IngestError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}
+        rejected: {type: array, items: {$ref: '#/components/schemas/IngestRejection'}}
     ActionRequest:
       type: object
       additionalProperties: false

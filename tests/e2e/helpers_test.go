@@ -24,7 +24,7 @@ import (
 //	DECKARD_METRICS_URL     base URL of the metrics port                           optional
 //	ALERTMANAGER_URLS       comma-separated base URLs of EVERY Alertmanager replica optional
 //	DECKARD_NOTIFY_MIN_SEVERITY  configured notification floor (default info)      optional
-//	DECKARD_E2E_MUTATE=1    also run the tests that change finding state           optional
+//	DECKARD_E2E_MUTATE=1    also run the tests that change state (finding actions, ingest self-test) optional
 //	DECKARD_OPENAPI         path to openapi.yaml (default ../../docs/openapi.yaml) optional
 type env struct {
 	base, token, metrics string

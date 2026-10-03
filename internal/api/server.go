@@ -20,6 +20,7 @@ import (
 	"github.com/chainseer-xyz/deckard/internal/api/auth"
 	"github.com/chainseer-xyz/deckard/internal/api/ui"
 	"github.com/chainseer-xyz/deckard/internal/config"
+	"github.com/chainseer-xyz/deckard/internal/ingest"
 	"github.com/chainseer-xyz/deckard/internal/store"
 )
 
@@ -72,6 +73,11 @@ type Deps struct {
 	// CORSOrigins is empty by default (CORS off).
 	CORSOrigins []string
 
+	// Ingester applies POST /api/v1/ingest (finding.Processor); nil answers
+	// 501. Ingest is its policy: the zero value is disabled (403).
+	Ingester Ingester
+	Ingest   config.IngestConfig
+
 	// Tunables; zero values pick defaults.
 	RequestTimeout   time.Duration // default 30s
 	MaxBodyBytes     int64         // default 64KiB
@@ -98,6 +104,7 @@ type Server struct {
 	authErr error
 	router  *chi.Mux
 	sse     *sseGate
+	ing     *ingestState
 
 	reqTotal *prometheus.CounterVec
 	reqDur   *prometheus.HistogramVec
@@ -158,7 +165,9 @@ func New(d Deps) *Server {
 		}
 		s.authn = a
 	}
+	s.initIngest()
 	s.registerMetrics()
+	s.registerIngestMetrics()
 	s.router = s.routes()
 	return s
 }
@@ -242,33 +251,44 @@ func (s *Server) routes() *chi.Mux {
 	}
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(noStore, s.authenticate, maxBody(s.d.MaxBodyBytes))
+		r.Use(noStore, s.authenticate)
 
-		// Streaming endpoint: no request timeout.
-		r.Get("/events", s.events)
+		// Ingest carries up to 10 MiB and may write thousands of rows: its
+		// own body cap and timeout. It is a write like the operator actions.
+		r.Group(func(r chi.Router) {
+			r.Use(maxBody(ingest.MaxBodyBytes), timeout(s.d.Ingest.Timeout), s.csrf)
+			r.Post("/ingest", s.ingest)
+		})
 
 		r.Group(func(r chi.Router) {
-			r.Use(timeout(s.d.RequestTimeout))
-			r.Get("/me", s.me)
-			r.Get("/openapi.yaml", s.openapi)
-			r.Get("/stats", s.stats)
-			r.Get("/assets", s.listAssets)
-			r.Get("/assets/{id}", s.getAsset)
-			r.Get("/assets/{id}/graph", s.assetGraph)
-			r.Get("/findings", s.listFindings)
-			r.Get("/findings/{id}", s.getFinding)
-			r.Get("/sources", s.listSources)
-			r.Get("/scans", s.listScans)
-			r.Get("/changes", s.changes)
+			r.Use(maxBody(s.d.MaxBodyBytes))
+
+			// Streaming endpoint: no request timeout.
+			r.Get("/events", s.events)
 
 			r.Group(func(r chi.Router) {
-				r.Use(s.csrf)
-				r.Post("/findings/{id}/acknowledge", s.findingAction("acknowledge"))
-				r.Post("/findings/{id}/suppress", s.findingAction("suppress"))
-				r.Post("/findings/{id}/false-positive", s.findingAction("false-positive"))
-				r.Post("/findings/{id}/reopen", s.findingAction("reopen"))
-				r.Post("/assets/{id}/rescan", s.rescanAsset)
-				r.Post("/sources/{name}/sync", s.syncSource)
+				r.Use(timeout(s.d.RequestTimeout))
+				r.Get("/me", s.me)
+				r.Get("/openapi.yaml", s.openapi)
+				r.Get("/stats", s.stats)
+				r.Get("/assets", s.listAssets)
+				r.Get("/assets/{id}", s.getAsset)
+				r.Get("/assets/{id}/graph", s.assetGraph)
+				r.Get("/findings", s.listFindings)
+				r.Get("/findings/{id}", s.getFinding)
+				r.Get("/sources", s.listSources)
+				r.Get("/scans", s.listScans)
+				r.Get("/changes", s.changes)
+
+				r.Group(func(r chi.Router) {
+					r.Use(s.csrf)
+					r.Post("/findings/{id}/acknowledge", s.findingAction("acknowledge"))
+					r.Post("/findings/{id}/suppress", s.findingAction("suppress"))
+					r.Post("/findings/{id}/false-positive", s.findingAction("false-positive"))
+					r.Post("/findings/{id}/reopen", s.findingAction("reopen"))
+					r.Post("/assets/{id}/rescan", s.rescanAsset)
+					r.Post("/sources/{name}/sync", s.syncSource)
+				})
 			})
 		})
 	})

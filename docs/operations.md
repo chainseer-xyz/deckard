@@ -259,6 +259,8 @@ ships ready-made rules (all metrics below exist in the binary):
 | `DeckardVulnintelRefreshFailing` / `DeckardVulnintelNeverLoaded` | 3+ failed refreshes in 6h / empty KEV catalog | tunable |
 | `DeckardKnownExploitedOpen` | `deckard_findings_kev_open` > 0 | informational |
 | `DeckardHeartbeatFailing` | heartbeat attempts in the last 30m were all `error` or `unhealthy` | only exists when `notify.heartbeat.url` is set |
+| `DeckardIngestStale` | no complete ingest for a `(tool, scope)` in twice `ingest.tools.<tool>.expected_interval` (`deckard_ingest_last_success_timestamp` vs `deckard_ingest_expected_interval_seconds`) | only tools that set an expected interval; silence retired scopes (see [ingest.md](ingest.md#metrics-and-alerts)) |
+| `DeckardIngestRejected` | `deckard_ingest_requests_total` with result rejected, invalid, too_large or partial in the last hour | the response and the log say why |
 | `DeckardJobsReclaimed` | `deckard_jobs_reclaimed_total` increased in the last hour (or a pod that started within the hour reclaimed before its first scrape) | an instance died while running jobs; see [Crashes, restarts and orphaned jobs](#crashes-restarts-and-orphaned-jobs) |
 
 Air-gapped installs (`*.enabled: false`) never produce the refdata, vulnintel or
@@ -291,6 +293,15 @@ snapshot refresh.
 | `deckard_scope_refusals_total` | `tier`, `class`, `reason` | every scope-guard refusal, including those logged at DEBUG (see [Scope refusals](#scope-refusals)) |
 | `deckard_heartbeat_total` | `result` = ok, error, unhealthy | external heartbeat attempts; absent unless `notify.heartbeat.url` is set |
 | `deckard_jobs_reclaimed_total` | `kind` (job kind) | running jobs taken back from an instance that died; 0 for every kind from engine start |
+
+**Ingest metrics** (see [ingest.md](ingest.md#metrics-and-alerts))
+
+| Metric | Labels | Meaning |
+| --- | --- | --- |
+| `deckard_ingest_requests_total` | `tool`, `result` | `POST /api/v1/ingest` requests: ok, partial, replay, rejected, invalid, too_large, rate_limited, disabled, error |
+| `deckard_ingest_findings` | `tool` | open findings posted by the tool |
+| `deckard_ingest_last_success_timestamp` | `tool`, `scope` | last run applied as complete; overflow scopes report as `scope="other"` |
+| `deckard_ingest_expected_interval_seconds` | `tool` | `ingest.tools.<tool>.expected_interval` (only when set) |
 
 Only the heartbeat gets an example alert (`DeckardHeartbeatFailing`): skips
 and expected refusals are steady by design on a proxied estate, so alerting on

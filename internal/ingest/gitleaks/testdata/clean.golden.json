@@ -1,0 +1,7 @@
+{
+  "tool": "gitleaks",
+  "scope": "test:scope",
+  "complete": true,
+  "observed_at": "2026-10-03T07:00:00Z",
+  "findings": []
+}

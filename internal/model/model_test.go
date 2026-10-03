@@ -1,6 +1,9 @@
 package model
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSeverityOrdering(t *testing.T) {
 	tests := []struct {
@@ -45,5 +48,21 @@ func TestFingerprintStableAndDistinct(t *testing.T) {
 	// separator must prevent ("ab","c") colliding with ("a","bc")
 	if Fingerprint("ab", "c", "") == Fingerprint("a", "bc", "") {
 		t.Fatal("field boundary collision")
+	}
+}
+
+func TestValidIngestTool(t *testing.T) {
+	for _, ok := range []string{"prowler", "e2e-selftest", "s3scanner", "a1", "0x", strings.Repeat("a", 32)} {
+		if !ValidIngestTool(ok) {
+			t.Errorf("%q should be valid", ok)
+		}
+	}
+	for _, bad := range []string{"", "a", "-x", "Prowler", "pro_wler", "pro.wler", "pro wler", "prowl\u00e9r", strings.Repeat("a", 33), "x|y"} {
+		if ValidIngestTool(bad) {
+			t.Errorf("%q should be invalid", bad)
+		}
+	}
+	if IngestCheck("prowler") != "ext.prowler" || IngestSource("prowler") != "ingest:prowler" || !IsIngestSource("ingest:x") || IsIngestSource("cf") {
+		t.Fatal("ingest naming helpers wrong")
 	}
 }

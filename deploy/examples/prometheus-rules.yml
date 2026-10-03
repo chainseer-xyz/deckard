@@ -210,3 +210,37 @@ groups:
           severity: high
         annotations:
           summary: "{{ $value }} open deckard finding(s) are known-exploited (CISA KEV)"
+
+  # Findings posted by external scanners through POST /api/v1/ingest (see
+  # docs/ingest.md). Every deckard replica exports the same store-backed values,
+  # so the expressions aggregate before comparing.
+  - name: deckard-ingest
+    rules:
+      # Only tools with ingest.tools.<tool>.expected_interval export
+      # deckard_ingest_expected_interval_seconds, so only they can go stale, and
+      # only scopes that completed at least once have a timestamp. "Complete"
+      # means a request with complete: true that was applied as complete. A
+      # retired scope keeps firing until silenced.
+      - alert: DeckardIngestStale
+        expr: |
+          min by (tool, scope) (time() - deckard_ingest_last_success_timestamp)
+            > on (tool) group_left ()
+          2 * max by (tool) (deckard_ingest_expected_interval_seconds)
+        for: 15m
+        labels:
+          severity: medium
+        annotations:
+          summary: "No complete {{ $labels.tool }} ingest for {{ $labels.scope }} in over twice its expected interval"
+          description: "The last complete run was {{ $value | humanizeDuration }} ago, so findings for this scope are neither refreshed nor resolved. Check the producer (CronJob or CI job) and deckard_ingest_requests_total{tool=\"{{ $labels.tool }}\"}; scope=\"other\" aggregates the scopes beyond ingest.max_scopes_per_tool (oldest wins)."
+
+      # rejected (422), invalid (400/415) and too_large (413) changed nothing.
+      # partial was applied but some items were rejected (an asset.ref that is
+      # not a live owned asset) or the run was not newer than the last accepted
+      # one, so nothing was resolved by it.
+      - alert: DeckardIngestRejected
+        expr: sum by (tool, result) (increase(deckard_ingest_requests_total{result=~"rejected|invalid|too_large|partial"}[1h])) > 0
+        labels:
+          severity: medium
+        annotations:
+          summary: "deckard answered {{ $value | humanize }} {{ $labels.tool }} ingest request(s) with result {{ $labels.result }} in the last hour"
+          description: "The response body lists every problem (rejected[].reason) and the deckard log has a line per request (msg=\"ingest applied\" or the access log). A persistently rejected producer is also a stale one: its findings no longer resolve."

@@ -629,6 +629,31 @@ suppressions:
   - { match: "check=http.headers asset=blog.example.com", reason: "accepted risk", until: 2026-12-31 }
 ```
 
+## Ingest (external scanners)
+
+Account-level and secret scanners that run elsewhere (Prowler, Kubescape, trufflehog,
+gitleaks, s3scanner, any SARIF producer) post their findings to `POST /api/v1/ingest`,
+usually through `deckard ingest`. Findings are stored under check `ext.<tool>` and follow the
+normal lifecycle; deckard never probes anything they name. The contract, the reconciliation
+rules and CronJob examples are in [ingest.md](ingest.md).
+
+```yaml
+ingest:
+  enabled: true            # default: any identity that may acknowledge or suppress may ingest
+  rate_limit: 60/m         # per identity
+  burst: 10
+  max_concurrent: 4        # per API process; more get 429
+  timeout: 2m
+  max_scopes_per_tool: 50  # scope-label cap of deckard_ingest_last_success_timestamp
+  tools:
+    prowler:
+      owned: true          # label the cloud_resource assets it creates owned (never probable)
+      max_findings: 5000   # per request, at most 5000
+      expected_interval: 24h   # DeckardIngestStale fires after twice this without a complete run
+```
+
+The `ingest:` source-name prefix and the `ext.` plugin-name prefix are reserved.
+
 ## Alerting
 
 deckard pushes findings to Alertmanager (`/api/v2/alerts`); route to Slack,

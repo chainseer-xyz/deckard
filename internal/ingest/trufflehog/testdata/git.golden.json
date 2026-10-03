@@ -1,0 +1,88 @@
+{
+  "tool": "trufflehog",
+  "scope": "test:scope",
+  "complete": true,
+  "observed_at": "2026-10-03T07:00:00Z",
+  "findings": [
+    {
+      "key": "AWS:deploy/terraform.tfvars:14:0a1b2c3d4e5f60718293a4b5c6d7e8f901234567:sha256:691c8930e9c9",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "https://github.com/example/app"
+      },
+      "title": "Verified AWS secret in deploy/terraform.tfvars:14",
+      "description": "trufflehog found a verified AWS credential in deploy/terraform.tfvars:14 (commit 0a1b2c3d4e5f60718293a4b5c6d7e8f901234567) of https://github.com/example/app. The secret value is not stored; its hash prefix is sha256:691c8930e9c9.",
+      "severity": "high",
+      "remediation": "Revoke or rotate the AWS credential now: trufflehog confirmed it is live. Then remove it from the history (rotation is what makes it safe; history rewrites do not reach clones) and load it from a secret manager.",
+      "tags": [
+        "trufflehog",
+        "aws",
+        "secret"
+      ],
+      "evidence": {
+        "commit": "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567",
+        "decoder": "PLAIN",
+        "detector": "AWS",
+        "file": "deploy/terraform.tfvars",
+        "line": 14,
+        "repository": "https://github.com/example/app.git",
+        "secret_hash": "sha256:691c8930e9c9",
+        "source": "trufflehog - git",
+        "verified": true
+      }
+    },
+    {
+      "key": "PrivateKey:/srv/example/.env:3::sha256:4f62b2cbc908",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "test:scope"
+      },
+      "title": "Unverified PrivateKey secret in /srv/example/.env:3",
+      "description": "trufflehog found an unverified PrivateKey credential in /srv/example/.env:3 of test:scope. The secret value is not stored; its hash prefix is sha256:4f62b2cbc908.",
+      "severity": "medium",
+      "remediation": "Check whether the value is a real PrivateKey credential. If it is, rotate it, remove it from the history and load it from a secret manager; if not, mark this finding as a false positive.",
+      "tags": [
+        "trufflehog",
+        "privatekey",
+        "secret"
+      ],
+      "evidence": {
+        "decoder": "PLAIN",
+        "detector": "PrivateKey",
+        "file": "/srv/example/.env",
+        "line": 3,
+        "secret_hash": "sha256:4f62b2cbc908",
+        "source": "trufflehog - filesystem",
+        "verified": false
+      }
+    },
+    {
+      "key": "SlackWebhook:src/notify.py:7:9f8e7d6c5b4a39281706f5e4d3c2b1a098765432:sha256:ce6e0a36d070",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "https://github.com/example/app"
+      },
+      "title": "Unverified SlackWebhook secret in src/notify.py:7",
+      "description": "trufflehog found an unverified SlackWebhook credential in src/notify.py:7 (commit 9f8e7d6c5b4a39281706f5e4d3c2b1a098765432) of https://github.com/example/app. The secret value is not stored; its hash prefix is sha256:ce6e0a36d070.",
+      "severity": "medium",
+      "remediation": "Check whether the value is a real SlackWebhook credential. If it is, rotate it, remove it from the history and load it from a secret manager; if not, mark this finding as a false positive.",
+      "tags": [
+        "trufflehog",
+        "slackwebhook",
+        "secret"
+      ],
+      "evidence": {
+        "commit": "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432",
+        "decoder": "BASE64",
+        "detector": "SlackWebhook",
+        "file": "src/notify.py",
+        "line": 7,
+        "link": "https://github.com/example/app/blob/9f8e7d6c5b4a39281706f5e4d3c2b1a098765432/src/notify.py",
+        "repository": "https://github.com/example/app.git",
+        "secret_hash": "sha256:ce6e0a36d070",
+        "source": "trufflehog - github",
+        "verified": false
+      }
+    }
+  ]
+}

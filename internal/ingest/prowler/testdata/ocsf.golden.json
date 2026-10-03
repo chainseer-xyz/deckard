@@ -1,0 +1,88 @@
+{
+  "tool": "prowler",
+  "scope": "test:scope",
+  "complete": true,
+  "observed_at": "2026-10-03T07:00:00Z",
+  "findings": [
+    {
+      "key": "guardduty_is_enabled:prowler:aws:123456789012:eu-west-1:guardduty_is_enabled",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "prowler:aws:123456789012:eu-west-1:guardduty_is_enabled"
+      },
+      "title": "GuardDuty is not enabled in eu-west-1.",
+      "description": "Check if GuardDuty is enabled.",
+      "severity": "medium",
+      "remediation": "Enable GuardDuty in every region.",
+      "tags": [
+        "prowler",
+        "guardduty_is_enabled",
+        "guardduty",
+        "aws"
+      ],
+      "evidence": {
+        "account": "123456789012",
+        "check_id": "guardduty_is_enabled",
+        "finding_uid": "prowler-aws-guardduty_is_enabled-123456789012-eu-west-1-unknown",
+        "provider": "aws",
+        "region": "eu-west-1",
+        "resource_type": "AwsGuardDutyDetector",
+        "service": "guardduty"
+      }
+    },
+    {
+      "key": "iam_root_mfa_enabled:arn:aws:iam::123456789012:root",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "arn:aws:iam::123456789012:root"
+      },
+      "title": "Root account does not have MFA enabled.",
+      "description": "Ensure MFA is enabled for the root account.\n\nRisk: Without MFA, a leaked root password grants full control of the account.",
+      "severity": "critical",
+      "remediation": "Enable a hardware or virtual MFA device for the root user.\n\nReferences: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_root-user_manage_mfa.html",
+      "tags": [
+        "prowler",
+        "iam_root_mfa_enabled",
+        "iam",
+        "aws"
+      ],
+      "evidence": {
+        "account": "123456789012",
+        "check_id": "iam_root_mfa_enabled",
+        "finding_uid": "prowler-aws-iam_root_mfa_enabled-123456789012-us-east-1-root",
+        "provider": "aws",
+        "region": "us-east-1",
+        "resource_name": "\u003croot_account\u003e",
+        "resource_type": "AwsIamUser",
+        "service": "iam"
+      }
+    },
+    {
+      "key": "s3_bucket_public_access:arn:aws:s3:::example-public-assets",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "arn:aws:s3:::example-public-assets"
+      },
+      "title": "S3 Bucket example-public-assets has public access due to bucket policy.",
+      "description": "Ensure there are no S3 buckets open to Everyone or Any AWS user.\n\nRisk: Public buckets can expose sensitive data to anyone on the internet.",
+      "severity": "high",
+      "remediation": "Ensure that the S3 bucket does not grant public access through its policy or ACL; enable S3 Block Public Access.\n\nReferences: aws s3api put-public-access-block --bucket example-public-assets --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-block-public-access.html",
+      "tags": [
+        "prowler",
+        "s3_bucket_public_access",
+        "s3",
+        "aws"
+      ],
+      "evidence": {
+        "account": "123456789012",
+        "check_id": "s3_bucket_public_access",
+        "finding_uid": "prowler-aws-s3_bucket_public_access-123456789012-us-west-2-example-public-assets",
+        "provider": "aws",
+        "region": "us-west-2",
+        "resource_name": "example-public-assets",
+        "resource_type": "AwsS3Bucket",
+        "service": "s3"
+      }
+    }
+  ]
+}
