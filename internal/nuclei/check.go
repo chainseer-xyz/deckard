@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -33,7 +34,15 @@ var ErrNoTemplates = errors.New("nuclei: no templates available yet")
 type options struct {
 	env         func() ([]string, func(), error)
 	templateDir func() (string, error)
+	source      func() string
+	logger      *slog.Logger
+	observe     RunObserver
+	gate        *ProcessGate
 }
+
+// RunObserver receives one nuclei process result. source is downloaded,
+// baked, or configured, targets is the number of targets handed to it.
+type RunObserver func(duration time.Duration, targets int, source string, err error)
 
 // Option customises Checks, New and NewScanner.
 type Option func(*options)
@@ -49,12 +58,36 @@ func WithEnv(f func() ([]string, func(), error)) Option { return func(o *options
 // templates yet and runs fail with ErrNoTemplates.
 func WithTemplateDir(f func() (string, error)) Option { return func(o *options) { o.templateDir = f } }
 
+// WithTemplateSource labels process observations with the active template
+// source. It is normally supplied by the updater-backed app wiring.
+func WithTemplateSource(f func() string) Option { return func(o *options) { o.source = f } }
+
+// WithLogger supplies the logger used for non-fatal custom-template rejects.
+func WithLogger(l *slog.Logger) Option { return func(o *options) { o.logger = l } }
+
+// WithRunObserver exports nuclei-specific process metrics without coupling the
+// scanner to the metrics package.
+func WithRunObserver(f RunObserver) Option { return func(o *options) { o.observe = f } }
+
+// WithProcessGate bounds concurrent nuclei processes across all checks in one
+// deckard process.
+func WithProcessGate(g *ProcessGate) Option { return func(o *options) { o.gate = g } }
+
 func buildOptions(opts []Option) options {
 	var o options
 	for _, f := range opts {
 		f(&o)
 	}
 	return o
+}
+
+func (o options) templateSource() string {
+	if o.source != nil {
+		if s := o.source(); s != "" {
+			return s
+		}
+	}
+	return "configured"
 }
 
 // Checks returns cve.nuclei and nuclei.intrusive, or nothing when nuclei is
@@ -64,7 +97,8 @@ func Checks(cfg config.NucleiConfig, defaults map[string]map[string]any, verify 
 	if !cfg.Enabled {
 		return nil
 	}
-	r := ExecRunner{Env: buildOptions(opts).env}
+	o := buildOptions(opts)
+	r := ExecRunner{Env: o.env, Gate: o.gate}
 	return []check.Check{
 		New(cfg, verify, r, false, defaults[NameActive], opts...),
 		New(cfg, verify, r, true, defaults[NameIntrusive], opts...),
@@ -106,6 +140,14 @@ func (c *nucleiCheck) Tier() model.Tier {
 // WantsOpenFindings makes the engine pass Target.OpenFindings: a full scan
 // re-runs the template behind every unresolved finding (see Run).
 func (c *nucleiCheck) WantsOpenFindings() bool { return true }
+
+// DefaultTimeout lets the engine's outer check deadline cover the nuclei
+// process and the optional re-verification process. The per-request `timeout`
+// remains a nuclei flag; it is deliberately not used as the engine deadline.
+func (c *nucleiCheck) DefaultTimeout() time.Duration {
+	_, runTimeout := c.runOptions(check.Target{})
+	return 2*runTimeout + 30*time.Second
+}
 
 func (c *nucleiCheck) Applies(a model.Asset) bool { return appliesTo(a) }
 
@@ -149,13 +191,18 @@ func (c *nucleiCheck) Run(ctx context.Context, t check.Target) (*check.Result, e
 		}
 		opts.cfg.TemplatesDir = dir
 	}
+	opts.extraDirs = validExtraDirs(c.cfg.ExtraTemplatesDirs, c.opts)
 	args, err := buildArgs(tg, t.Asset, opts)
 	if err != nil {
 		return nil, err
 	}
 	rctx, cancel := context.WithTimeout(ctx, runTimeout)
 	defer cancel()
+	start := time.Now()
 	out, runErr := c.runner.Run(rctx, c.cfg.Binary, args)
+	if c.opts.observe != nil {
+		c.opts.observe(time.Since(start), 1, c.opts.templateSource(), runErr)
+	}
 	findings, perr := ParseJSONL(bytes.NewReader(out))
 	if perr != nil {
 		return nil, perr
@@ -184,7 +231,11 @@ func (c *nucleiCheck) Run(ctx context.Context, t check.Target) (*check.Result, e
 		}
 		vctx, vcancel := context.WithTimeout(ctx, runTimeout)
 		defer vcancel()
+		vstart := time.Now()
 		vout, vErr := c.runner.Run(vctx, c.cfg.Binary, rargs)
+		if c.opts.observe != nil {
+			c.opts.observe(time.Since(vstart), 1, c.opts.templateSource(), vErr)
+		}
 		vf, verr := ParseJSONL(bytes.NewReader(vout))
 		if verr != nil {
 			return nil, verr

@@ -51,10 +51,10 @@ jobs are never touched.
 ## nuclei and CVE templates
 
 `cve.nuclei` runs [nuclei](https://github.com/projectdiscovery/nuclei) templates against owned web assets
-(`url` assets and web `service` assets, active tier). The container image ships the binary but **no
-templates**, and nuclei never updates itself (deckard starts it with `-duc`), so deckard keeps the
-templates fresh itself. This matters most when a critical CVE lands: ProjectDiscovery usually publishes
-a detection template within hours, and deckard fetches it and tests every owned web asset promptly.
+(`url` assets and web `service` assets, active tier). The full image ships the pinned binary and a
+validated snapshot of the official templates plus deckard's custom pack. Nuclei never updates itself
+(deckard starts it with `-duc`); the updater refreshes a writable release directory and atomically swaps
+it in. On a restart before the first refresh, the baked snapshot remains available.
 
 ```yaml
 nuclei:
@@ -64,7 +64,10 @@ nuclei:
   severity_min: low        # info|low|medium|high|critical
   tags_exclude: [dos, fuzz]
   extra_tags: []
-  templates_dir: ""        # default: <update.dir>/current while update.enabled
+  extra_templates_dirs: [] # absolute operator-owned directories, always added
+  process_concurrency: 1   # max concurrent nuclei processes per pod
+  process_memory_limit: 768MiB # GOMEMLIMIT per nuclei process
+  templates_dir: ""        # current release, or baked snapshot if no valid release exists
   update:
     enabled: true
     interval: 6h           # how often to look for a new release (jittered, plus once at start)
@@ -78,7 +81,10 @@ nuclei:
 |---|---|---|
 | `nuclei.enabled` | `true` | Register `cve.nuclei`. The slim image has no nuclei binary: deckard logs a warning and skips the check |
 | `nuclei.binary` | `nuclei` | Executable to run (the image pins v3.11.1) |
-| `nuclei.templates_dir` | | Templates to run. Empty with `update.enabled` means the updater's current release. Setting it explicitly turns the updater off (deckard logs a warning): it would update a directory nothing reads |
+| `nuclei.templates_dir` | | Templates to run. Empty with `update.enabled` means a valid updater `current` release, falling back to the baked snapshot. Setting it explicitly turns the updater off (deckard logs a warning) |
+| `nuclei.extra_templates_dirs` | `[]` | Absolute directories of operator-owned templates. They are added to every run, including tag-selected runs. Invalid, oversized, malformed or unsafe directories are logged and skipped; official templates still run |
+| `nuclei.process_concurrency` | `1` | Maximum nuclei processes per pod. Keep this at `1` unless memory sizing and active-queue capacity justify more |
+| `nuclei.process_memory_limit` | `768MiB` | Per-process Go memory limit passed as `GOMEMLIMIT`; size the pod for this plus the process baseline and other deckard work |
 | `nuclei.severity_min` | `low` | Lowest severity run and reported |
 | `nuclei.tags_exclude` | `[dos, fuzz]` | Template tags never run. `dos` and (for `cve.nuclei`) `intrusive` are always excluded |
 | `nuclei.extra_tags` | | Extra tags added to every tech-based scan |
@@ -112,7 +118,8 @@ The updater runs the pinned nuclei binary's own installer
 
 A release is rejected (and the last good one keeps serving) when it has fewer than 1000 templates or 100
 http templates, more than 512 MiB or 200,000 files, special files, dangling symlinks, or symlinks leaving the
-directory, or when more than 10% of its template files are unparseable. Failures are logged, counted in
+directory, or when more than 10% of its template files are unparseable. If no valid downloaded release exists,
+the full image's baked snapshot is used instead. Failures are logged, counted in
 `deckard_nuclei_template_updates_total{result="error"}`, and retried (River retries the job; every worker
 also re-checks every few minutes while its templates are stale). One update is a ~15 MB download from
 GitHub; it happens every `interval` even when nothing changed, because nuclei starts from an empty config
@@ -149,6 +156,42 @@ directory, or more than 200 unresolved findings) counts no misses at all.
 
 `deckard scan` (one-shot) runs the updater first, then the regular pass, then the new-template scan; pass
 `--no-update` to skip the update (air-gapped hosts).
+
+### Custom templates
+
+Custom directories are mounted read-only and appended to every nuclei run. A ConfigMap is convenient for
+small packs:
+
+```yaml
+nuclei:
+  customTemplates:
+    configMap: deckard-custom-templates
+```
+
+For a larger or frequently updated pack, use a PVC instead:
+
+```yaml
+nuclei:
+  customTemplates:
+    existingClaim: nuclei-custom-templates
+```
+
+The chart mounts either choice at `/var/lib/deckard/custom-templates` and wires that path into
+`nuclei.extra_templates_dirs`. Do not set both. Standalone deployments can set the list directly. Each
+directory is checked for path escapes, special files, size/file-count limits and parse errors; a bad custom
+directory is skipped without disabling the official release. The image includes the non-intrusive
+`templates/deckard` pack at `/usr/local/share/deckard/nuclei-templates/deckard`.
+
+### Operating nuclei
+
+The process loads and validates the selected templates before probing targets. On the local reference run,
+validation of the official snapshot took 3.46s, one local web target took 28.17s and peaked at 716.6 MiB,
+and a 20-target single process was still running after 265.92s at about 746 MiB when deliberately stopped.
+New-template and CVE-targeted scans batch up to 50 targets per process; the process gate defaults to one.
+The active check timeout is scaled for batched targets, while the generic two-minute engine timeout is not
+used for `cve.nuclei`. If runs time out, inspect `deckard_nuclei_run_duration_seconds`,
+`deckard_nuclei_errors_total{reason}`, pod memory and the active queue; lower concurrency,
+raise `checks.cve.nuclei.run_timeout`, and size the pod above the measured per-process memory.
 
 ### CVE-targeted scans
 
@@ -187,9 +230,13 @@ when the updater runs. Setting `nuclei.templates_dir` while the updater is on al
 | `deckard_nuclei_template_count` | Templates in the active release |
 | `deckard_nuclei_template_updates_total{result}` | Update attempts: `ok` (new release), `unchanged`, `error` |
 | `deckard_nuclei_new_templates_total` | Templates added by updates |
+| `deckard_nuclei_run_duration_seconds{source}` | Nuclei process duration, with `source` `downloaded`, `baked` or `configured` |
+| `deckard_nuclei_targets_per_run{source}` | Targets handed to each process |
+| `deckard_nuclei_errors_total{reason}` | Process errors classified as `timeout`, `no-templates`, `oom`, `parse` or `other` |
+| `deckard_nuclei_last_clean_run_timestamp` | Unix time of the last successful nuclei run |
 
-`deploy/examples/prometheus-rules.yml` alerts on stale templates, repeated update failures and a first update
-that never succeeded.
+`deploy/examples/prometheus-rules.yml` alerts on stale templates, repeated update failures, a first update
+that never succeeded, and a `cve.nuclei` run that has not completed cleanly for six hours.
 
 ## Sources
 

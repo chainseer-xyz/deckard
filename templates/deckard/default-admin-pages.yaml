@@ -1,0 +1,18 @@
+id: deckard-default-admin-pages
+info:
+  name: Default ingress or server-status page
+  author: deckard
+  severity: low
+  tags: [deckard, exposure, ingress, server-status]
+  description: A default ingress controller page or Apache server-status page is publicly exposed.
+  remediation: Remove default pages and restrict server-status and ingress diagnostics to operators.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+      - "{{BaseURL}}/server-status"
+      - "{{BaseURL}}/nginx_status"
+    matchers:
+      - type: word
+        part: body
+        words: ["default backend - 404", "Server Status", "Active connections:"]

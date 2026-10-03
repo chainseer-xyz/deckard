@@ -162,6 +162,13 @@ nuex=$(helm template t deckard --set database.cnpg.enabled=true --set nuclei.per
 absent "existing claim: no PVC created"           "name: t-deckard-nuclei" "$nuex"
 check  "existing claim used"                      "claimName: mine" "$nuex"
 
+nucm=$(helm template t deckard --set database.cnpg.enabled=true --set nuclei.customTemplates.configMap=custom-pack)
+check  "custom ConfigMap mounted"                 "configMap: { name: custom-pack }" "$nucm"
+check  "custom path configured"                    "/var/lib/deckard/custom-templates" "$nucm"
+nupack=$(helm template t deckard --set database.cnpg.enabled=true --set nuclei.customTemplates.existingClaim=custom-pvc)
+check  "custom PVC mounted"                        "claimName: custom-pvc" "$nupack"
+expect_error "custom sources mutually exclusive"   "mutually exclusive" --set database.cnpg.enabled=true --set nuclei.customTemplates.configMap=custom-pack --set nuclei.customTemplates.existingClaim=custom-pvc
+
 # A ReadWriteOnce claim cannot back several worker replicas: workers keep an emptyDir.
 nuw=$(helm template t deckard --set database.cnpg.enabled=true --set worker.enabled=true --set "roles={api,scheduler}" --set nuclei.persistence.enabled=true)
 if [[ $(print -r -- "$nuw" | grep -c "claimName: t-deckard-nuclei") == 1 ]]; then print "ok   nuclei claim backs the main Deployment only"; else print "FAIL nuclei claim must back the main Deployment only"; fail=1; fi

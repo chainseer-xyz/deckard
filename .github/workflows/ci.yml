@@ -100,9 +100,32 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
         run: docker build --target "$TARGET" -t "deckard:$TARGET" .
+      - if: matrix.target == 'full'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: test baked finder pack with the shipped nuclei binary
+        if: matrix.target == 'full'
+        shell: bash
+        run: |
+          container_id=$(docker create deckard:full)
+          trap 'docker rm -f "$container_id" >/dev/null' EXIT
+          docker cp "$container_id:/usr/local/bin/nuclei" /tmp/nuclei
+          chmod +x /tmp/nuclei
+          NUCLEI_BINARY=/tmp/nuclei go test -count=1 -v ./templates/deckard | tee finder-test.log
+          if grep -q -- '--- SKIP' finder-test.log; then
+            echo "finder template test skipped" >&2
+            exit 1
+          fi
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: deckard:${{ matrix.target }}
           severity: CRITICAL,HIGH
           exit-code: "1"
           ignore-unfixed: true
+          # The official nuclei corpus intentionally contains public exploit
+          # fixtures, default keys and secret-detection regex examples. Keep
+          # secret scanning on for the image, but do not report its scanner
+          # input data as Deckard credentials.
+          skip-dirs: /usr/local/share/deckard/nuclei-templates

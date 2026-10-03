@@ -1,0 +1,19 @@
+id: deckard-exposed-env
+info:
+  name: Exposed environment file
+  author: deckard
+  severity: high
+  tags: [deckard, exposure, secrets]
+  description: An environment file is publicly readable and may contain deployment secrets.
+  remediation: Deny access to environment files and rotate any secrets that were exposed.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/.env"
+      - "{{BaseURL}}/.env.bak"
+      - "{{BaseURL}}/.env~"
+    matchers:
+      - type: regex
+        part: body
+        regex:
+          - "(?m)^(APP_KEY|AWS_ACCESS_KEY_ID|DATABASE_URL|DB_PASSWORD|SECRET_KEY)\\s*="

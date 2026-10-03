@@ -234,8 +234,8 @@ func TestRescueAfterExceedsEveryWorkerTimeout(t *testing.T) {
 	if len(e.timeouts) < 11 || e.timeouts[KindScanAsset] != 30*time.Minute {
 		t.Fatalf("worker timeouts not collected: %v", e.timeouts)
 	}
-	if e.rescueAfter != longest+rescueMargin || e.rescueAfter != 35*time.Minute {
-		t.Errorf("rescue after %v, want longest timeout %v + %v (35m today)", e.rescueAfter, longest, rescueMargin)
+	if e.rescueAfter != longest+rescueMargin || e.rescueAfter < 49*time.Minute {
+		t.Errorf("rescue after %v, want longest timeout %v + %v", e.rescueAfter, longest, rescueMargin)
 	}
 
 	ws := &workerSet{workers: river.NewWorkers(), timeouts: map[string]time.Duration{}}

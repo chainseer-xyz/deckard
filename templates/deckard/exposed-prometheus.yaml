@@ -1,0 +1,17 @@
+id: deckard-exposed-prometheus
+info:
+  name: Exposed Prometheus metrics
+  author: deckard
+  severity: medium
+  tags: [deckard, exposure, monitoring]
+  description: Prometheus metrics are accessible without authentication.
+  remediation: Require authentication or network policy protection for the metrics endpoint.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/metrics"
+    matchers:
+      - type: word
+        part: body
+        words: ["# HELP", "# TYPE", "process_cpu_seconds"]
+        condition: and

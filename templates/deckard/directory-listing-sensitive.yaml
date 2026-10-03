@@ -1,0 +1,19 @@
+id: deckard-directory-listing-sensitive
+info:
+  name: Sensitive directory listing
+  author: deckard
+  severity: medium
+  tags: [deckard, exposure, backup]
+  description: A directory listing exposes sensitive backup or configuration file names.
+  remediation: Disable directory indexes and remove sensitive files from web-served directories.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+      - "{{BaseURL}}/backup/"
+      - "{{BaseURL}}/config/"
+    matchers:
+      - type: regex
+        part: body
+        regex:
+          - "(?i)(Index of /|\\.(bak|backup|dump|sql|env|pem|key)(\\\"|</a>|\\s))"

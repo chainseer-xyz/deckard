@@ -127,7 +127,8 @@ $EDITOR deploy/compose/deckard.yaml
 docker compose up -d            # UI on http://127.0.0.1:8080, metrics on :9090
 ```
 
-Images: `ghcr.io/chainseer-xyz/deckard` (includes the nuclei engine) and
+Images: `ghcr.io/chainseer-xyz/deckard` (includes the nuclei engine, a pinned official template snapshot,
+and deckard's custom finder pack) and
 `ghcr.io/chainseer-xyz/deckard:latest-slim` (13 MB, no nuclei; set `nuclei.enabled: false`).
 Both run as non-root on a distroless base, signed with cosign, with an SBOM and provenance.
 

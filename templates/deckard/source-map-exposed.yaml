@@ -1,0 +1,19 @@
+id: deckard-source-map-exposed
+info:
+  name: Public JavaScript source map
+  author: deckard
+  severity: low
+  tags: [deckard, exposure, javascript]
+  description: A JavaScript source map is publicly readable and may disclose application source.
+  remediation: Do not publish source maps to production origins or serve them only to authenticated users.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/app.js.map"
+      - "{{BaseURL}}/main.js.map"
+      - "{{BaseURL}}/assets/index.js.map"
+    matchers:
+      - type: word
+        part: body
+        words: ["version", "sources", "mappings"]
+        condition: and

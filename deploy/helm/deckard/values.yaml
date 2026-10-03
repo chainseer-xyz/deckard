@@ -210,6 +210,11 @@ persistence:
   existingClaim: ""
 
 nuclei:
+  # -- Mount operator-supplied templates at this fixed read-only path. The
+  # directory is appended to nuclei.extra_templates_dirs automatically.
+  customTemplates:
+    configMap: ""
+    existingClaim: ""
   # -- Volume for the nuclei template updater (config.nuclei.update.dir, default
   # /var/lib/deckard/nuclei-templates). The root filesystem stays read-only; the
   # default is an emptyDir (templates are re-downloaded when the pod restarts, a

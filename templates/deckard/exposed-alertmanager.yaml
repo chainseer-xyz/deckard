@@ -1,0 +1,17 @@
+id: deckard-exposed-alertmanager
+info:
+  name: Exposed Alertmanager API
+  author: deckard
+  severity: medium
+  tags: [deckard, exposure, monitoring]
+  description: Alertmanager status or silences are accessible without authentication.
+  remediation: Restrict Alertmanager to trusted operators and require authentication.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/v2/status"
+      - "{{BaseURL}}/api/v2/silences"
+    matchers:
+      - type: word
+        part: body
+        words: ["clusterStatus", "silences"]

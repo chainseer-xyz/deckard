@@ -1,0 +1,17 @@
+id: deckard-spring-actuator-env
+info:
+  name: Exposed Spring Boot actuator environment
+  author: deckard
+  severity: critical
+  tags: [deckard, exposure, spring, secrets]
+  description: Spring Boot actuator environment data is publicly readable.
+  remediation: Disable or authenticate actuator env endpoints and never expose secret properties.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/actuator/env"
+    matchers:
+      - type: word
+        part: body
+        words: ["activeProfiles", "propertySources", "systemProperties"]
+        condition: and

@@ -11,6 +11,8 @@ import (
 	"github.com/chainseer-xyz/deckard/internal/nuclei/updater"
 )
 
+const bakedNucleiTemplates = "/usr/local/share/deckard/nuclei-templates"
+
 // nucleiWiring is everything the app builds around the nuclei binary: the
 // effective config, the template updater (nil when off) and the template-
 // limited scanner (nil when nuclei is off).
@@ -20,6 +22,7 @@ type nucleiWiring struct {
 	scanner *nuclei.Scanner
 	opts    []nuclei.Option
 	env     func() ([]string, func(), error)
+	gate    *nuclei.ProcessGate
 }
 
 // nuclei builds the wiring once. It never touches the network and fails open:
@@ -42,6 +45,7 @@ func (a *App) nuclei() *nucleiWiring {
 	}
 
 	u := nw.cfg.Update
+	nw.gate = nuclei.NewProcessGate(nw.cfg.ProcessConcurrency)
 	switch {
 	case !u.Enabled:
 		a.log.Info("nuclei template updates are disabled; scans use the templates found at nuclei.templates_dir", "templates_dir", nw.cfg.TemplatesDir)
@@ -52,19 +56,50 @@ func (a *App) nuclei() *nucleiWiring {
 			"templates_dir", nw.cfg.TemplatesDir, "update_dir", u.Dir)
 		nw.cfg.Update.Enabled = false
 	default:
-		upd, err := updater.New(updater.Config{Dir: u.Dir, Binary: nw.cfg.Binary, Timeout: u.Timeout, Logger: a.log})
+		upd, err := updater.New(updater.Config{Dir: u.Dir, BakedDir: bakedNucleiTemplates, Binary: nw.cfg.Binary, Timeout: u.Timeout, Logger: a.log})
 		if err != nil {
 			a.log.Error("nuclei template updater disabled", "err", err)
 			nw.cfg.Update.Enabled = false
 			break
 		}
 		nw.upd = upd
-		nw.env = upd.ScanEnv
-		nw.opts = []nuclei.Option{nuclei.WithEnv(upd.ScanEnv), nuclei.WithTemplateDir(upd.CurrentDir)}
+		nw.env = func() ([]string, func(), error) {
+			values, cleanup, err := upd.ScanEnv()
+			if err != nil {
+				return nil, nil, err
+			}
+			values = append(values, "GOMEMLIMIT="+nw.cfg.ProcessMemoryLimit)
+			return values, cleanup, nil
+		}
+		nw.opts = []nuclei.Option{nuclei.WithEnv(nw.env), nuclei.WithTemplateDir(func() (string, error) {
+			dir, _, err := upd.ActiveDir()
+			return dir, err
+		})}
 		a.seedTemplateMetrics(upd)
 	}
+	if _, err := os.Stat(filepath.Join(bakedNucleiTemplates, "deckard")); err == nil {
+		nw.cfg.ExtraTemplatesDirs = append(nw.cfg.ExtraTemplatesDirs, filepath.Join(bakedNucleiTemplates, "deckard"))
+	}
+	if nw.env == nil {
+		nw.env = func() ([]string, func(), error) {
+			return []string{"GOMEMLIMIT=" + nw.cfg.ProcessMemoryLimit}, func() {}, nil
+		}
+	}
+	runtimeOpts := append([]nuclei.Option{}, nw.opts...)
+	runtimeOpts = append(runtimeOpts, nuclei.WithEnv(nw.env), nuclei.WithLogger(a.log),
+		nuclei.WithRunObserver(a.metrics.ObserveNucleiRun), nuclei.WithProcessGate(nw.gate))
+	if nw.upd != nil {
+		upd := nw.upd
+		runtimeOpts = append(runtimeOpts, nuclei.WithTemplateSource(func() string {
+			_, source, err := upd.ActiveDir()
+			if err != nil {
+				return "configured"
+			}
+			return source
+		}))
+	}
 	nw.scanner = nuclei.NewScanner(nw.cfg, nuclei.ScopeVerifier(a.guard.VerifyOwnedTarget),
-		nuclei.ExecRunner{Env: nw.env}, a.cfg.Checks[nuclei.NameActive], nw.opts...)
+		nuclei.ExecRunner{Env: nw.env, Gate: nw.gate}, a.cfg.Checks[nuclei.NameActive], runtimeOpts...)
 	return nw
 }
 
