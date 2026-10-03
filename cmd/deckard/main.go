@@ -31,6 +31,7 @@ Commands:
   findings          print current findings (--min-severity, --status, --format table|json)
   ingest            post an external scanner's output (prowler, kubescape, trufflehog, gitleaks,
                     s3scanner, sarif) to a deckard API; see deckard ingest --help and docs/ingest.md
+                    (ingest prowler-app pulls the findings of a running Prowler App instead)
   version           print version information
 
 Common flags:

@@ -21,42 +21,9 @@ var (
 	scanStart = clock.Add(-4 * time.Hour)
 )
 
-// world is a Prowler App with an AWS account (five failing findings, the
-// first page of which is served two at a time, so three pages) and a GCP
-// project.
-func world(t *testing.T) *pt.Server {
-	t.Helper()
-	srv := pt.New(t)
-	srv.APIKey = testKey
-	srv.Providers = []pt.Provider{
-		{ID: "p-gcp", Type: "gcp", UID: "my-project", Connected: true},
-		{ID: "p-aws", Type: "aws", UID: "123456789012", Connected: true},
-	}
-	srv.Scans = []pt.Scan{
-		{ID: "s-aws", ProviderID: "p-aws", State: "completed", StartedAt: scanStart, CompletedAt: scanDone},
-		{ID: "s-aws-old", ProviderID: "p-aws", State: "completed", StartedAt: scanStart.Add(-24 * time.Hour), CompletedAt: scanDone.Add(-24 * time.Hour)},
-		{ID: "s-gcp", ProviderID: "p-gcp", State: "completed", StartedAt: scanStart, CompletedAt: scanDone.Add(time.Minute)},
-	}
-	for i := 1; i <= 5; i++ {
-		srv.Resources = append(srv.Resources, pt.Resource{ID: fmt.Sprintf("r%d", i), UID: fmt.Sprintf("arn:aws:s3:::bucket-%d", i), Name: fmt.Sprintf("bucket-%d", i), Region: "us-east-1", Service: "s3", Type: "AwsS3Bucket"})
-		srv.Findings = append(srv.Findings, awsFinding(i))
-	}
-	srv.Resources = append(srv.Resources, pt.Resource{ID: "rg", UID: "projects/my-project/buckets/b", Name: "b", Region: "europe-west1", Service: "gcs", Type: "bucket"})
-	srv.Findings = append(srv.Findings, pt.Finding{
-		ID: "fg", UID: "prowler-gcp-gcs-1", ProviderID: "p-gcp", ScanID: "s-gcp", CheckID: "gcs_public", CheckTitle: "GCS bucket is public",
-		Severity: "high", Status: "FAIL", StatusExtended: "bucket b is public", Service: "gcs", ResourceIDs: []string{"rg"},
-	})
-	return srv
-}
+func world(t *testing.T) *pt.Server { return pt.Sample(t, testKey, scanDone) }
 
-func awsFinding(i int) pt.Finding {
-	return pt.Finding{
-		ID: fmt.Sprintf("f%d", i), UID: fmt.Sprintf("prowler-aws-s3_public-123456789012-us-east-1-b%d", i), ProviderID: "p-aws", ScanID: "s-aws",
-		CheckID: "s3_public", CheckTitle: "S3 bucket is public", Severity: "high", Status: "FAIL", StatusExtended: fmt.Sprintf("bucket-%d is public", i),
-		Risk: "data leak", RecText: "Block public access", RecURL: "https://docs.example.com/s3", Service: "s3", ResourceType: "AwsS3Bucket",
-		Delta: "new", FirstSeenAt: "2026-10-01T00:00:00Z", ResourceIDs: []string{fmt.Sprintf("r%d", i)},
-	}
-}
+func awsFinding(i int) pt.Finding { return pt.AWSFinding(i) }
 
 func collector(t *testing.T, srv *pt.Server, mod func(*prowlerapp.Options)) *prowlerapp.Collector {
 	t.Helper()
