@@ -71,7 +71,7 @@ Response (one JSON object on stdout; every key optional):
     "remediation": "How to fix it.",
     "tags": ["custom"]
   }],
-  "discovered": [{"kind": "hostname", "key": "new.example.com", "source": "my-check", "attrs": {}}],
+  "discovered": [{"kind": "hostname", "key": "new.example.com", "attrs": {}}],
   "relations": [{"from_kind": "hostname", "from_key": "new.example.com",
                  "to_kind": "ip", "to_key": "192.0.2.10", "type": "resolves_to"}]
 }
@@ -86,7 +86,9 @@ Rules enforced by deckard:
   defaults to the title.
 - Discovered assets need a known `kind` and a non-empty `key`; relations need
   known kinds, keys and a known `type`. Invalid ones are dropped and logged.
-  Discovered assets only enter the inventory if they fall within scope.
+  Discovered assets only enter the inventory if they fall within scope. Their
+  `source` is always `check:plugin.<name>`: like any check's discoveries they
+  are removed once the plugin stops reporting them.
 - Never put secret values in `evidence`; findings are stored and sent to
   alerting.
 

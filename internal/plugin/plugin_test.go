@@ -14,6 +14,7 @@ import (
 	"github.com/chainseer-xyz/deckard/internal/check"
 	"github.com/chainseer-xyz/deckard/internal/config"
 	"github.com/chainseer-xyz/deckard/internal/model"
+	"github.com/chainseer-xyz/deckard/internal/store"
 )
 
 // TestMain doubles as the plugin: when DECKARD_PLUGIN_MODE is set the test
@@ -48,6 +49,7 @@ func helperPlugin(mode string) int {
 			},
 			"discovered": []any{
 				map[string]any{"kind": "hostname", "key": "x.example.com"},
+				map[string]any{"kind": "hostname", "key": "z.example.com", "source": "cloudflare"},
 				map[string]any{"kind": "banana", "key": "y"},
 				map[string]any{"kind": "ip", "key": ""},
 			},
@@ -128,8 +130,15 @@ func TestProtocolRoundTrip(t *testing.T) {
 	if f.Check != "plugin.demo" || f.Title != "found https://app.example.com/x" || f.Severity != model.SeverityHigh {
 		t.Errorf("finding %+v", f)
 	}
-	if len(res.Discovered) != 1 || res.Discovered[0].Key != "x.example.com" || res.Discovered[0].Source != "plugin.demo" {
+	if len(res.Discovered) != 2 || res.Discovered[0].Key != "x.example.com" || res.Discovered[1].Key != "z.example.com" {
 		t.Errorf("discovered %+v", res.Discovered)
+	}
+	// What a check discovers is derived (garbage-collected when no longer
+	// observed), never source-owned, whatever source the plugin claims.
+	for _, a := range res.Discovered {
+		if a.Source != "check:plugin.demo" || !store.IsDerivedSource(a.Source) {
+			t.Errorf("discovered %s has source %q, want derived check:plugin.demo", a.Key, a.Source)
+		}
 	}
 	if len(res.Relations) != 1 {
 		t.Errorf("relations %+v", res.Relations)

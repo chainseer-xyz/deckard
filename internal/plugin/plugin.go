@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/chainseer-xyz/deckard/internal/check"
+	"github.com/chainseer-xyz/deckard/internal/check/checkutil"
 	"github.com/chainseer-xyz/deckard/internal/config"
 	"github.com/chainseer-xyz/deckard/internal/model"
 )
@@ -294,9 +295,10 @@ func (p *pluginCheck) keepAssets(resp *response, res *check.Result) {
 			slog.Warn("plugin discovered asset dropped", "plugin", p.name, "kind", a.Kind, "key", a.Key)
 			continue
 		}
-		if a.Source == "" {
-			a.Source = p.name
-		}
+		// A check's discoveries are derived assets, garbage-collected once no
+		// longer observed. A plugin-chosen source would make them source-owned
+		// (never collected) or let a plugin write as a real source.
+		a.Source = checkutil.Source(p.name)
 		res.Discovered = append(res.Discovered, a)
 	}
 	for i, r := range resp.Relations {
