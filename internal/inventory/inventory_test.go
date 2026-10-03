@@ -38,7 +38,13 @@ func (f *fakeCls) SetOwnedPrefixes(p []netip.Prefix) {
 	f.owned = p
 	f.mu.Unlock()
 }
+func (f *fakeCls) ClassifyUnregistered(ip string) model.ScopeClass {
+	return f.classify(model.KindIP, ip, false)
+}
 func (f *fakeCls) Classify(kind model.AssetKind, key string) model.ScopeClass {
+	return f.classify(kind, key, true)
+}
+func (f *fakeCls) classify(kind model.AssetKind, key string, registered bool) model.ScopeClass {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if kind == model.KindIP {
@@ -47,7 +53,7 @@ func (f *fakeCls) Classify(kind model.AssetKind, key string) model.ScopeClass {
 			return model.ScopeExternal
 		}
 		for _, p := range f.owned {
-			if p.Contains(ip) {
+			if registered && p.Contains(ip) {
 				return model.ScopeOwned
 			}
 		}
@@ -284,6 +290,36 @@ func TestOwnedPrefixRegistration(t *testing.T) {
 	}
 	if got := cls.Classify(model.KindIP, "198.51.100.7"); got != model.ScopeOwned {
 		t.Errorf("other sources' registrations stay, got %s", got)
+	}
+}
+
+// An owned registration must not vouch for itself: once the IP's range is
+// shared (the shared list grew after it was registered), the next sync drops
+// the registration exactly as a first registration would have been refused.
+func TestOwnedPrefixDroppedWhenRangeBecomesShared(t *testing.T) {
+	ctx := context.Background()
+	st := pgtest.New(t)
+	cls := &fakeCls{}
+	svc := inventory.New(st, cls, quiet)
+	cf := &fakeSrc{name: "cf", typ: "cloudflare", d: &source.Discovery{Assets: []model.AssetInput{
+		ip("192.0.2.10", map[string]any{"origin": true}),
+	}}}
+	if _, err := svc.Sync(ctx, cf); err != nil {
+		t.Fatal(err)
+	}
+	if got := cls.Classify(model.KindIP, "192.0.2.10"); got != model.ScopeOwned {
+		t.Fatalf("precondition: origin IP should be owned, got %s", got)
+	}
+
+	cls.mu.Lock()
+	cls.sharedPfx = pfx("192.0.2.0/24")
+	cls.mu.Unlock()
+	if _, err := svc.Sync(ctx, cf); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := cls.Classify(model.KindIP, "192.0.2.10"); got != model.ScopeShared {
+		t.Errorf("IP in a now-shared range stays registered as owned: got %s, want shared", got)
 	}
 }
 

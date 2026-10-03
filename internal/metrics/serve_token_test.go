@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -78,5 +79,18 @@ func TestServeListenerEmptyTokenIsOpen(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Fatalf("open metrics = %d", resp.StatusCode)
+	}
+}
+
+// The presented token is trimmed, so the configured one must be too: a token
+// from a file-backed secret ends in a newline and would otherwise never match.
+func TestRequireTokenTrimsConfiguredToken(t *testing.T) {
+	h := metrics.RequireToken(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}), "s3cret-scrape-token\n")
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil)
+	req.Header.Set("Authorization", "Bearer s3cret-scrape-token")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: token with trailing newline never matches", rec.Code)
 	}
 }

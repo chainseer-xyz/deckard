@@ -49,6 +49,21 @@ func (c *capBuffer) Write(p []byte) (int, error) {
 	return c.buf.Write(p)
 }
 
+// truncBuffer keeps the first max bytes and silently drops the rest. A write
+// error would make os/exec stop draining the pipe and nuclei die of SIGPIPE,
+// so warning volume alone would fail the run.
+type truncBuffer struct {
+	buf bytes.Buffer
+	max int
+}
+
+func (t *truncBuffer) Write(p []byte) (int, error) {
+	if room := t.max - t.buf.Len(); room > 0 {
+		t.buf.Write(p[:min(len(p), room)])
+	}
+	return len(p), nil
+}
+
 // Run implements Runner. When nuclei exits non-zero the captured stdout is
 // still returned alongside the error so callers can salvage matches.
 func (r ExecRunner) Run(ctx context.Context, binary string, args []string) ([]byte, error) {
@@ -65,7 +80,7 @@ func (r ExecRunner) Run(ctx context.Context, binary string, args []string) ([]by
 	defer cancel()
 	cmd := exec.CommandContext(ctx, binary, args...) // #nosec G204 -- operator-configured binary, argv only, never a shell
 	out := &capBuffer{max: maxStdout, cancel: cancel}
-	errBuf := &capBuffer{max: maxStderr}
+	errBuf := &truncBuffer{max: maxStderr}
 	cmd.Stdout, cmd.Stderr = out, errBuf
 	cmd.Env = env
 	setProcessGroup(cmd)

@@ -52,8 +52,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if and .Values.worker.enabled .Values.worker.resources .Values.worker.resources.limits .Values.worker.resources.limits.cpu }}
 {{- fail "worker.resources.limits.cpu must not be set: CPU limits cause throttling and are disallowed" }}
 {{- end }}
-{{- if and (not .Values.database.cnpg.enabled) (not .Values.database.existingSecret) (not (hasKey .Values.env "DECKARD_DATABASE__URL")) }}
-{{- fail "no database configured: set database.cnpg.enabled=true, database.existingSecret, or env.DECKARD_DATABASE__URL" }}
+{{- $dbEnv := or (hasKey .Values.env "DECKARD_DATABASE__URL") (hasKey (.Values.secretEnv | default dict) "DECKARD_DATABASE__URL") (dig "database" "url" "" .Values.config) -}}
+{{- range .Values.extraEnv }}{{ if eq (toString .name) "DECKARD_DATABASE__URL" }}{{ $dbEnv = true }}{{ end }}{{ end -}}
+{{- if and (not .Values.database.cnpg.enabled) (not .Values.database.existingSecret) (not $dbEnv) }}
+{{- fail "no database configured: set database.cnpg.enabled=true, database.existingSecret, or DECKARD_DATABASE__URL (env, secretEnv or extraEnv)" }}
 {{- end }}
 {{- if and .Values.worker.enabled (has "worker" .Values.roles) }}
 {{- fail "worker.enabled=true: remove \"worker\" from roles so scanning runs only in the worker Deployment" }}
@@ -134,8 +136,19 @@ spec:
         {{- with $root.Values.extraEnvFrom }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+      {{- if has "api" .roles }}
       livenessProbe: {{- toYaml $root.Values.livenessProbe | nindent 8 }}
       readinessProbe: {{- toYaml $root.Values.readinessProbe | nindent 8 }}
+      {{- else }}
+      {{- /* Only the api role serves /healthz and /readyz on the http port; a
+           pod without it listens on the metrics port alone. */}}
+      livenessProbe:
+        tcpSocket: { port: metrics }
+        periodSeconds: {{ default 20 $root.Values.livenessProbe.periodSeconds }}
+      readinessProbe:
+        tcpSocket: { port: metrics }
+        periodSeconds: {{ default 10 $root.Values.readinessProbe.periodSeconds }}
+      {{- end }}
       resources: {{- toYaml .resources | nindent 8 }}
       volumeMounts:
         - { name: config, mountPath: /etc/deckard, readOnly: true }

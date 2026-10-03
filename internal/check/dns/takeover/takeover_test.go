@@ -3,6 +3,7 @@ package takeover
 import (
 	"context"
 	"crypto/x509"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -243,5 +244,42 @@ func TestDefaultCertMatching(t *testing.T) {
 				t.Errorf("%s: default_cert entries are bare domains, got %q", p.Provider, d)
 			}
 		}
+	}
+}
+
+// SERVFAIL, timeouts and unreachable hosts are unknown, not "no takeover": a
+// clean result would count a miss against an open critical takeover finding
+// and a DNS outage would resolve it. Such runs must be partial.
+func TestRunUnknownOutcomesArePartial(t *testing.T) {
+	servfail := &net.DNSError{Err: "server misbehaving", Name: "x", IsTemporary: true}
+	for name, tc := range map[string]struct {
+		r    *checktest.Resolver
+		host string
+		http bool
+	}{
+		"cname lookup fails": {host: "docs.example.com",
+			r: &checktest.Resolver{Errs: map[string]error{"docs.example.com": servfail}}},
+		"nxdomain provider target lookup fails": {host: "app.example.com",
+			r: &checktest.Resolver{CNAMEs: map[string]string{"app.example.com": "gone.azurewebsites.net"},
+				Errs: map[string]error{"gone.azurewebsites.net": servfail}}},
+		"body provider unreachable on both schemes": {host: "docs.example.com", http: true,
+			r: &checktest.Resolver{CNAMEs: map[string]string{"docs.example.com": "acme.github.io"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			opts := []checktest.Option{checktest.WithResolver(tc.r)}
+			if tc.http {
+				opts = append(opts, checktest.WithHTTP(checktest.HostClient(map[string]*httptest.Server{})))
+			}
+			tg := checktest.NewTarget(checktest.Hostname(tc.host, "example.com"), opts...)
+
+			res, err := New(nil).Run(context.Background(), tg)
+
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Findings) != 0 || !res.Partial {
+				t.Fatalf("unknown outcome reported as a clean run: partial=%v findings=%+v obs=%+v", res.Partial, res.Findings, res.Observations)
+			}
+		})
 	}
 }

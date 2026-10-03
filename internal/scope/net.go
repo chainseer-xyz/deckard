@@ -146,6 +146,16 @@ type guardedDialer struct {
 }
 
 func (d *guardedDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	return d.dial(ctx, network, address, 0)
+}
+
+// DialTimeout is DialContext with timeout bounding only the lookup and the
+// connection attempt, not the wait for a rate-limit token (check.TimeoutDialer).
+func (d *guardedDialer) DialTimeout(ctx context.Context, network, address string, timeout time.Duration) (net.Conn, error) {
+	return d.dial(ctx, network, address, timeout)
+}
+
+func (d *guardedDialer) dial(ctx context.Context, network, address string, timeout time.Duration) (net.Conn, error) {
 	g := d.g
 	switch network {
 	case "tcp", "tcp4", "tcp6", "udp", "udp4", "udp6":
@@ -171,6 +181,8 @@ func (d *guardedDialer) DialContext(ctx context.Context, network, address string
 		if err := d.wait(ctx, ip.String()); err != nil {
 			return nil, err
 		}
+		ctx, cancel := withTimeout(ctx, timeout)
+		defer cancel()
 		return d.base.DialContext(ctx, network, net.JoinHostPort(ip.String(), portStr))
 	}
 
@@ -189,6 +201,8 @@ func (d *guardedDialer) DialContext(ctx context.Context, network, address string
 	if err := d.wait(ctx, name); err != nil {
 		return nil, err
 	}
+	ctx, cancel := withTimeout(ctx, timeout)
+	defer cancel()
 	addrs, err := g.resolver.LookupHost(ctx, name)
 	if err != nil {
 		return nil, err
@@ -225,7 +239,18 @@ func (d *guardedDialer) wait(ctx context.Context, host string) error {
 	if d.rate == nil {
 		return nil
 	}
-	return d.rate.Wait(ctx, host)
+	if err := d.rate.Wait(ctx, host); err != nil {
+		return fmt.Errorf("%w: %w", check.ErrRateLimited, err)
+	}
+	return nil
+}
+
+// withTimeout bounds ctx by timeout; zero leaves it unchanged.
+func withTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, timeout)
 }
 
 // Resolver returns a scope-aware check.Resolver. Excluded names are never

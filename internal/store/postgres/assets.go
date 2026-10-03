@@ -251,9 +251,15 @@ func removeAssets(ctx context.Context, tx pgx.Tx, in []model.Asset, now time.Tim
 func (s *Store) ReplaceDerived(ctx context.Context, assetID int64, origin string, assets []store.AssetUpsert, rels []model.RelationInput, now time.Time) (store.InventoryDiff, error) {
 	var diff store.InventoryDiff
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		var parent int64
-		if err := tx.QueryRow(ctx, `SELECT id FROM assets WHERE id = $1 FOR UPDATE`, assetID).Scan(&parent); err != nil {
+		var parentRemoved bool
+		if err := tx.QueryRow(ctx, `SELECT removed_at IS NOT NULL FROM assets WHERE id = $1 FOR UPDATE`, assetID).Scan(&parentRemoved); err != nil {
 			return notFound(err)
+		}
+		if parentRemoved {
+			// A scan that started before its parent was removed: what it saw
+			// must not revive children the removal just took down, since a
+			// removed parent is never scanned again to take them back down.
+			return nil
 		}
 		ups := make([]store.AssetUpsert, len(assets))
 		for i, a := range assets {

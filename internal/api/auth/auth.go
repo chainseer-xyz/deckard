@@ -131,7 +131,7 @@ func New(cfg config.AuthConfig, opts Options) (Authenticator, error) {
 		if cfg.TokenEnv == "" {
 			return nil, errors.New("auth.token_env is required for token mode")
 		}
-		tok := opts.Getenv(cfg.TokenEnv)
+		tok := strings.TrimSpace(opts.Getenv(cfg.TokenEnv))
 		if tok == "" {
 			return nil, fmt.Errorf("auth token env %q is empty", cfg.TokenEnv)
 		}
@@ -159,8 +159,11 @@ func (None) Authenticate(*http.Request) (*Identity, error) {
 // Token authenticates a static bearer token.
 type Token struct{ digest [32]byte }
 
-// NewToken builds a Token authenticator.
-func NewToken(tok string) *Token { return &Token{digest: sha256.Sum256([]byte(tok))} }
+// NewToken builds a Token authenticator. Surrounding whitespace (a trailing
+// newline from a file-backed secret) is ignored, as on the presented token.
+func NewToken(tok string) *Token {
+	return &Token{digest: sha256.Sum256([]byte(strings.TrimSpace(tok)))}
+}
 
 // Mode implements Authenticator.
 func (*Token) Mode() string { return "token" }

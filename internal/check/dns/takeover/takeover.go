@@ -228,10 +228,13 @@ func (c *Check) Run(ctx context.Context, t check.Target) (*check.Result, error) 
 	obs := map[string]any{"host": host}
 	defer func() { res.Observations = append(res.Observations, model.ObservationInput{Check: Name, Data: obs}) }()
 
+	// SERVFAIL, timeouts and unreachable hosts are unknown, not clean: such a
+	// run is partial so it cannot count a miss against an open finding.
 	cname, err := t.Resolver.LookupCNAME(ctx, host)
 	if err != nil {
 		if !checkutil.IsNotFound(err) {
 			obs["cname_error"] = err.Error()
+			res.Partial = true
 		}
 		return res, nil
 	}
@@ -256,6 +259,10 @@ func (c *Check) Run(ctx context.Context, t check.Target) (*check.Result, error) 
 	if fp.NXDomain {
 		_, err := t.Resolver.LookupHost(ctx, final)
 		obs["target_nxdomain"] = checkutil.IsNotFound(err)
+		if err != nil && !checkutil.IsNotFound(err) {
+			obs["target_error"] = err.Error()
+			res.Partial = true
+		}
 		if checkutil.IsNotFound(err) {
 			state := c.probeCert(ctx, t, host, fp, timeout, obs)
 			if state == certValidForHost {
@@ -293,6 +300,9 @@ func (c *Check) Run(ctx context.Context, t check.Target) (*check.Result, error) 
 	}
 	if len(errs) > 0 {
 		obs["fetch_errors"] = errs
+		if len(res.Findings) == 0 && len(errs) == 2 {
+			res.Partial = true // neither scheme answered: nothing was checked
+		}
 	}
 	return res, nil
 }

@@ -55,6 +55,23 @@ func testDerivedGCOnRemoval(t *testing.T, f Factory) {
 		}
 	})
 
+	t.Run("a scan finishing after its parent was removed does not revive its children", func(t *testing.T) {
+		e := newEnv(t, f)
+		h := e.seedHost("h.x.io", "cf", at(0))
+		children := []store.AssetUpsert{svc("h.x.io:443", check, nil)}
+		e.replace(h.ID, check, children, []model.RelationInput{exposes("h.x.io", "h.x.io:443")}, at(1))
+		e.snapshot("cf", nil, nil, at(2)) // removes the parent and its child
+
+		// A scan of the parent that started before the removal lands now.
+		d := e.replace(h.ID, check, children, []model.RelationInput{exposes("h.x.io", "h.x.io:443")}, at(3))
+		if len(d.Added)+len(d.Revived)+len(d.Changed) != 0 {
+			t.Fatalf("stale scan of a removed parent changed inventory: %+v", d)
+		}
+		if a := e.asset(model.KindService, "h.x.io:443"); a.RemovedAt == nil {
+			t.Fatalf("derived child revived by a stale scan of its removed parent; nothing will ever remove it again")
+		}
+	})
+
 	t.Run("removal cascades down derivation chains", func(t *testing.T) {
 		e := newEnv(t, f)
 		h := e.seedHost("h.x.io", "cf", at(0))

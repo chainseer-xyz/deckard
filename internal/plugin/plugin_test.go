@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/chainseer-xyz/deckard/internal/check"
 	"github.com/chainseer-xyz/deckard/internal/config"
 	"github.com/chainseer-xyz/deckard/internal/model"
+	"github.com/chainseer-xyz/deckard/internal/store"
 )
 
 // TestMain doubles as the plugin: when DECKARD_PLUGIN_MODE is set the test
@@ -48,6 +50,7 @@ func helperPlugin(mode string) int {
 			},
 			"discovered": []any{
 				map[string]any{"kind": "hostname", "key": "x.example.com"},
+				map[string]any{"kind": "hostname", "key": "z.example.com", "source": "cloudflare"},
 				map[string]any{"kind": "banana", "key": "y"},
 				map[string]any{"kind": "ip", "key": ""},
 			},
@@ -57,6 +60,11 @@ func helperPlugin(mode string) int {
 			},
 		}
 		_ = json.NewEncoder(os.Stdout).Encode(out)
+	case "noisy": // verbose logging must not fail an otherwise good run
+		for i := 0; i < 64; i++ {
+			_, _ = os.Stderr.WriteString(strings.Repeat("x", 1023) + "\n")
+		}
+		_, _ = os.Stdout.WriteString(`{"findings":[{"severity":"low","title":"ok"}]}`)
 	case "badjson":
 		_, _ = os.Stdout.WriteString("not json at all")
 	case "twoobjects":
@@ -128,8 +136,15 @@ func TestProtocolRoundTrip(t *testing.T) {
 	if f.Check != "plugin.demo" || f.Title != "found https://app.example.com/x" || f.Severity != model.SeverityHigh {
 		t.Errorf("finding %+v", f)
 	}
-	if len(res.Discovered) != 1 || res.Discovered[0].Key != "x.example.com" || res.Discovered[0].Source != "plugin.demo" {
+	if len(res.Discovered) != 2 || res.Discovered[0].Key != "x.example.com" || res.Discovered[1].Key != "z.example.com" {
 		t.Errorf("discovered %+v", res.Discovered)
+	}
+	// What a check discovers is derived (garbage-collected when no longer
+	// observed), never source-owned, whatever source the plugin claims.
+	for _, a := range res.Discovered {
+		if a.Source != "check:plugin.demo" || !store.IsDerivedSource(a.Source) {
+			t.Errorf("discovered %s has source %q, want derived check:plugin.demo", a.Key, a.Source)
+		}
 	}
 	if len(res.Relations) != 1 {
 		t.Errorf("relations %+v", res.Relations)
@@ -285,5 +300,30 @@ func TestAssetHost(t *testing.T) {
 		if got := assetHost(tc.a); got != tc.want {
 			t.Errorf("%+v: %q", tc.a, got)
 		}
+	}
+}
+
+func TestVerboseStderrDoesNotFailRun(t *testing.T) {
+	c := New(cfgFor("noisy", nil), scope("app.example.com"))
+	res, err := c.Run(context.Background(), urlTarget())
+	if err != nil {
+		t.Fatalf("64 KiB of stderr failed the run: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("findings %+v", res.Findings)
+	}
+}
+
+// The plugin runs in a fresh temp directory, so a relative exec path such as
+// "plugins/check.py" must be resolved against deckard's working directory,
+// not the plugin's, or it can never be found.
+func TestRelativeExecPathResolvedFromWorkingDir(t *testing.T) {
+	t.Chdir(filepath.Dir(os.Args[0]))
+	cfg := cfgFor("echo", nil)
+	cfg.Exec = []string{"." + string(filepath.Separator) + filepath.Base(os.Args[0])}
+	c := New(cfg, scope("app.example.com"))
+
+	if _, err := c.Run(context.Background(), urlTarget()); err != nil {
+		t.Fatalf("relative exec path: %v", err)
 	}
 }

@@ -1,4 +1,5 @@
 {{- if .Values.database.cnpg.enabled }}
+{{- $extra := .Values.database.cnpg.extraSpec | default dict }}
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -7,16 +8,22 @@ metadata:
     {{- include "deckard.labels" . | nindent 4 }}
 spec:
   instances: {{ .Values.database.cnpg.instances }}
+  {{- /* extraSpec may replace these (e.g. bootstrap.recovery to restore a
+       backup); emitting both would duplicate the mapping key. */}}
+  {{- if not (hasKey $extra "bootstrap") }}
   bootstrap:
     initdb:
       database: deckard
       owner: deckard
+  {{- end }}
+  {{- if not (hasKey $extra "storage") }}
   storage:
     size: {{ .Values.database.cnpg.storage.size }}
     {{- with .Values.database.cnpg.storage.storageClass }}
     storageClass: {{ . }}
     {{- end }}
-  {{- with .Values.database.cnpg.extraSpec }}
+  {{- end }}
+  {{- with $extra }}
   {{- toYaml . | nindent 2 }}
   {{- end }}
 {{- end }}

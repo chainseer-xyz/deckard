@@ -15,10 +15,12 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/chainseer-xyz/deckard/internal/check"
+	"github.com/chainseer-xyz/deckard/internal/check/checkutil"
 	"github.com/chainseer-xyz/deckard/internal/config"
 	"github.com/chainseer-xyz/deckard/internal/model"
 )
@@ -66,6 +68,13 @@ func New(cfg config.PluginConfig, verify ScopeVerifier) check.Check {
 	if !tier.Valid() {
 		slog.Warn("plugin has invalid tier, treating as intrusive", "plugin", cfg.Name, "tier", cfg.Tier)
 		tier = model.TierIntrusive
+	}
+	// The plugin runs in a fresh temp directory, which os/exec would resolve a
+	// relative path such as "plugins/check.py" against; anchor it to ours.
+	if len(cfg.Exec) > 0 && !filepath.IsAbs(cfg.Exec[0]) && filepath.Base(cfg.Exec[0]) != cfg.Exec[0] {
+		if abs, err := filepath.Abs(cfg.Exec[0]); err == nil {
+			cfg.Exec = append([]string{abs}, cfg.Exec[1:]...)
+		}
 	}
 	return &pluginCheck{cfg: cfg, name: "plugin." + cfg.Name, tier: tier, verify: verify}
 }
@@ -199,6 +208,21 @@ func (l *limitWriter) Write(b []byte) (int, error) {
 	return l.buf.Write(b)
 }
 
+// truncWriter keeps the first max bytes and silently drops the rest: a
+// write error would make os/exec stop draining the pipe, killing the child
+// with SIGPIPE or failing Wait, so log volume alone would fail a good run.
+type truncWriter struct {
+	buf bytes.Buffer
+	max int
+}
+
+func (l *truncWriter) Write(b []byte) (int, error) {
+	if room := l.max - l.buf.Len(); room > 0 {
+		l.buf.Write(b[:min(len(b), room)])
+	}
+	return len(b), nil
+}
+
 func (p *pluginCheck) exec(ctx context.Context, stdin []byte) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, p.timeout())
 	defer cancel()
@@ -213,7 +237,7 @@ func (p *pluginCheck) exec(ctx context.Context, stdin []byte) ([]byte, error) {
 	cmd.Env = p.env()
 	cmd.Stdin = bytes.NewReader(stdin)
 	stdout := &limitWriter{max: maxStdout, cancel: cancel}
-	stderr := &limitWriter{max: maxStderr}
+	stderr := &truncWriter{max: maxStderr}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	setProcessGroup(cmd)
 	cmd.WaitDelay = 2 * time.Second
@@ -294,9 +318,10 @@ func (p *pluginCheck) keepAssets(resp *response, res *check.Result) {
 			slog.Warn("plugin discovered asset dropped", "plugin", p.name, "kind", a.Kind, "key", a.Key)
 			continue
 		}
-		if a.Source == "" {
-			a.Source = p.name
-		}
+		// A check's discoveries are derived assets, garbage-collected once no
+		// longer observed. A plugin-chosen source would make them source-owned
+		// (never collected) or let a plugin write as a real source.
+		a.Source = checkutil.Source(p.name)
 		res.Discovered = append(res.Discovered, a)
 	}
 	for i, r := range resp.Relations {

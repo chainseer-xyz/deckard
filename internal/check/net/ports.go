@@ -5,6 +5,7 @@ package netcheck
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sort"
@@ -118,11 +119,13 @@ func scan(ctx context.Context, d check.Dialer, host string, ports []int, conc in
 		conc = 1
 	}
 	var (
-		mu   sync.Mutex
-		open []int
-		wg   sync.WaitGroup
-		sem  = make(chan struct{}, conc)
+		mu      sync.Mutex
+		open    []int
+		limited error
+		wg      sync.WaitGroup
+		sem     = make(chan struct{}, conc)
 	)
+	td, _ := d.(check.TimeoutDialer)
 loop:
 	for _, p := range ports {
 		select {
@@ -134,10 +137,26 @@ loop:
 		go func(p int) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			cctx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-			conn, err := d.DialContext(cctx, "tcp", net.JoinHostPort(host, strconv.Itoa(p)))
+			addr := net.JoinHostPort(host, strconv.Itoa(p))
+			var (
+				conn net.Conn
+				err  error
+			)
+			if td != nil {
+				conn, err = td.DialTimeout(ctx, "tcp", addr, timeout)
+			} else {
+				cctx, cancel := context.WithTimeout(ctx, timeout)
+				conn, err = d.DialContext(cctx, "tcp", addr)
+				cancel()
+			}
 			if err != nil {
+				// A dial the rate limiter never let through says nothing
+				// about the port; reporting it closed would resolve findings.
+				if errors.Is(err, check.ErrRateLimited) {
+					mu.Lock()
+					limited = err
+					mu.Unlock()
+				}
 				return
 			}
 			_ = conn.Close()
@@ -149,6 +168,9 @@ loop:
 	wg.Wait()
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if limited != nil {
+		return nil, fmt.Errorf("net.ports: %w", limited)
 	}
 	sort.Ints(open)
 	return open, nil
