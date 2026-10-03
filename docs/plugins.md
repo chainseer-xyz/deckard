@@ -24,6 +24,8 @@ intrusive profile is enabled for the asset.
 ## Execution environment
 
 - argv comes from `exec`; there is no shell, so no quoting or expansion applies.
+  A relative program path (`plugins/check.py`) is resolved against deckard's
+  working directory; a bare name (`python3`) is looked up in `PATH`.
 - Working directory is a fresh temporary directory, removed afterwards.
 - The environment contains only `PATH` plus the names listed in
   `config.passthrough_env`. Secrets are not inherited implicitly.

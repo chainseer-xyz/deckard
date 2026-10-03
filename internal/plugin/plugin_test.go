@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -310,5 +311,19 @@ func TestVerboseStderrDoesNotFailRun(t *testing.T) {
 	}
 	if len(res.Findings) != 1 {
 		t.Fatalf("findings %+v", res.Findings)
+	}
+}
+
+// The plugin runs in a fresh temp directory, so a relative exec path such as
+// "plugins/check.py" must be resolved against deckard's working directory,
+// not the plugin's, or it can never be found.
+func TestRelativeExecPathResolvedFromWorkingDir(t *testing.T) {
+	t.Chdir(filepath.Dir(os.Args[0]))
+	cfg := cfgFor("echo", nil)
+	cfg.Exec = []string{"." + string(filepath.Separator) + filepath.Base(os.Args[0])}
+	c := New(cfg, scope("app.example.com"))
+
+	if _, err := c.Run(context.Background(), urlTarget()); err != nil {
+		t.Fatalf("relative exec path: %v", err)
 	}
 }

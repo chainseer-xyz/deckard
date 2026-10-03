@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -67,6 +68,13 @@ func New(cfg config.PluginConfig, verify ScopeVerifier) check.Check {
 	if !tier.Valid() {
 		slog.Warn("plugin has invalid tier, treating as intrusive", "plugin", cfg.Name, "tier", cfg.Tier)
 		tier = model.TierIntrusive
+	}
+	// The plugin runs in a fresh temp directory, which os/exec would resolve a
+	// relative path such as "plugins/check.py" against; anchor it to ours.
+	if len(cfg.Exec) > 0 && !filepath.IsAbs(cfg.Exec[0]) && filepath.Base(cfg.Exec[0]) != cfg.Exec[0] {
+		if abs, err := filepath.Abs(cfg.Exec[0]); err == nil {
+			cfg.Exec = append([]string{abs}, cfg.Exec[1:]...)
+		}
 	}
 	return &pluginCheck{cfg: cfg, name: "plugin." + cfg.Name, tier: tier, verify: verify}
 }
