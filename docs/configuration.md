@@ -233,10 +233,12 @@ when the updater runs. Setting `nuclei.templates_dir` while the updater is on al
 | `deckard_nuclei_run_duration_seconds{source}` | Nuclei process duration, with `source` `downloaded`, `baked` or `configured` |
 | `deckard_nuclei_targets_per_run{source}` | Targets handed to each process |
 | `deckard_nuclei_errors_total{reason}` | Process errors classified as `timeout`, `no-templates`, `oom`, `parse` or `other` |
+| `deckard_nuclei_last_attempt_timestamp` | Unix time of the last target-bearing nuclei process attempt (successful or failed) |
 | `deckard_nuclei_last_clean_run_timestamp` | Unix time of the last successful nuclei run |
 
 `deploy/examples/prometheus-rules.yml` alerts on stale templates, repeated update failures, a first update
-that never succeeded, and a `cve.nuclei` run that has not completed cleanly for six hours.
+that never succeeded, and a recently attempted `cve.nuclei` run that has not completed cleanly for six hours.
+The check-stale alert stays quiet when there are no eligible targets.
 
 ## Sources
 

@@ -99,6 +99,27 @@ func TestNucleiTemplateSourceIsOneHot(t *testing.T) {
 	}
 }
 
+func TestNucleiAttemptTimestampRequiresTargetBearingProcess(t *testing.T) {
+	m := metrics.New("dev", "none")
+
+	// Template validation is reported with a zero duration and is not a scan.
+	m.ObserveNucleiRun(0, 1, "baked", errors.New("validation failed"))
+	out := scrape(t, m)
+	if !strings.Contains(out, `deckard_nuclei_last_attempt_timestamp 0`) {
+		t.Fatalf("validation changed attempt timestamp:\n%s", out)
+	}
+
+	// A failed process still proves that eligible targets exist and were tried.
+	m.ObserveNucleiRun(time.Second, 1, "baked", errors.New("process failed"))
+	out = scrape(t, m)
+	if strings.Contains(out, `deckard_nuclei_last_attempt_timestamp 0`) {
+		t.Fatalf("target-bearing process did not change attempt timestamp:\n%s", out)
+	}
+	if !strings.Contains(out, `deckard_nuclei_last_clean_run_timestamp 0`) {
+		t.Fatalf("failed process changed clean timestamp:\n%s", out)
+	}
+}
+
 func TestStateCollector(t *testing.T) {
 	fs := fakestore.New()
 	fs.StatsVal = store.Stats{

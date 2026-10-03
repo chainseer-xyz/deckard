@@ -71,6 +71,7 @@ type Metrics struct {
 	nucleiTargets   *prometheus.HistogramVec
 	nucleiErrors    *prometheus.CounterVec
 	nucleiSource    *prometheus.GaugeVec
+	nucleiLastTry   prometheus.Gauge
 	nucleiLastClean prometheus.Gauge
 	nucleiMu        sync.Mutex
 }
@@ -102,6 +103,9 @@ func New(version, commit string) *Metrics {
 	}, []string{"source"})
 	m.nucleiLastClean = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "deckard_nuclei_last_clean_run_timestamp", Help: "Unix time of the last successful nuclei run.",
+	})
+	m.nucleiLastTry = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "deckard_nuclei_last_attempt_timestamp", Help: "Unix time of the last target-bearing nuclei process attempt.",
 	})
 	for _, source := range []string{"downloaded", "baked", "configured"} {
 		m.nucleiSource.WithLabelValues(source)
@@ -143,7 +147,7 @@ func New(version, commit string) *Metrics {
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		m.scanDuration, m.scanErrors, m.checksRun, m.checksSkipped, m.scopeRefusals, m.heartbeats, m.syncDuration,
 		m.queueDepth, m.invChanges, m.reclaimed, m.collectErrors, build,
-		m.nucleiDuration, m.nucleiTargets, m.nucleiErrors, m.nucleiSource, m.nucleiLastClean,
+		m.nucleiDuration, m.nucleiTargets, m.nucleiErrors, m.nucleiSource, m.nucleiLastTry, m.nucleiLastClean,
 		m.ref.entries, m.ref.total, m.ref,
 		m.vi.refresh, m.vi.kevOpen, m.vi,
 		m.intel.requests, m.intel.duration,
@@ -172,6 +176,9 @@ func (m *Metrics) ObserveNucleiRun(d time.Duration, targets int, source string, 
 	}
 	if targets > 0 {
 		m.nucleiTargets.WithLabelValues(source).Observe(float64(targets))
+		if d > 0 {
+			m.nucleiLastTry.Set(float64(time.Now().Unix()))
+		}
 	}
 	if err != nil {
 		m.nucleiErrors.WithLabelValues(nuclei.ErrorReason(err)).Inc()

@@ -25,6 +25,20 @@ func (d *plainDialer) DialContext(ctx context.Context, network, addr string) (ne
 	return nd.DialContext(ctx, network, addr)
 }
 
+type closedPortDialer struct {
+	plainDialer
+	closed int
+}
+
+func (d *closedPortDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	_, port, err := net.SplitHostPort(addr)
+	if err == nil && port == strconv.Itoa(d.closed) {
+		d.calls.Add(1)
+		return nil, net.ErrClosed
+	}
+	return d.plainDialer.DialContext(ctx, network, addr)
+}
+
 // listen starts a TCP server on 127.0.0.1 running handler per connection.
 func listen(t *testing.T, handler func(net.Conn)) int {
 	t.Helper()
@@ -116,10 +130,9 @@ func TestPortsApplies(t *testing.T) {
 func TestPortsScan(t *testing.T) {
 	p1 := listen(t, func(net.Conn) {})
 	p2 := listen(t, func(net.Conn) {})
-	closed := p2 + 1 // almost certainly unused
-	if closed == p1 {
-		closed++
-	}
+	// The dialer, not an assumed-unused neighbouring ephemeral port, makes
+	// this deterministic when other packages open listeners in parallel.
+	closed := 1
 	spec := strconv.Itoa(p1) + "," + strconv.Itoa(p2) + "," + strconv.Itoa(closed)
 
 	tests := []struct {
@@ -138,7 +151,7 @@ func TestPortsScan(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			d := &plainDialer{}
+			d := &closedPortDialer{closed: closed}
 			res, err := (&portsCheck{}).Run(context.Background(), check.Target{Asset: ipAsset(), Dialer: d, Config: tc.cfg, Baseline: tc.baseline})
 			if err != nil {
 				t.Fatal(err)
