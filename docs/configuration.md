@@ -210,7 +210,18 @@ scope:
   include: ["*.example.com"]          # extra hostnames treated as yours
   exclude: ["legacy.example.com", "198.51.100.5", "198.51.100.0/24"]  # always wins
   max_cidr_hosts: 1024                # static CIDRs larger than this are rejected
+  resolvers: ["1.1.1.1", "8.8.8.8"]   # optional: DNS servers every scan uses (IP or IP:port)
 ```
+
+`scope.resolvers` sets the vantage point. By default deckard uses the system
+resolvers, so inside a cluster or VPC with split-horizon DNS your internal names
+resolve to private addresses (which the scope guard refuses to probe) and you see
+the inside view. List public resolvers to see your names as an outside attacker
+does: the same answers the internet gets, including CDN and proxy addresses. Both
+the DNS checks and the address lookup before every connection use them; entries
+are tried in rotation. Leave it empty to keep the system resolvers. Notifier and
+source calls (for example an in-cluster Alertmanager URL) are not affected and
+keep using the system resolver.
 
 deckard only actively probes assets it can show are yours: names under zones from
 your sources, IPs from your static lists, origins, load balancers and cluster

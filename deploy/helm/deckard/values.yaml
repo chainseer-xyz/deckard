@@ -54,6 +54,7 @@ config:
     include: []
     exclude: []
     max_cidr_hosts: 1024
+    # resolvers: ["1.1.1.1", "8.8.8.8"]   # scan from the public-DNS vantage point
   profiles:
     passive: { enabled: true, interval: 5m, on_inventory_change: true }
     active: { enabled: true, interval: 6h, on_inventory_change: true, rate_limit: "50/s", per_host_concurrency: 2 }

@@ -155,6 +155,10 @@ type ScopeConfig struct {
 	Include      []string `koanf:"include"`
 	Exclude      []string `koanf:"exclude"`
 	MaxCIDRHosts int      `koanf:"max_cidr_hosts"`
+	// Resolvers are the recursive DNS servers (IP or IP:port) every scan uses
+	// instead of the system resolvers. Set public resolvers to see your names the
+	// way an outside attacker does (no split-horizon answers).
+	Resolvers []string `koanf:"resolvers"`
 }
 
 // Profile controls one tier. Pointer-free so group overrides can be merged by
