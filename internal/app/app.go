@@ -188,7 +188,7 @@ func (a *App) build() error {
 		Auth:        cfg.Auth,
 		AuthOptions: auth.Options{Getenv: a.opts.Getenv, Logger: a.log},
 		BaseURL:     cfg.Server.BaseURL,
-		Actions:     a.eng,
+		Actions:     engineActions{a.eng},
 		Logger:      a.log,
 		Registry:    a.metrics.Registry(),
 		Broadcaster: api.NewBroadcaster(),
