@@ -21,6 +21,7 @@ import (
 	"github.com/chainseer-xyz/deckard/internal/check/origin/exposed"
 	"github.com/chainseer-xyz/deckard/internal/check/registry"
 	"github.com/chainseer-xyz/deckard/internal/check/tls/cert"
+	"github.com/chainseer-xyz/deckard/internal/check/web/history"
 )
 
 // Checks returns every built-in passive check, configured from cfg (keyed by
@@ -30,6 +31,7 @@ func Checks(cfg map[string]map[string]any) []check.Check {
 	for _, ctor := range []func(map[string]map[string]any) []check.Check{
 		dangling.Checks, takeover.Checks, hygiene.Checks, cert.Checks,
 		probe.Checks, headers.Checks, exposed.Checks, correlation.Checks, expiry.Checks, lookalike.Checks, internetdb.Checks, policy.Checks,
+		probe.Checks, headers.Checks, exposed.Checks, correlation.Checks, expiry.Checks, history.Checks,
 	} {
 		out = append(out, ctor(cfg)...)
 	}
