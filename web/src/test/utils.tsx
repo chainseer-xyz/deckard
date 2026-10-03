@@ -1,7 +1,7 @@
 import { render } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { setupServer } from 'msw/node';
 import { makeHandlers } from '../../mock/handlers';
 import type { MockState } from '../../mock/handlers';
@@ -12,13 +12,19 @@ export function mockServer(state?: Partial<MockState>) {
   return { state: s, server: setupServer(...makeHandlers(s)) };
 }
 
+/** Renders the current path + query so tests can assert on URL state. */
+export function LocationProbe() {
+  const l = useLocation();
+  return <output data-testid="location">{`${l.pathname}${l.search}`}</output>;
+}
+
 export function renderRoute(ui: ReactElement, path = '/', route = path) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[route]}>
         <Routes>
-          <Route path={path.split('?')[0]} element={ui} />
+          <Route path={path.split('?')[0]} element={<><LocationProbe />{ui}</>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,

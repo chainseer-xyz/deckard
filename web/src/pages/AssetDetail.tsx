@@ -1,4 +1,4 @@
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Network, RefreshCw } from 'lucide-react';
 import { useAsset, useMe, useRescan } from '../api/hooks';
 import { Card, Empty, ErrorBox, Field, JsonViewer, KindBadge, Loading, PageHeader, ScopeBadge } from '../components/ui';
@@ -10,6 +10,7 @@ export default function AssetDetail() {
   const q = useAsset(id);
   const me = useMe();
   const rescan = useRescan();
+  const navigate = useNavigate();
 
   if (q.isLoading) return <Loading />;
   if (q.isError) return <ErrorBox error={q.error} onRetry={() => void q.refetch()} />;
@@ -59,7 +60,7 @@ export default function AssetDetail() {
         </Card>
 
         <Card title={`Open findings (${findings.length})`}>
-          <FindingsTable items={findings} compact />
+          <FindingsTable items={findings} compact onOpen={(f) => navigate(`/findings?finding=${f.id}`)} />
         </Card>
 
         <Card title={`Relations (${edges.length})`}>

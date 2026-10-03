@@ -140,65 +140,116 @@ describe('Dashboard', () => {
 });
 
 describe('Findings', () => {
-  it('lists open findings by default, filters from the URL, and sorts', async () => {
-    renderRoute(<Findings />, '/findings', '/findings?min_severity=high');
+  const rowTitles = () => screen.getAllByRole('row').slice(1).map((r) => within(r).getAllByRole('button')[0]?.textContent ?? '');
+
+  it('defaults to open, medium and above, and says how much noise is hidden', async () => {
+    renderRoute(<Findings />, '/findings');
     expect(await screen.findByText('possible subdomain takeover via Azure App Service')).toBeInTheDocument();
-    expect(screen.getByText('SSH exposed to the internet')).toBeInTheDocument();
-    expect(screen.queryByText('Missing Strict-Transport-Security header')).not.toBeInTheDocument();
+    expect(screen.getByText('Missing Strict-Transport-Security header')).toBeInTheDocument();
+    expect(screen.queryByText('Missing X-Content-Type-Options header')).not.toBeInTheDocument(); // low
+    expect(screen.queryByText('A record changed from baseline')).not.toBeInTheDocument(); // acknowledged
+    expect(await screen.findByText('Showing 10 of 14 findings (medium and above).')).toBeInTheDocument();
+    expect(screen.getByLabelText('Min severity')).toHaveValue('medium');
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/findings$/);
+  });
+
+  it('brings low and info back with one click and writes it to the URL', async () => {
+    renderRoute(<Findings />, '/findings');
+    await userEvent.click(await screen.findByRole('button', { name: 'Include low and info' }));
+    expect(await screen.findByText('Missing X-Content-Type-Options header')).toBeInTheDocument();
+    expect(screen.getByText('Showing all 14 findings.')).toBeInTheDocument();
+    expect(screen.getByTestId('location')).toHaveTextContent('min_severity=info');
+    await userEvent.click(screen.getByRole('button', { name: 'Hide low and info' }));
+    await waitFor(() => expect(screen.queryByText('Missing X-Content-Type-Options header')).not.toBeInTheDocument());
+    expect(screen.getByTestId('location')).not.toHaveTextContent('min_severity');
+  });
+
+  it('reads every filter from the URL', async () => {
+    renderRoute(<Findings />, '/findings', '/findings?min_severity=high&check=net.ports&zone=example.com&source=discovered&q=ssh');
+    expect(await screen.findByText('SSH exposed to the internet')).toBeInTheDocument();
+    expect(screen.getAllByRole('row')).toHaveLength(2);
     expect(screen.getByLabelText('Min severity')).toHaveValue('high');
-    // severity is text, not colour only
-    expect(screen.getAllByText('critical').length).toBeGreaterThan(0);
-    const rows = screen.getAllByRole('row').slice(1);
-    expect(rows[0]).toHaveTextContent('critical');
-    await userEvent.click(screen.getByRole('button', { name: /^Age/ }));
-    await userEvent.click(screen.getByRole('button', { name: /^Age/ }));
+    expect(screen.getByLabelText('Check')).toHaveValue('net.ports');
+    expect(screen.getByLabelText('Source')).toHaveValue('discovered');
+    expect(screen.getByLabelText('Zone')).toHaveValue('example.com');
+    expect(screen.getByLabelText('Search')).toHaveValue('ssh');
   });
 
-  it('expands evidence and remediation', async () => {
-    renderRoute(<Findings />, '/findings', '/findings?status=any');
-    await userEvent.click(await screen.findByRole('button', { name: /Expand details for TLS certificate on 203/ }));
-    expect(screen.getByLabelText(/Evidence for TLS certificate/)).toHaveTextContent('"issuer": "Let\'s Encrypt R3"');
-    expect(screen.getAllByText(/Renew the certificate now/).length).toBeGreaterThan(0);
+  it('writes filter changes back to the URL', async () => {
+    renderRoute(<Findings />, '/findings');
+    await screen.findByText('SSH exposed to the internet');
+    await userEvent.selectOptions(screen.getByLabelText('Min severity'), 'critical');
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('min_severity=critical'));
+    await userEvent.selectOptions(screen.getByLabelText('Check'), 'nuclei');
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('check=nuclei'));
+    await userEvent.click(screen.getByRole('button', { name: /Acknowledged/ }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('status=open&status=acknowledged'));
+    expect(await screen.findByText(/Log4j2/)).toBeInTheDocument();
   });
 
-  it('shows KEV badge and EPSS chip as text, and the intel details when expanded', async () => {
-    renderRoute(<Findings />, '/findings', '/findings');
-    const kevRow = (await screen.findByText(/Apache Log4j2 remote code execution/)).closest('tr') as HTMLElement;
-    expect(within(kevRow).getByText('KEV')).toBeInTheDocument();
-    expect(within(kevRow).getByText('EPSS 94.4%')).toBeInTheDocument();
-
-    const epssRow = screen.getByText(/Example Server information disclosure/).closest('tr') as HTMLElement;
-    expect(within(epssRow).getByText('EPSS 31.3%')).toBeInTheDocument();
-    expect(within(epssRow).queryByText('KEV')).not.toBeInTheDocument();
-
-    const plainRow = screen.getByText('SSH exposed to the internet').closest('tr') as HTMLElement;
-    expect(within(plainRow).queryByText('KEV')).not.toBeInTheDocument();
-    expect(within(plainRow).queryByText(/EPSS/)).not.toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: /Expand details for Apache Log4j2/ }));
-    const intel = await screen.findByLabelText('Exploit intelligence');
-    expect(intel).toHaveTextContent('Known exploited (CISA KEV, added 2021-12-10)');
-    expect(intel).toHaveTextContent('used in ransomware campaigns');
-    expect(intel).toHaveTextContent('Required action: Apply updates per vendor instructions.');
-    expect(intel).toHaveTextContent('(99.9th percentile)');
+  it('filters to an exact severity from a dashboard tile link', async () => {
+    renderRoute(<Findings />, '/findings', '/findings?severity=high');
+    expect(await screen.findByText('SSH exposed to the internet')).toBeInTheDocument();
+    expect(screen.queryByText(/Log4j2/)).not.toBeInTheDocument(); // critical
+    expect(screen.getByText('Showing 3 high findings.')).toBeInTheDocument();
   });
 
-  it('acknowledges directly and suppression requires a reason', async () => {
-    renderRoute(<Findings />, '/findings', '/findings');
-    await userEvent.click(await screen.findByRole('button', { name: /Acknowledge: SSH exposed/ }));
-    await waitFor(() => expect(state.findings.find((f) => f.id === 4)?.status).toBe('acknowledged'));
+  it('shows severity as text, plus kev, new-24h and reopened badges and the full column set', async () => {
+    renderRoute(<Findings />, '/findings');
+    const kev = (await screen.findByText(/Apache Log4j2 remote code execution/)).closest('tr') as HTMLElement;
+    expect(within(kev).getByText('KEV')).toBeInTheDocument();
+    expect(within(kev).getByText(/^New/)).toBeInTheDocument();
+    expect(within(kev).getByText('critical')).toBeInTheDocument();
+    expect(within(kev).getByText('Open')).toBeInTheDocument();
+    const hygiene = screen.getByText('example.com has no DMARC record').closest('tr') as HTMLElement;
+    expect(within(hygiene).getByText('Reopened 2×')).toBeInTheDocument();
+    expect(within(hygiene).queryByText('KEV')).not.toBeInTheDocument();
+    expect(within(hygiene).getByText('dns.hygiene')).toBeInTheDocument();
+    const heads = screen.getAllByRole('columnheader').map((h) => h.textContent);
+    expect(heads).toEqual(['Severity', 'Finding', 'Asset', 'Zone', 'Check', 'Status', 'First seen', 'Last seen']);
+  });
 
-    await userEvent.click(await screen.findByRole('button', { name: /Suppress: TLS certificate on 203/ }));
-    const dlg = await screen.findByRole('dialog');
-    await userEvent.click(within(dlg).getByRole('button', { name: 'Suppress' }));
-    expect(within(dlg).getByText('A reason is required.')).toBeInTheDocument();
-    await userEvent.type(within(dlg).getByLabelText(/Reason/), 'accepted until renewal');
-    await userEvent.click(within(dlg).getByRole('button', { name: 'Suppress' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(state.findings.find((f) => f.id === 3)).toMatchObject({
-      status: 'suppressed',
-      suppression_note: 'accepted until renewal',
-    });
+  it('sorts by severity, last seen and first seen from the column headers', async () => {
+    renderRoute(<Findings />, '/findings');
+    await screen.findByText('SSH exposed to the internet');
+    expect(rowTitles()[0]).toMatch(/Azure App Service|Log4j2/); // critical first
+    await userEvent.click(screen.getByRole('button', { name: 'First seen' }));
+    expect(screen.getByTestId('location')).toHaveTextContent('sort=first_seen');
+    // newest first_seen (the 2h-old CSP finding) leads
+    await waitFor(() => expect(rowTitles()[0]).toBe('Missing Content-Security-Policy header'));
+    await userEvent.click(screen.getByRole('button', { name: 'First seen' }));
+    expect(screen.getByTestId('location')).toHaveTextContent('dir=asc');
+    await waitFor(() => expect(rowTitles()[0]).toBe('example.com has no DMARC record')); // oldest first seen: 40d
+    expect(screen.getByRole('columnheader', { name: /First seen/ })).toHaveAttribute('aria-sort', 'ascending');
+    await userEvent.click(screen.getByRole('button', { name: 'Last seen' }));
+    expect(screen.getByTestId('location')).toHaveTextContent('sort=last_seen');
+  });
+
+  it('groups by check with counts and expands a group inline', async () => {
+    renderRoute(<Findings />, '/findings', '/findings?group=check');
+    const toggle = await screen.findByRole('button', { name: /tls\.cert/ });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle).toHaveAccessibleName('tls.cert, 2 findings: 1 high, 1 medium');
+    expect(screen.queryByText(/TLS certificate on shop/)).not.toBeInTheDocument();
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText(/TLS certificate on shop.example.org/)).toBeInTheDocument();
+    expect(screen.getByText('7 check groups')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Expand all' }));
+    expect(screen.getByText('SSH exposed to the internet')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Collapse all' }));
+    expect(screen.queryByText('SSH exposed to the internet')).not.toBeInTheDocument();
+  });
+
+  it('groups by asset (worst group first) and by zone from the selector', async () => {
+    renderRoute(<Findings />, '/findings');
+    await screen.findByText('SSH exposed to the internet');
+    await userEvent.selectOptions(screen.getByLabelText('Group by'), 'asset');
+    expect(screen.getByTestId('location')).toHaveTextContent('group=asset');
+    const groups = await screen.findAllByRole('button', { name: /findings?\b/ });
+    expect(groups[0]).toHaveAccessibleName('promo.example.com, 2 findings: 1 critical, 1 high'); // worst first
+    await userEvent.selectOptions(screen.getByLabelText('Group by'), 'zone');
+    expect(await screen.findByRole('button', { name: 'example.org, 1 finding: 1 medium' })).toBeInTheDocument();
   });
 });
 

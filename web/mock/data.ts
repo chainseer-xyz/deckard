@@ -251,7 +251,7 @@ export function makeFindings(): Finding[] {
         tags: ['dns', 'dangling', 'hygiene'],
       },
     ),
-    f(18, 'medium', 'http.headers', 15, 'Missing Content-Security-Policy header', { first_seen: ago(60 * 2) }),
+    f(18, 'medium', 'http.headers', 15, 'Missing Content-Security-Policy header', { first_seen: ago(60) }),
   ];
 }
 export const findings: Finding[] = makeFindings();
