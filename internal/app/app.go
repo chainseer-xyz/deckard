@@ -162,6 +162,10 @@ func (a *App) build() error {
 	if nw := a.nuclei(); nw.upd != nil {
 		a.checkUpdateDir(nw.cfg.Update.Dir) // startup only: never from tests that just build checks
 	}
+	ic, err := a.buildIntel()
+	if err != nil {
+		return fmt.Errorf("intel: %w", err)
+	}
 	templates, delta := a.engineTemplates()
 	a.eng, err = engine.New(engine.Deps{
 		Refdata:   refresher,
@@ -178,6 +182,7 @@ func (a *App) build() error {
 		Expander:  expander,
 		Templates: templates,
 		Delta:     delta,
+		Intel:     ic,
 	}, append([]engine.Option{engine.WithRoles(cfg.Server.Roles...), engine.WithQueueWorkers(queueWorkers(cfg))}, engIntel...)...)
 	if err != nil {
 		return fmt.Errorf("engine: %w", err)

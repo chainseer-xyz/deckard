@@ -48,6 +48,11 @@ type Config struct {
 	Suppressions []Suppression             `koanf:"suppressions"`
 	Auth         AuthConfig                `koanf:"auth"`
 	Vulnintel    VulnintelConfig           `koanf:"vulnintel"`
+	Intel        IntelConfig               `koanf:"intel"`
+
+	// intelKeyErrs are unknown keys found under intel.* at load (the block is
+	// closed; see unknownIntelKeys). Validate reports them.
+	intelKeyErrs []string
 }
 
 // VulnintelConfig configures exploit-intelligence enrichment (CISA KEV and
@@ -424,6 +429,7 @@ func Defaults() map[string]any {
 		"vulnintel.kev_floor":                     "critical",
 		"vulnintel.epss_high":                     0.7,
 		"vulnintel.epss_medium":                   0.3,
+		"intel.enabled":                           true,
 		"auth.mode":                               "token",
 		"auth.oidc.groups_claim":                  "groups",
 	}
@@ -465,6 +471,7 @@ func Load(path string, env []string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: decode: %w", err)
 	}
+	cfg.intelKeyErrs = unknownIntelKeys(k.Keys())
 	cfg.applyDerived()
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -575,6 +582,7 @@ func (c *Config) Validate() error {
 		}
 	}
 	c.validateVulnintel(add)
+	c.validateIntel(add)
 	if c.Scheduling.ErrorRetry <= 0 {
 		add("scheduling.error_retry must be > 0")
 	}
