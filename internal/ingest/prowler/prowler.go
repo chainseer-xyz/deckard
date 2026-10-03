@@ -129,7 +129,9 @@ func Parse(data []byte, _ ingest.ParseOptions) ([]ingest.Finding, error) {
 func split(data []byte) ([]json.RawMessage, error) {
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 {
-		return nil, nil
+		// Prowler always writes at least []: an empty file is a failed run,
+		// and treating it as an empty complete run would resolve everything.
+		return nil, fmt.Errorf("prowler output is empty (a run with no results is [])")
 	}
 	if data[0] == '[' {
 		var items []json.RawMessage

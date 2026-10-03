@@ -50,7 +50,7 @@ func TestEmptyAndLines(t *testing.T) {
 	if err != nil || len(fs) != 2 {
 		t.Fatalf("NDJSON: %d %v", len(fs), err)
 	}
-	for _, bad := range []string{`{"foo":1}`, `[1,2]`, `{"CheckID":`, `not json`} {
+	for _, bad := range []string{"", " \n", `{"foo":1}`, `[1,2]`, `{"CheckID":`, `not json`} {
 		if _, err := Parse([]byte(bad), ingest.ParseOptions{}); err == nil {
 			t.Errorf("Parse(%s) accepted", bad)
 		}
