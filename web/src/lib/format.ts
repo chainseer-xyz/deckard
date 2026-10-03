@@ -19,13 +19,33 @@ export function absTime(s?: string | null): string {
   return new Date(s as string).toLocaleString();
 }
 
+/** Deterministic absolute time, e.g. `2026-10-12 09:00 UTC`. */
+export function absUtc(s?: string | null): string {
+  if (isZeroTime(s)) return '-';
+  const d = new Date(s as string);
+  if (Number.isNaN(d.getTime())) return String(s);
+  return `${d.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+}
+
 export function fmtDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
   return `${Math.round(ms / 60000)}m`;
 }
 
-export const STALE_AFTER_MS = 12 * 3600 * 1000;
+/**
+ * The API does not expose the configured sync interval, so staleness assumes
+ * the server default (`sync.interval: 10m`); a source is stale after 3 missed
+ * intervals.
+ */
+export const SYNC_INTERVAL_MS = 10 * 60_000;
+export const STALE_AFTER_MS = 3 * SYNC_INTERVAL_MS;
+
+/**
+ * The server records a warning on a run that succeeded with caveats; today that
+ * is partial discovery, which also skips removals (so the data is incomplete).
+ */
+export const isPartialSync = (s: { warning?: string }): boolean => !!s.warning;
 
 export type SyncHealth = 'ok' | 'stale' | 'failing' | 'never';
 
