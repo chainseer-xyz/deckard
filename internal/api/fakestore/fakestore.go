@@ -375,7 +375,7 @@ func (s *Store) LastScans(context.Context) ([]store.ScanLast, error) {
 		if r.StartedAt.After(l.LastAttempt) {
 			l.LastAttempt = r.StartedAt
 		}
-		if r.Error == "" && r.StartedAt.After(l.LastSuccess) {
+		if r.Settled() && r.StartedAt.After(l.LastSuccess) {
 			l.LastSuccess = r.StartedAt
 		}
 	}

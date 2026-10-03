@@ -21,6 +21,7 @@ import (
 // Recorder is what the engine calls to report activity.
 type Recorder interface {
 	ObserveScan(check, tier string, d time.Duration, err error)
+	ObserveSkip(check, tier, reason string)
 	ObserveSync(source string, d time.Duration, ok bool)
 	InventoryChange(kind string, n int)
 	SetQueueDepth(queue string, n int)
@@ -30,6 +31,7 @@ type Recorder interface {
 type Nop struct{}
 
 func (Nop) ObserveScan(string, string, time.Duration, error) {}
+func (Nop) ObserveSkip(string, string, string)               {}
 func (Nop) ObserveSync(string, time.Duration, bool)          {}
 func (Nop) InventoryChange(string, int)                      {}
 func (Nop) SetQueueDepth(string, int)                        {}
@@ -47,6 +49,7 @@ type Metrics struct {
 	scanDuration  *prometheus.HistogramVec
 	scanErrors    *prometheus.CounterVec
 	checksRun     *prometheus.CounterVec
+	checksSkipped *prometheus.CounterVec
 	syncDuration  *prometheus.HistogramVec
 	queueDepth    *prometheus.GaugeVec
 	invChanges    *prometheus.CounterVec
@@ -75,6 +78,9 @@ func New(version, commit string) *Metrics {
 	m.checksRun = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "deckard_checks_run_total", Help: "Check executions.",
 	}, []string{"check", "tier"})
+	m.checksSkipped = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "deckard_checks_skipped_total", Help: "Checks skipped before touching the network (for example an owned name on shared CDN infrastructure the tier may not probe). Not runs, not errors.",
+	}, []string{"check", "tier", "reason"})
 	m.syncDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "deckard_source_sync_duration_seconds", Help: "Duration of source syncs.", Buckets: buckets,
 	}, []string{"source"})
@@ -95,7 +101,7 @@ func New(version, commit string) *Metrics {
 	m.reg.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
-		m.scanDuration, m.scanErrors, m.checksRun, m.syncDuration,
+		m.scanDuration, m.scanErrors, m.checksRun, m.checksSkipped, m.syncDuration,
 		m.queueDepth, m.invChanges, m.collectErrors, build,
 		m.ref.entries, m.ref.total, m.ref,
 		m.vi.refresh, m.vi.kevOpen, m.vi,
@@ -119,6 +125,11 @@ func (m *Metrics) ObserveScan(check, tier string, d time.Duration, err error) {
 	if err != nil {
 		m.scanErrors.WithLabelValues(check).Inc()
 	}
+}
+
+// ObserveSkip counts one skipped check.
+func (m *Metrics) ObserveSkip(check, tier, reason string) {
+	m.checksSkipped.WithLabelValues(check, tier, reason).Inc()
 }
 
 // ObserveSync records a sync duration. Success freshness comes from the store

@@ -134,6 +134,43 @@ exactly the rows that match the features you left on.
 4. Expect the staleness metrics to grow; alert on your own thresholds (below)
    so a forgotten snapshot refresh is noticed.
 
+## Skipped checks
+
+The active and intrusive tiers only probe destinations whose IP addresses you
+own. An owned name proxied by a CDN (a Cloudflare orange-cloud record), hosted
+on a third-party platform, or seen through split-horizon DNS as a private
+address you have not declared owned resolves to addresses deckard may not
+probe, so
+`cve.nuclei`, `http.exposed`, `tls.config` and the like have nothing they are
+allowed to connect to. deckard notices this before it dials (one DNS lookup
+per scan job, then the scope guard still vets every connection) and records
+the check as **skipped** rather than failed:
+
+- no `check failed` warning (a `check skipped` line at debug level), no
+  increment of `deckard_scan_errors_total` or `deckard_checks_run_total`;
+- `deckard_checks_skipped_total{check,tier,reason}` counts them, with
+  `reason` = `shared_destination`, `external_destination` or
+  `private_destination`;
+- the scan history shows `skipped: unowned destination: <name> resolves to ...`;
+- the check is retried at its normal interval (not `scheduling.error_retry`),
+  so a name that moves onto owned addresses is picked up at the next run.
+
+A skip made no observation. It never refreshes, misses, resolves or ages out a
+finding and never removes a derived asset: an open finding from before the
+name moved behind the CDN stays open until a real run proves it fixed. The
+same holds when the guard refuses a connection during a run for any other
+reason: that run is treated as partial. Passive checks (DNS, certificates,
+headers by hostname) keep running against these names.
+
+Answers that point at something wrong (loopback, link-local or metadata
+addresses, an excluded IP, an unparseable answer) are never skipped: the check
+runs, the guard refuses the connection and logs it at WARN, and the run is
+treated as partial.
+
+A steady skip count is normal for a proxied estate. To scan the origin
+servers behind the CDN, declare their addresses owned (a static source or
+`scope.include`).
+
 ## Alerting
 
 Findings reach Alertmanager as one alert per open finding (see

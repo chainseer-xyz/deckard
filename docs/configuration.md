@@ -291,6 +291,11 @@ Order of evaluation: the scope guard, then the tier's `enabled` (global, then
 asset-group overrides), then the per-check values. A per-check override can
 therefore never enable a disabled tier and never reach a non-owned asset.
 
+An owned name that resolves to shared (CDN/SaaS), third-party or undeclared
+private addresses is probed by the passive tier only: active and intrusive checks for it are
+recorded as skipped, counted in `deckard_checks_skipped_total`, and never
+resolve a finding (see [Skipped checks](operations.md#skipped-checks)).
+
 `on_inventory_change` applies to the passive and active tiers (default `true`
 for both): a new asset gets an immediate scan, still rate limited and
 scope-guarded. The intrusive tier is **never** triggered by inventory change,

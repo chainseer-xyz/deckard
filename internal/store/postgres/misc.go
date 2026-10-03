@@ -123,8 +123,9 @@ func (s *Store) ListScans(ctx context.Context, limit int) ([]store.ScanRun, erro
 
 // LastScans: see store.Store.
 func (s *Store) LastScans(ctx context.Context) ([]store.ScanLast, error) {
-	rows, err := s.pool.Query(ctx, `SELECT asset_id, check_name, max(started_at), max(started_at) FILTER (WHERE error = '')
-		FROM scans GROUP BY asset_id, check_name ORDER BY asset_id, check_name`)
+	rows, err := s.pool.Query(ctx, `SELECT asset_id, check_name, max(started_at),
+		max(started_at) FILTER (WHERE error = '' OR starts_with(error, $1))
+		FROM scans GROUP BY asset_id, check_name ORDER BY asset_id, check_name`, store.UnownedDestinationSkip)
 	if err != nil {
 		return nil, err
 	}

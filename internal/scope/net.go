@@ -45,6 +45,18 @@ func isSpecial(ip netip.Addr) bool {
 		ip.IsUnspecified() || inAny(specialPrefixes, ip)
 }
 
+// isAnomalous reports whether ip is a destination that always points at a
+// misconfiguration, DNS rebinding or an attack when it is not explicitly
+// owned: loopback, link-local (cloud metadata), multicast, unspecified,
+// reserved, and the transition forms that can embed them (the never-ownable
+// ranges). Private ranges (RFC1918, ULA, CGNAT) are special too, but
+// split-horizon DNS returns them routinely, so they are not anomalous.
+func isAnomalous(ip netip.Addr) bool {
+	ip = normAddr(ip)
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsMulticast() || ip.IsUnspecified() ||
+		inAny(neverOwnedPrefixes, ip)
+}
+
 // stdResolver adapts *net.Resolver to check.Resolver.
 type stdResolver struct{ r *net.Resolver }
 

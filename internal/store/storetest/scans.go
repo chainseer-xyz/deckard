@@ -65,6 +65,22 @@ func testScanHistory(t *testing.T, f Factory) {
 		}
 	})
 
+	t.Run("an unowned-destination skip settles scheduling, other skips do not", func(t *testing.T) {
+		e := newEnv(t, f)
+		a := e.seedHost("a.x.io", "cf", at(0))
+		record(e, a.ID, "c1", at(1), "")
+		record(e, a.ID, "c1", at(3), store.UnownedDestinationSkip+"a.x.io resolves to shared address(es) 104.16.1.1")
+		record(e, a.ID, "c2", at(1), "")
+		record(e, a.ID, "c2", at(3), store.SkippedPrefix+"profile: active tier disabled for this asset")
+		got := last(e)
+		if l := got[k{a.ID, "c1"}]; !l.LastAttempt.Equal(at(3)) || !l.LastSuccess.Equal(at(3)) {
+			t.Errorf("c1 = %+v, want the destination skip to settle it", l)
+		}
+		if l := got[k{a.ID, "c2"}]; !l.LastAttempt.Equal(at(3)) || !l.LastSuccess.Equal(at(1)) {
+			t.Errorf("c2 = %+v, want other skips to stay unsettled", l)
+		}
+	})
+
 	t.Run("PruneScans deletes runs older than the cutoff", func(t *testing.T) {
 		e := newEnv(t, f)
 		a := e.seedHost("a.x.io", "cf", at(0))
