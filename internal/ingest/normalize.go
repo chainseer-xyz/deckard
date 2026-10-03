@@ -133,12 +133,13 @@ func SecretHash(secret string) string {
 	return "sha256:" + hex.EncodeToString(sum[:6])
 }
 
-// Tags cleans, deduplicates and caps tags, keeping order.
+// Tags cleans, deduplicates and caps tags, keeping order. An over-long tag
+// (a long rule id) is shortened like ID, so distinct rules keep distinct tags.
 func Tags(in ...string) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, t := range in {
-		t = Line(t, MaxTagLen)
+		t = ID(t, MaxTagLen)
 		if t == "" || seen[t] {
 			continue
 		}

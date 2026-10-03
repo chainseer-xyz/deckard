@@ -88,6 +88,15 @@ func TestSeverityWords(t *testing.T) {
 	}
 }
 
+func TestTagsKeepLongRuleIDsDistinct(t *testing.T) {
+	a := "ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_mongodb_27017_27018"
+	b := "ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_mongodb_27017_27019"
+	tags := Tags("prowler", a, b, "prowler", " ")
+	if len(tags) != 3 || tags[1] == tags[2] || len(tags[1]) > MaxTagLen {
+		t.Fatalf("tags %q", tags)
+	}
+}
+
 func TestFinalizeDedupesAndSorts(t *testing.T) {
 	fs := Finalize([]Finding{{Key: "b", Title: "first b"}, {Key: "a"}, {Key: "b", Title: "second b"}})
 	if len(fs) != 2 || fs[0].Key != "a" || fs[1].Title != "first b" {
