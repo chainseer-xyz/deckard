@@ -257,6 +257,18 @@ snapshot refresh.
 | `deckard_vulnintel_refresh_total` | `feed`, `result` = ok, not_modified, error | refresh attempts |
 | `deckard_findings_kev_open` | | open findings tagged `kev` (as of the last refresh job) |
 
+**Scan and notification health metrics**
+
+| Metric | Labels | Meaning |
+| --- | --- | --- |
+| `deckard_checks_skipped_total` | `check`, `tier`, `reason` = shared_destination, external_destination, private_destination | checks skipped before touching the network (see [Skipped checks](#skipped-checks)); neither runs nor errors |
+| `deckard_scope_refusals_total` | `tier`, `class`, `reason` | every scope-guard refusal, including those logged at DEBUG (see [Scope refusals](#scope-refusals)) |
+| `deckard_heartbeat_total` | `result` = ok, error, unhealthy | external heartbeat attempts; absent unless `notify.heartbeat.url` is set |
+
+Only the heartbeat gets an example alert (`DeckardHeartbeatFailing`): skips
+and expected refusals are steady by design on a proxied estate, so alerting on
+their volume would be noise. Watch them on a dashboard instead.
+
 ## Runbooks
 
 ### Updater failing

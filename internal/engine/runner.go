@@ -38,6 +38,8 @@ type runner struct {
 	limiters *limiterSet
 	sems     *keyedSem
 
+	ctWarn *zoneWarnThrottle // transient CT warnings, shared by copies
+
 	mu *sync.Mutex
 	// last is a small in-process overlay of the attempts this process made, so
 	// a tick never re-enqueues what it just ran even if the store read lags.
@@ -57,6 +59,7 @@ func newRunner(d Deps) *runner {
 		q:        noQueue{},
 		last:     map[ScanKey]store.ScanLast{},
 		mu:       &sync.Mutex{},
+		ctWarn:   &zoneWarnThrottle{},
 	}
 	if r.log == nil {
 		r.log = slog.Default()

@@ -321,8 +321,15 @@ through the scope-guarded resolver (passive tier, owned class, at the passive
 `rate_limit`), and hands the names to the inventory with origin
 `expansion:ct` / `expansion:dns`. The inventory keeps only names that classify
 as owned; new ones get their immediate scans through `on_inventory_change`.
-Expansion only ever adds assets. If crt.sh is down or a lookup fails the job
-is retried with backoff and everything else keeps running. It is skipped for a
+Expansion only ever adds assets. crt.sh is often briefly unavailable: a
+timeout, network error, 429 or 5xx (after the client's own two retries) is
+treated as transient. The zone's expansion stays incomplete (nothing is ever
+pruned because of it), whatever the DNS bruteforce found is still added, one
+WARN per zone per hour is logged (DEBUG otherwise), and the job is snoozed
+with backoff (5m, doubling to at most 1h or `interval`) instead of failing and
+logging "Job errored; retrying" on every attempt. Any other failure (an
+unparseable answer, a failed wildcard probe) is retried by the job queue as an
+error. Everything else keeps running either way. It is skipped for a
 zone whose passive tier is disabled.
 
 ## Reference data refresh
