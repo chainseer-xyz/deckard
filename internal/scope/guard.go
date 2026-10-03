@@ -7,16 +7,20 @@ package scope
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/netip"
 	"net/url"
+	"os"
 	"path"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"golang.org/x/net/idna"
@@ -555,22 +559,113 @@ func normalizeResolvers(in []string) ([]string, error) {
 	return out, nil
 }
 
+// resolverCooldown is how long a resolver that just failed is skipped.
+const resolverCooldown = 30 * time.Second
+
+// dnsServer is one configured resolver and when it may be tried again.
+type dnsServer struct {
+	addr     string
+	badUntil atomic.Int64 // unix nanoseconds
+}
+
+// serverSet picks the next healthy resolver, rotating the starting point so
+// load spreads, and skips ones that failed recently. The Go resolver asks for a
+// connection per attempt and runs A and AAAA lookups concurrently, so a plain
+// rotating index can starve a lookup onto a dead server; remembering failures
+// makes the next attempt go elsewhere.
+type serverSet struct {
+	servers []*dnsServer
+	next    atomic.Uint32
+	now     func() time.Time
+}
+
+func newServerSet(addrs []string) *serverSet {
+	s := &serverSet{now: time.Now}
+	for _, a := range addrs {
+		s.servers = append(s.servers, &dnsServer{addr: a})
+	}
+	return s
+}
+
+func (s *serverSet) pick() *dnsServer {
+	n := len(s.servers)
+	start := int(s.next.Add(1) - 1)
+	now := s.now().UnixNano()
+	for i := 0; i < n; i++ {
+		if sv := s.servers[(start+i)%n]; sv.badUntil.Load() <= now {
+			return sv
+		}
+	}
+	return s.servers[start%n] // all recently failed: keep trying, rotating
+}
+
+func (s *serverSet) fail(sv *dnsServer) {
+	sv.badUntil.Store(s.now().Add(resolverCooldown).UnixNano())
+}
+
+// failing reports whether a read error means the resolver is unusable. A
+// context cancelled by the caller is not the server's fault.
+func failing(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, io.EOF)
+}
+
+// trackedUDP and trackedTCP report resolver failures. They embed the concrete
+// connection types so net.Resolver still sees a net.PacketConn for UDP and
+// frames its queries correctly.
+type trackedUDP struct {
+	*net.UDPConn
+	onErr func()
+}
+
+func (c trackedUDP) Read(b []byte) (int, error) {
+	n, err := c.UDPConn.Read(b)
+	if failing(err) {
+		c.onErr()
+	}
+	return n, err
+}
+
+type trackedTCP struct {
+	*net.TCPConn
+	onErr func()
+}
+
+func (c trackedTCP) Read(b []byte) (int, error) {
+	n, err := c.TCPConn.Read(b)
+	if failing(err) {
+		c.onErr()
+	}
+	return n, err
+}
+
 // resolverVia returns a pure-Go resolver that sends every lookup to servers,
-// starting at a rotating index so one dead server does not stall all lookups.
+// failing over from one that stops answering.
 func resolverVia(servers []string) *net.Resolver {
-	var next atomic.Uint32
+	set := newServerSet(servers)
 	return &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
 			d := net.Dialer{Timeout: 3 * time.Second}
-			start := int(next.Add(1) - 1)
 			var last error
-			for i := range servers {
-				c, err := d.DialContext(ctx, network, servers[(start+i)%len(servers)])
-				if err == nil {
-					return c, nil
+			for range set.servers {
+				sv := set.pick()
+				c, err := d.DialContext(ctx, network, sv.addr)
+				if err != nil {
+					set.fail(sv)
+					last = err
+					continue
 				}
-				last = err
+				fail := func() { set.fail(sv) }
+				switch conn := c.(type) {
+				case *net.UDPConn:
+					return trackedUDP{conn, fail}, nil
+				case *net.TCPConn:
+					return trackedTCP{conn, fail}, nil
+				}
+				return c, nil
 			}
 			return nil, last
 		},

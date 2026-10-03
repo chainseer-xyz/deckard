@@ -48,23 +48,54 @@ func TestResolversRouteLookupsToConfiguredServers(t *testing.T) {
 	}
 }
 
-func TestResolversRotateToALiveServer(t *testing.T) {
+// A resolver that stops answering is skipped, so lookups succeed even when the
+// dead server would otherwise be chosen. Run the lookup many times: the Go resolver
+// issues A and AAAA concurrently, which is what starved a plain rotating index.
+func TestResolversFailOverFromADeadServer(t *testing.T) {
 	live := startDNS(t, "app.example.com.", "203.0.113.9")
-	dead := "127.0.0.1:1" // nothing listens: a TCP dial would fail, UDP is connectionless
-	servers, err := normalizeResolvers([]string{dead, live})
-	if err != nil {
-		t.Fatal(err)
+	dead := "127.0.0.1:1" // nothing listens: the first read gets ECONNREFUSED
+	for _, order := range [][]string{{dead, live}, {live, dead}} {
+		servers, err := normalizeResolvers(order)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := resolverVia(servers)
+		for i := 0; i < 20; i++ {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			got, err := r.LookupHost(ctx, "app.example.com")
+			cancel()
+			if err != nil || len(got) != 1 || got[0] != "203.0.113.9" {
+				t.Fatalf("order %v lookup %d = %v, %v", order, i, got, err)
+			}
+		}
 	}
-	r := resolverVia(servers)
-	var ok bool
-	for i := 0; i < 4 && !ok; i++ { // rotation guarantees the live server leads at least once
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		got, err := r.LookupHost(ctx, "app.example.com")
-		cancel()
-		ok = err == nil && len(got) == 1 && got[0] == "203.0.113.9"
+}
+
+func TestServerSetSkipsRecentFailuresThenRecovers(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	s := newServerSet([]string{"192.0.2.1:53", "192.0.2.2:53"})
+	s.now = func() time.Time { return now }
+	first := s.pick()
+	s.fail(first)
+	for i := 0; i < 6; i++ {
+		if got := s.pick(); got == first {
+			t.Fatalf("pick %d returned the server that just failed", i)
+		}
 	}
-	if !ok {
-		t.Fatal("no lookup reached the live resolver")
+	now = now.Add(resolverCooldown + time.Second)
+	seen := map[string]bool{}
+	for i := 0; i < 4; i++ {
+		seen[s.pick().addr] = true
+	}
+	if !seen[first.addr] {
+		t.Fatal("a failed server must be tried again after the cooldown")
+	}
+	// Everything failing must still return something rather than nothing.
+	for _, sv := range s.servers {
+		s.fail(sv)
+	}
+	if s.pick() == nil {
+		t.Fatal("pick returned nil with every server marked bad")
 	}
 }
 
