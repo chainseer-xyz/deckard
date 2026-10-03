@@ -79,6 +79,12 @@ absent "servicemonitor no bearer by default" "bearerTokenSecret" "$sm"
 expect_error "cpu limit rejected"    "resources.limits.cpu must not be set" --set database.cnpg.enabled=true --set resources.limits.cpu=1
 expect_error "worker cpu limit rejected" "worker.resources.limits.cpu" --set database.cnpg.enabled=true --set worker.enabled=true --set "roles={api}" --set worker.resources.limits.cpu=2
 expect_error "no database rejected"  "no database configured"
+# The DSN is a secret: supplying it the ways values.yaml recommends must render.
+for args in "--set secretEnv.DECKARD_DATABASE__URL=postgres://x" \
+            "--set extraEnv[0].name=DECKARD_DATABASE__URL --set extraEnv[0].valueFrom.secretKeyRef.name=pg --set extraEnv[0].valueFrom.secretKeyRef.key=dsn" \
+            "--set config.database.url=postgres://x"; do
+  if helm template t deckard ${(z)args} >/dev/null 2>&1; then print "ok   database via $args"; else print "FAIL database via $args rejected"; fail=1; fi
+done
 expect_error "worker+worker role rejected" "remove \"worker\" from roles" --set database.cnpg.enabled=true --set worker.enabled=true
 
 dash=$(helm template t deckard --set database.cnpg.enabled=true --set metrics.dashboard.enabled=true)

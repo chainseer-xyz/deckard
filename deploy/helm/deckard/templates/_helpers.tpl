@@ -52,8 +52,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if and .Values.worker.enabled .Values.worker.resources .Values.worker.resources.limits .Values.worker.resources.limits.cpu }}
 {{- fail "worker.resources.limits.cpu must not be set: CPU limits cause throttling and are disallowed" }}
 {{- end }}
-{{- if and (not .Values.database.cnpg.enabled) (not .Values.database.existingSecret) (not (hasKey .Values.env "DECKARD_DATABASE__URL")) }}
-{{- fail "no database configured: set database.cnpg.enabled=true, database.existingSecret, or env.DECKARD_DATABASE__URL" }}
+{{- $dbEnv := or (hasKey .Values.env "DECKARD_DATABASE__URL") (hasKey (.Values.secretEnv | default dict) "DECKARD_DATABASE__URL") (dig "database" "url" "" .Values.config) -}}
+{{- range .Values.extraEnv }}{{ if eq (toString .name) "DECKARD_DATABASE__URL" }}{{ $dbEnv = true }}{{ end }}{{ end -}}
+{{- if and (not .Values.database.cnpg.enabled) (not .Values.database.existingSecret) (not $dbEnv) }}
+{{- fail "no database configured: set database.cnpg.enabled=true, database.existingSecret, or DECKARD_DATABASE__URL (env, secretEnv or extraEnv)" }}
 {{- end }}
 {{- if and .Values.worker.enabled (has "worker" .Values.roles) }}
 {{- fail "worker.enabled=true: remove \"worker\" from roles so scanning runs only in the worker Deployment" }}
