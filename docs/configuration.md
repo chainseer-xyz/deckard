@@ -356,6 +356,7 @@ checks:
 |---|---|---|
 | `interval` | the tier's (or asset group's) interval; `12h` for `domain.expiry`, `7d` for `domain.lookalike` | Replaces the tier interval for this check. May shorten or lengthen it. Must be a duration `> 0`. A check with its own default cadence (`domain.expiry`: registry data moves slowly; `domain.lookalike`: a sweep costs hundreds of DNS queries) uses it instead of the tier's; this key still overrides it. |
 | `interval` | the tier's (or asset group's) interval; `12h` for `domain.expiry`, `24h` for `intel.internetdb` | Replaces the tier interval for this check. May shorten or lengthen it. Must be a duration `> 0`. A check with its own default cadence (`domain.expiry`, `intel.internetdb`: slow-moving third-party data) uses it instead of the tier's; this key still overrides it. |
+| `interval` | the tier's (or asset group's) interval; `12h` for `domain.expiry` and `cloud.bucket`, `7d` for `web.history` | Replaces the tier interval for this check. May shorten or lengthen it. Must be a duration `> 0`. A check with its own default cadence (`domain.expiry`: registry data moves slowly; `web.history`: so does the archive) uses it instead of the tier's; this key still overrides it. |
 | `on_new_asset` | `true` | Scan this check as soon as an asset is added, changed or revived. Can only switch the tier's `on_inventory_change` off for this check, never on. |
 
 ### Check-specific options
@@ -384,6 +385,13 @@ ignored):
 | `intel.internetdb` | `expected_ports` | `[]` | Ports that may be open although `net.ports` does not list them (outside its scan range, or reachable from some networks only). They never raise `unexpected-port`. |
 | `intel.internetdb` | `max_cves` | `200` | At most this many CVE findings per IP (`1` to `2000`); a longer list is cut after sorting and the run is partial. |
 | `dns.takeover` | `timeout_seconds` | `10` | Per-request timeout. Before reporting, the check handshakes with the owned hostname over HTTPS: a certificate valid for the host that is not the provider's default certificate suppresses the finding. |
+| `web.history` | `max_findings` | `10` | Findings per host (`1`-`50`), highest severity first and newest capture first. When more paths match, the run is partial so nothing beyond the cap is resolved. |
+| `web.history` | `max_results` | `3000` | Archive rows requested per host (`100`-`10000`). A full page means the history was cut off: what was seen is reported and the run is partial. |
+| `web.history` | `min_severity` | `low` | Drop findings below this severity (`info` keeps the soft-404 downgrades of low-severity paths). |
+| `web.history` | `ignore_paths` | `[]` | Path prefixes never reported, for paths that are public on purpose (for example `[/admin, /swagger-ui]`). |
+| `web.history` | `max_age_days` | `0` | Ignore captures older than this many days. `0` means no limit. |
+| `cloud.bucket` | `timeout_seconds` | `10` | Per-request timeout for the `GET /` of the owned hostname (https first, then http). |
+| `cloud.bucket` | `sensitive_keywords` | `[]` | Extra case-insensitive substrings that make a listing critical, on top of `.env`, `backup`, `.sql`, `id_rsa`, `credentials`, `tfstate` and `.pem`. |
 
 `tls.cert` reports hostname-mismatch, self-signed and untrusted-chain findings
 at `low` (and `expired` at `high` instead of `critical`) when the host has an
@@ -504,6 +512,60 @@ For all checks that use `intel`: a lookup that fails, is rate limited, blocked
 or unsupported, an unusable answer, `intel.enabled: false` and a missing intel
 client never raise a finding: the observation says `skipped` or `unavailable`
 and the run is partial.
+`web.history` runs on owned hostnames (not IP addresses), once when a hostname
+appears and then every `7d`. It asks the Wayback Machine's CDX API (through
+[`intel`](#third-party-metadata-intel), service `wayback`) which paths of the
+host the archive captured with HTTP 200 and matches them against a fixed
+pattern table. It never requests the live host or the archived URL: a finding
+says the path *was* publicly served, with the capture date in the evidence.
+Confirm it is gone (the active `http.exposed` check probes the live host where
+active scanning is allowed), rotate any credential the file could have held, and
+ask the Internet Archive to exclude the capture if needed (info@archive.org).
+
+| Class | Severity | Paths |
+|---|---|---|
+| secrets and VCS metadata | high | `/.env*`, `.git/`, `.svn/`, `.hg/`, `id_rsa`/`id_dsa`/`id_ecdsa`/`id_ed25519`, `*.pem`, `*.key`, `.aws/credentials`, `*.tfstate`, `.npmrc`, `wp-config.php.*`, `config.php.bak` |
+| database and archive dumps | high | `*.sql` (also `.sql.gz` and similar), `*.dump`, `*.bak`, `*.old`, and `*.zip`, `*.tar.gz`, `*.tgz`, `*.7z` named `backup`, `db`, `database`, `site`, `www` or `website` |
+| admin and debug surfaces | medium | `/phpmyadmin`, `/adminer`, `/admin`, `/actuator/*`, `/server-status`, `/debug`, `/_profiler`, `/telescope`, `/horizon`, `/graphiql`, `/swagger*`, `/openapi.json`, `/api-docs` (web root only) |
+| leftovers | low | `.DS_Store`, `/web.config` |
+
+Matching is case-insensitive, on the path without its query string. Each path is
+one finding with the key `path:<lower-cased path>`; subtree patterns (`.git/`,
+`/actuator/*`, `/swagger*`, ...) report the directory, so one exposed
+repository is one finding, not one per object. Evidence holds the archived
+URLs without query strings (at most five), the newest capture time, the status
+and the MIME type. A path that should be a file (a `.env`, a `.sql`) but was
+archived only as `text/html` is probably a soft 404 or an application shell and
+is reported one severity lower (so a soft-404 `.DS_Store` falls below the
+default `min_severity`). An archive that returns nothing is a complete,
+clean answer; a lookup that is rate limited, too large, unavailable, disabled
+(`intel.enabled: false` or `intel.services.wayback.enabled: false`), a hostname
+the archive cannot be asked about, an unusable answer, a full page of rows or a
+match count above `max_findings` leaves the observation `wayback: skipped`,
+`rate_limited`, `too_large`, `unavailable`, `not_found`, `unsupported` or `unusable` (or
+`truncated`/`capped` on an otherwise good answer) and makes the run partial: no
+finding resolves on missing data.
+
+`cloud.bucket` runs on owned hostnames and every `12h`. When the CNAME chain
+(resolved like `dns.takeover` does) ends at object storage (`*.s3.amazonaws.com`,
+`*.s3-<region>.amazonaws.com`, `*.s3.<region>.amazonaws.com`, `s3-website*`,
+`storage.googleapis.com`, `*.storage.googleapis.com`, `*.blob.core.windows.net`,
+`*.web.core.windows.net`, `*.r2.dev`, `*.r2.cloudflarestorage.com`), it requests
+`GET /` of the **owned hostname** through the scope-guarded HTTP client, https
+first and then http. The provider's endpoint is only resolved by DNS, never
+contacted; nothing is written, no key is requested, only the first page of a
+listing is read and at most 20 key names are kept in the evidence (sensitive
+names first, each truncated). The response decides:
+
+| Response | Result |
+|---|---|
+| `ListBucketResult` (S3, GCS) or `EnumerationResults` (Azure), 2xx | `listable`: high, or critical when a key contains `.env`, `backup`, `.sql`, `id_rsa`, `credentials`, `tfstate`, `.pem` or a `sensitive_keywords` entry |
+| `AccessDenied`, `AllAccessDisabled`, 403 and similar | private: no finding |
+| `NoSuchBucket` | left to `dns.takeover` and `dns.dangling`: no finding |
+| any other 2xx page | static website: `website: true` in the observation only |
+| 5xx, 429, a redirect, or no answer on either scheme | inconclusive: the run is partial |
+
+`cloud.bucket` asks no third-party service, so `intel.enabled` does not affect it.
 
 Order of evaluation: the scope guard, then the tier's `enabled` (global, then
 asset-group overrides), then the per-check values. A per-check override can
@@ -677,6 +739,8 @@ Some checks ask public metadata services about *your own* domains and IPs:
 `domain.expiry` asks the registry's RDAP service when a zone apex expires and
 who its registrar is; `intel.internetdb` asks Shodan's InternetDB what internet
 scanners know about your public IPs. That is not a probe of your assets, so it does not go
+who its registrar is; `web.history` asks the Wayback Machine which paths of a
+hostname it has seen served. That is not a probe of your assets, so it does not go
 through the scope guard; it goes through a separate, narrower client instead:
 
 ```yaml
@@ -692,6 +756,7 @@ intel:
 | Key | Default | Description |
 |---|---|---|
 | `intel.enabled` | `true` | `false` turns every lookup into "skipped": the consuming check records an observation (`rdap: skipped`, `internetdb: skipped`), marks the run partial and raises nothing. |
+| `intel.enabled` | `true` | `false` turns every lookup into "skipped": the consuming check records an observation (`rdap: skipped`, `wayback: skipped`), marks the run partial and raises nothing. |
 | `intel.user_agent_contact` | | An e-mail address or URL appended to `User-Agent: deckard/<version> (+https://github.com/chainseer-xyz/deckard; <contact>)`. Printable ASCII, at most 128 characters, no `(`, `)`, `;`, `\` or quotes. |
 | `intel.services.<name>.enabled` | `true` | Switch one service off (`rdap`, `internetdb`, `wayback`). |
 | `intel.services.<name>.rate_per_second` | rdap `2`, internetdb `1`, wayback `1` | Token-bucket rate per service (shared by the whole process). `(0, 50]`. |

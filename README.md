@@ -100,6 +100,8 @@ stale syncs so you never trust an incomplete inventory by accident.
 | passive | `intel.internetdb` | CVEs, unexpected open ports and compromised/malware tags that internet scanners report for your public IPs (Shodan InternetDB) |
 | passive | `domain.expiry` | registrations near or past expiry, missing transfer/delete locks, registrar or nameserver changes (RDAP) |
 | passive | `domain.lookalike` | registered typosquats and lookalikes of your domains, with mail-capable ones flagged (DNS only, never contacts them) |
+| passive | `web.history` | sensitive files and admin surfaces the Wayback Machine saw served on your hostnames (`.env`, `.git`, dumps, actuator) |
+| passive | `cloud.bucket` | publicly listable S3, GCS or Azure buckets behind your hostnames |
 | passive | `tls.cert` | expiry, hostname mismatch, weak keys, self-signed |
 | passive | `http.probe`, `http.headers` | liveness, tech fingerprint, missing security headers |
 | passive | `origin.exposed`, `origin.correlation` | CDN origin reachable directly; origin IP published by an unproxied record |

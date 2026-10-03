@@ -75,6 +75,9 @@ config:
   # domain.expiry, InternetDB for intel.internetdb). Reaches only data.iana.org,
   # the RDAP servers it lists and internetdb.shodan.io (see docs/operations.md,
   # Network egress). Set enabled: false when air-gapped.
+  # Third-party metadata lookups about your own domains (RDAP for domain.expiry,
+  # the Wayback Machine for web.history). Reaches only a fixed host list (see
+  # docs/operations.md, Network egress). Set enabled: false when air-gapped.
   # intel: { enabled: true, user_agent_contact: security@example.com }
   # Per-check cadence overrides; on_new_asset (default true) can only turn
   # immediate scans on discovery off for a check.
