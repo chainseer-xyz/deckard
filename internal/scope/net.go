@@ -100,8 +100,11 @@ func (g *Guard) vetIP(op string, tier model.Tier, target string, ip netip.Addr, 
 			return g.refuse(ErrOutOfScope, op, tier, target+" -> "+ip.String(), class, "tier not permitted")
 		}
 		return nil
+	case isAnomalous(ip):
+		return g.refuseAnomaly(ErrOutOfScope, op, tier, target+" -> "+ip.String(), class, "loopback/link-local/metadata or reserved destination is not owned")
 	case isSpecial(ip):
-		return g.refuse(ErrOutOfScope, op, tier, target+" -> "+ip.String(), class, "private/loopback/link-local/metadata destination is not owned")
+		// Private ranges are routine with split-horizon DNS: throttled.
+		return g.refuse(ErrOutOfScope, op, tier, target+" -> "+ip.String(), class, "private destination is not owned")
 	case !viaHostname:
 		return g.refuse(ErrOutOfScope, op, tier, target, class, "IP-based probing is only allowed for owned IPs")
 	case !Allowed(tier, class):
@@ -138,9 +141,9 @@ func (g *Guard) Dialer(tier model.Tier, assetClass model.ScopeClass, rate RateLi
 					return fmt.Errorf("scope: control: bad address %q", address)
 				}
 				if class := g.classifyIP(ip); class == model.ScopeExcluded {
-					return g.refuse(ErrExcluded, "dial", tier, address, class, "control: destination IP is excluded")
+					return g.refuseAnomaly(ErrExcluded, "dial", tier, address, class, "control: destination IP is excluded")
 				} else if class != model.ScopeOwned && isSpecial(ip) {
-					return g.refuse(ErrOutOfScope, "dial", tier, address, class, "control: special-purpose destination")
+					return g.refuseAnomaly(ErrOutOfScope, "dial", tier, address, class, "control: special-purpose destination")
 				}
 				return nil
 			},
@@ -172,7 +175,7 @@ func (d *guardedDialer) dial(ctx context.Context, network, address string, timeo
 	switch network {
 	case "tcp", "tcp4", "tcp6", "udp", "udp4", "udp6":
 	default:
-		return nil, g.refuse(ErrOutOfScope, "dial", d.tier, address, d.class, "unsupported network "+strconv.Quote(network))
+		return nil, g.refuseAnomaly(ErrOutOfScope, "dial", d.tier, address+" ("+strconv.Quote(network)+")", d.class, "unsupported network")
 	}
 	host, portStr, err := net.SplitHostPort(address)
 	if err != nil {
@@ -223,7 +226,7 @@ func (d *guardedDialer) dial(ctx context.Context, network, address string, timeo
 	for _, a := range addrs {
 		ip, ok := parseIP(a)
 		if !ok {
-			return nil, g.refuse(ErrOutOfScope, "dial", d.tier, address, hostClass, "resolver returned unparseable address "+strconv.Quote(a))
+			return nil, g.refuseAnomaly(ErrOutOfScope, "dial", d.tier, address+" -> "+strconv.Quote(a), hostClass, "resolver returned an unparseable address")
 		}
 		if err := g.vetIP("dial", d.tier, address, ip, true); err != nil {
 			return nil, err // all-or-nothing: one bad answer poisons the lookup
@@ -433,12 +436,15 @@ func (g *Guard) checkRedirect(tier model.Tier, req *http.Request, via []*http.Re
 		}
 	}
 	// A merely external target (typically an SSO/login redirect) is routine:
-	// log it at DEBUG. Special-purpose IP literals stay WARN.
-	level := slog.LevelDebug
-	if ip, ok := parseIP(host); ok && isSpecial(ip) {
-		level = slog.LevelWarn
+	// log it at DEBUG. Anomalous IP literals (loopback, metadata) always log
+	// at WARN, private ones at WARN at most hourly.
+	const why = "redirect target is not owned and not the original host"
+	if ip, ok := parseIP(host); ok && isAnomalous(ip) {
+		return g.refuseAnomaly(ErrOutOfScope, "redirect", tier, target, class, why)
+	} else if ok && isSpecial(ip) {
+		return g.refuse(ErrOutOfScope, "redirect", tier, target, class, why)
 	}
-	return g.refuseAt(level, ErrOutOfScope, "redirect", tier, target, class, "redirect target is not owned and not the original host")
+	return g.refuseAt(slog.LevelDebug, ErrOutOfScope, "redirect", tier, target, class, why)
 }
 
 func isIPLiteral(s string) bool { _, ok := parseIP(s); return ok }

@@ -50,6 +50,7 @@ type Metrics struct {
 	scanErrors    *prometheus.CounterVec
 	checksRun     *prometheus.CounterVec
 	checksSkipped *prometheus.CounterVec
+	scopeRefusals *prometheus.CounterVec
 	syncDuration  *prometheus.HistogramVec
 	queueDepth    *prometheus.GaugeVec
 	invChanges    *prometheus.CounterVec
@@ -81,6 +82,9 @@ func New(version, commit string) *Metrics {
 	m.checksSkipped = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "deckard_checks_skipped_total", Help: "Checks skipped before touching the network (for example an owned name on shared CDN infrastructure the tier may not probe). Not runs, not errors.",
 	}, []string{"check", "tier", "reason"})
+	m.scopeRefusals = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "deckard_scope_refusals_total", Help: "Operations the scope guard refused, by tier, target class and reason (logged at WARN at most hourly per target unless anomalous).",
+	}, []string{"tier", "class", "reason"})
 	m.syncDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "deckard_source_sync_duration_seconds", Help: "Duration of source syncs.", Buckets: buckets,
 	}, []string{"source"})
@@ -101,7 +105,7 @@ func New(version, commit string) *Metrics {
 	m.reg.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
-		m.scanDuration, m.scanErrors, m.checksRun, m.checksSkipped, m.syncDuration,
+		m.scanDuration, m.scanErrors, m.checksRun, m.checksSkipped, m.scopeRefusals, m.syncDuration,
 		m.queueDepth, m.invChanges, m.collectErrors, build,
 		m.ref.entries, m.ref.total, m.ref,
 		m.vi.refresh, m.vi.kevOpen, m.vi,
@@ -130,6 +134,11 @@ func (m *Metrics) ObserveScan(check, tier string, d time.Duration, err error) {
 // ObserveSkip counts one skipped check.
 func (m *Metrics) ObserveSkip(check, tier, reason string) {
 	m.checksSkipped.WithLabelValues(check, tier, reason).Inc()
+}
+
+// ScopeRefusal counts one scope-guard refusal (scope.WithRefusalObserver).
+func (m *Metrics) ScopeRefusal(tier, class, reason string) {
+	m.scopeRefusals.WithLabelValues(tier, class, reason).Inc()
 }
 
 // ObserveSync records a sync duration. Success freshness comes from the store

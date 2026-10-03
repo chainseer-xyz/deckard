@@ -171,6 +171,30 @@ A steady skip count is normal for a proxied estate. To scan the origin
 servers behind the CDN, declare their addresses owned (a static source or
 `scope.include`).
 
+### Scope refusals
+
+Every operation the scope guard refuses is logged as `scope refusal` and
+counted in `deckard_scope_refusals_total{tier,class,reason}` (`reason` is a
+fixed phrase such as `tier requires an owned destination IP`). Most refusals
+are expected by design (a third-party CNAME target, an SSO redirect, a shared
+destination reached during a run), so each distinct target and reason is
+logged at WARN at most once an hour and at DEBUG in between; the counter keeps
+the full volume visible. Refusals that point at something genuinely wrong are
+logged at WARN every time:
+
+- an excluded name or address (`excluded=true` in the log line);
+- a loopback, link-local (cloud metadata), multicast or reserved destination
+  that is not owned, whether reached by IP or through an owned name's DNS
+  answer;
+- an unparseable resolver answer, a forbidden DNS query type or network.
+
+Private destinations (RFC1918, ULA, CGNAT) that are not declared owned are
+throttled like routine refusals: split-horizon DNS returns them all the time
+when deckard runs inside a cluster or VPC (see `scope.resolvers`).
+
+A sudden rise of `deckard_scope_refusals_total` for one `reason` after a DNS
+or inventory change is worth a look; a flat rate is the guard doing its job.
+
 ## Alerting
 
 Findings reach Alertmanager as one alert per open finding (see

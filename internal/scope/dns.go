@@ -138,7 +138,7 @@ func (d *guardedDNS) record(qname string, depth int, resp *dnsx.Response) {
 func (d *guardedDNS) Query(ctx context.Context, name string, qtype uint16) (*dnsx.Response, error) {
 	switch qtype {
 	case dns.TypeAXFR, dns.TypeIXFR, dns.TypeOPT:
-		return nil, d.g.refuse(ErrOutOfScope, "resolve", d.tier, name, d.class, "query type "+dns.TypeToString[qtype]+" is not permitted")
+		return nil, d.g.refuseAnomaly(ErrOutOfScope, "resolve", d.tier, name+" ("+dns.TypeToString[qtype]+")", d.class, "query type is not permitted")
 	}
 	n, depth, err := d.gate("resolve", name)
 	if err != nil {

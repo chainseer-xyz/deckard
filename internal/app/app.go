@@ -98,13 +98,13 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, opts Options
 
 func (a *App) build() error {
 	cfg := a.cfg
-	g, err := scope.NewGuard(cfg.Scope, scope.WithLogger(a.log))
+	a.metrics = metrics.New(a.opts.Version, a.opts.Commit)
+	a.metrics.RegisterState(a.st, 15*time.Second)
+	g, err := scope.NewGuard(cfg.Scope, scope.WithLogger(a.log), scope.WithRefusalObserver(a.metrics.ScopeRefusal))
 	if err != nil {
 		return fmt.Errorf("scope: %w", err)
 	}
 	a.guard = g
-	a.metrics = metrics.New(a.opts.Version, a.opts.Commit)
-	a.metrics.RegisterState(a.st, 15*time.Second)
 
 	for _, sc := range cfg.Sources {
 		s, err := registry.Build(sc, cfg.Scope, a.opts.Getenv, a.log)
