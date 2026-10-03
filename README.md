@@ -96,6 +96,8 @@ stale syncs so you never trust an incomplete inventory by accident.
 | passive | `dns.dangling` | CNAME chains ending in NXDOMAIN, dangling NS delegations |
 | passive | `dns.takeover` | provider takeover fingerprints (S3, GitHub Pages, Heroku, Azure, CloudFront, …) |
 | passive | `dns.hygiene` | SPF/DMARC/CAA/DNSSEC gaps, wildcard records, open AXFR |
+| passive | `mail.policy` | MTA-STS and TLS-RPT gaps, weak DMARC (`pct`, `sp=none`, no `rua`), `~all` on mail zones |
+| passive | `intel.internetdb` | CVEs, unexpected open ports and compromised/malware tags that internet scanners report for your public IPs (Shodan InternetDB) |
 | passive | `domain.expiry` | registrations near or past expiry, missing transfer/delete locks, registrar or nameserver changes (RDAP) |
 | passive | `domain.lookalike` | registered typosquats and lookalikes of your domains, with mail-capable ones flagged (DNS only, never contacts them) |
 | passive | `tls.cert` | expiry, hostname mismatch, weak keys, self-signed |
