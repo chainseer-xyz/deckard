@@ -52,6 +52,19 @@ func ClassifyCNAME(host, final string, finalNXDomain, owned bool) *model.Finding
 		return nil
 	}
 	ev := map[string]any{"host": host, "cname_target": final, "target_in_owned_zone": owned}
+	if isServiceLabel(host) {
+		// _domainkey, _domainconnect, _dmarc, _acme-challenge and similar names
+		// carry mail and domain-verification data, never web content, so a dead
+		// target there is not a subdomain takeover. It is still stale data, and a
+		// claimable DKIM target would let its owner sign mail as this domain.
+		return &model.FindingInput{
+			Check: Name, Key: "cname-nxdomain-service", Severity: model.SeverityLow,
+			Title:       fmt.Sprintf("%s is a service-record CNAME to a name that does not exist (%s)", host, final),
+			Description: "This CNAME sits under an underscore service label (mail authentication or domain verification), so it cannot serve web content and is not a web subdomain takeover. The target no longer resolves, so the record is stale and the service it verified or signed for may be broken.",
+			Remediation: "Delete the record for " + host + " if the service is retired, or restore the target " + final + " if it should still work.",
+			Evidence:    ev, Tags: []string{"dns", "dangling", "hygiene"},
+		}
+	}
 	if owned {
 		return &model.FindingInput{
 			Check: Name, Key: "cname-owned-missing", Severity: model.SeverityHigh,
@@ -68,6 +81,17 @@ func ClassifyCNAME(host, final string, finalNXDomain, owned bool) *model.Finding
 		Remediation: "Remove the stale CNAME for " + host + ", or restore the third-party resource it pointed at. Review dns.takeover results for the same host.",
 		Evidence:    ev, Tags: []string{"dns", "dangling", "takeover"},
 	}
+}
+
+// isServiceLabel reports whether any label of host starts with an underscore,
+// the convention for DNS service and verification records.
+func isServiceLabel(host string) bool {
+	for _, l := range strings.Split(strings.TrimSuffix(host, "."), ".") {
+		if strings.HasPrefix(l, "_") {
+			return true
+		}
+	}
+	return false
 }
 
 // ClassifyNS flags a delegation to a nameserver whose name does not exist.
