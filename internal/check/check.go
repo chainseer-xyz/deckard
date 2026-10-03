@@ -4,8 +4,10 @@ package check
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/chainseer-xyz/deckard/internal/dnsx"
 	"github.com/chainseer-xyz/deckard/internal/model"
@@ -15,6 +17,19 @@ import (
 type Dialer interface {
 	DialContext(ctx context.Context, network, address string) (net.Conn, error)
 }
+
+// TimeoutDialer is implemented by dialers that can bound the connection
+// attempt alone. The timeout starts after any wait for the per-host rate
+// limiter, so a dial queued behind the limiter is not mistaken for an
+// unresponsive port.
+type TimeoutDialer interface {
+	DialTimeout(ctx context.Context, network, address string, timeout time.Duration) (net.Conn, error)
+}
+
+// ErrRateLimited marks a dial that was never attempted because no rate-limit
+// token could be had before the context ended. It says nothing about the
+// destination.
+var ErrRateLimited = errors.New("rate limit wait failed")
 
 // Resolver is a scope-aware DNS resolver.
 type Resolver interface {
