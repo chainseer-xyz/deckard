@@ -53,7 +53,7 @@ type Config struct {
 	// intelKeyErrs are unknown keys found under intel.* at load (the block is
 	// closed; see unknownIntelKeys). Validate reports them.
 	intelKeyErrs []string
-	Ingest       IngestConfig              `koanf:"ingest"`
+	Ingest       IngestConfig `koanf:"ingest"`
 }
 
 // IngestConfig controls POST /api/v1/ingest, through which external scanners
