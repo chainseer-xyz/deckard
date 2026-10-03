@@ -29,6 +29,8 @@ type options struct {
 	guardInitial time.Duration
 	guardEvery   time.Duration
 	vi           vulnintelOpts
+	// reclaimSpread staggers reclaimed jobs (see WithReclaimSpread).
+	reclaimSpread time.Duration
 }
 
 // Option customises an Engine.
@@ -66,6 +68,11 @@ func WithTemplateGuard(initial, every time.Duration) Option {
 	return func(o *options) { o.guardInitial, o.guardEvery = initial, every }
 }
 
+// WithReclaimSpread sets the window over which jobs reclaimed from a dead
+// instance are spread (each is due at a random point in it; default 60s, 0
+// makes them all due at once).
+func WithReclaimSpread(d time.Duration) Option { return func(o *options) { o.reclaimSpread = d } }
+
 // Engine owns the job system.
 type Engine struct {
 	d      Deps
@@ -73,6 +80,15 @@ type Engine struct {
 	r      *runner
 	client *river.Client[pgx.Tx] // nil without a pool
 	roles  map[string]bool
+	// clientID is the River client id, recorded by River in
+	// river_job.attempted_by and registered in deckard_instances.
+	clientID string
+	// timeouts maps each job kind this engine's client works to its
+	// worker's timeout.
+	timeouts map[string]time.Duration
+	// rescueAfter is River's RescueStuckJobsAfter, derived from the workers'
+	// timeouts (see rescueMargin).
+	rescueAfter time.Duration
 
 	vulnOnce sync.Once
 	vuln     *vulnintelJob
@@ -84,6 +100,9 @@ type Engine struct {
 
 	stopGuard context.CancelFunc
 	guardDone chan struct{}
+
+	stopInst context.CancelFunc
+	instDone chan struct{}
 }
 
 // New validates deps and builds the engine (and, with a Pool, the River
@@ -104,9 +123,15 @@ func New(d Deps, opts ...Option) (*Engine, error) {
 		tick:         30 * time.Second,
 		gaugeEvery:   15 * time.Second,
 		syncJitter:   0.1,
+		// A crashed instance's jobs come back together; retrying all of
+		// them in the same second is what OOMKilled the replacement pod.
+		reclaimSpread: 60 * time.Second,
 	}
 	for _, f := range opts {
 		f(&o)
+	}
+	if o.reclaimSpread < 0 {
+		return nil, errors.New("engine: negative reclaim spread")
 	}
 	if o.runOnceWorkers < 1 {
 		o.runOnceWorkers = 8
@@ -150,23 +175,85 @@ func New(d Deps, opts ...Option) (*Engine, error) {
 	return e, nil
 }
 
+// stopCancelWindow is how long Stop waits for cancelled jobs to return once
+// the graceful drain deadline has passed.
+const stopCancelWindow = 10 * time.Second
+
+// StopOverrun is the most Stop can run past its context's deadline: the cancel
+// window plus deregistering the instance. Whoever owns the process lifetime
+// (the pod's terminationGracePeriodSeconds) must allow the drain deadline plus
+// this, or the process is killed mid-cancel and its jobs stay running.
+const StopOverrun = stopCancelWindow + deregisterTimeout
+
+// rescueMargin is how far River's RescueStuckJobsAfter sits above the longest
+// worker timeout. River rescues a job that has been running that long even if
+// its client is alive, so the value must exceed every worker's Timeout:
+// otherwise a slow but healthy job (a 30m scan) is re-run while it is still
+// running. Jobs of instances that died are reclaimed within about a minute by
+// the instance heartbeat (instances.go); this rescue is the backstop for
+// clients that never registered, such as an older deckard mid-rollout.
+const rescueMargin = 5 * time.Minute
+
+// workerSet registers River workers and remembers what it registered.
+type workerSet struct {
+	workers  *river.Workers
+	timeouts map[string]time.Duration
+	err      error
+}
+
+func addWorker[T river.JobArgs](s *workerSet, w river.Worker[T]) {
+	river.AddWorker(s.workers, w)
+	var args T
+	kind := args.Kind()
+	d := w.Timeout(&river.Job[T]{})
+	switch {
+	case d < 0:
+		// No timeout: River would rescue (and so re-run) it while it runs.
+		s.err = errors.Join(s.err, fmt.Errorf("engine: worker %s has no timeout; the stuck-job rescue needs one", kind))
+	case d == 0:
+		d = river.JobTimeoutDefault
+	}
+	s.timeouts[kind] = d
+}
+
+// rescueAfter is the longest worker timeout plus rescueMargin.
+func (s *workerSet) rescueAfter() time.Duration {
+	var longest time.Duration
+	for _, d := range s.timeouts {
+		longest = max(longest, d)
+	}
+	return longest + rescueMargin
+}
+
 func (e *Engine) newClient() (*river.Client[pgx.Tx], error) {
-	workers := river.NewWorkers()
-	river.AddWorker(workers, &syncWorker{r: e.r})
-	river.AddWorker(workers, &scanWorker{r: e.r})
-	river.AddWorker(workers, &scheduleWorker{r: e.r})
-	river.AddWorker(workers, &housekeepingWorker{r: e.r})
-	river.AddWorker(workers, &expandWorker{r: e.r})
-	river.AddWorker(workers, &scheduleExpansionWorker{r: e.r})
-	river.AddWorker(workers, &refdataWorker{e: e})
-	river.AddWorker(workers, &updateTemplatesWorker{r: e.r})
-	river.AddWorker(workers, &scanNewTemplatesWorker{r: e.r})
-	river.AddWorker(workers, &scanCVEsWorker{r: e.r})
-	river.AddWorker(workers, &vulnintelWorker{e: e})
+	ws := &workerSet{workers: river.NewWorkers(), timeouts: map[string]time.Duration{}}
+	addWorker(ws, &syncWorker{r: e.r})
+	addWorker(ws, &scanWorker{r: e.r})
+	addWorker(ws, &scheduleWorker{r: e.r})
+	addWorker(ws, &housekeepingWorker{r: e.r})
+	addWorker(ws, &expandWorker{r: e.r})
+	addWorker(ws, &scheduleExpansionWorker{r: e.r})
+	addWorker(ws, &refdataWorker{e: e})
+	addWorker(ws, &updateTemplatesWorker{r: e.r})
+	addWorker(ws, &scanNewTemplatesWorker{r: e.r})
+	addWorker(ws, &scanCVEsWorker{r: e.r})
+	addWorker(ws, &vulnintelWorker{e: e})
+	if ws.err != nil {
+		return nil, ws.err
+	}
+	e.timeouts = ws.timeouts
+	e.rescueAfter = ws.rescueAfter()
+	e.clientID = newClientID(time.Now())
 
 	cfg := &river.Config{
-		Workers: workers,
+		// Explicit (River's default shape) so the instance heartbeat knows
+		// which attempted_by entries are ours; see instances.go.
+		ID:      e.clientID,
+		Workers: ws.workers,
 		Logger:  e.r.log,
+		// River's default is an hour, so a job orphaned by an instance that
+		// never registered blocked its unique successors that long.
+		RescueStuckJobsAfter: e.rescueAfter,
 		// Default River retry policy: exponential backoff (attempt^4 seconds
 		// with jitter); per-kind MaxAttempts are set in jobs.go.
 	}
@@ -249,10 +336,22 @@ func (e *Engine) Start(ctx context.Context) error {
 	if e.client == nil {
 		return fmt.Errorf("engine: start: %w", ErrNoQueue)
 	}
+	// Register before River fetches anything, so every job this client runs
+	// belongs to a registered, heartbeating instance.
+	if err := e.heartbeat(ctx); err != nil {
+		return fmt.Errorf("engine: start: %w", err)
+	}
 	if err := e.client.Start(ctx); err != nil {
+		e.deregisterQuietly()
 		return fmt.Errorf("engine: start river: %w", err)
 	}
 	e.started = true
+	for k := range e.timeouts {
+		e.r.rec.JobsReclaimed(k, 0) // series exist from the start, so increase() sees the first reclaim
+	}
+	ictx, icancel := context.WithCancel(context.WithoutCancel(ctx))
+	e.stopInst, e.instDone = icancel, make(chan struct{})
+	go e.instanceLoop(ictx, e.instDone)
 	gctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	e.stopGau, e.gauDone = cancel, make(chan struct{})
 	go e.gaugeLoop(gctx, e.gauDone)
@@ -272,7 +371,9 @@ func (e *Engine) templateUpdateEnabled() bool {
 
 // Stop stops fetching new jobs and waits for in-flight ones until ctx expires,
 // after which running jobs are cancelled (their contexts are cancelled and
-// River retries them on the next start).
+// River retries them on the next start). Once River has stopped cleanly the
+// instance is deregistered; if it has not, the row stays and goes stale, so
+// peers reclaim whatever is still marked running.
 func (e *Engine) Stop(ctx context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -287,16 +388,35 @@ func (e *Engine) Stop(ctx context.Context) error {
 		<-e.guardDone
 		e.stopGuard = nil
 	}
+	// The heartbeat stops first: from here on the row only says "this client
+	// existed", and it is either deleted below or left to go stale.
+	e.stopInst()
+	<-e.instDone
 	err := e.client.Stop(ctx)
 	if err != nil && ctx.Err() != nil {
-		cctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		cctx, cancel := context.WithTimeout(context.Background(), stopCancelWindow)
 		defer cancel()
 		if cerr := e.client.StopAndCancel(cctx); cerr != nil {
 			return errors.Join(err, cerr)
 		}
+		e.deregisterQuietly()
 		return fmt.Errorf("engine: graceful stop deadline hit, in-flight jobs cancelled: %w", err)
 	}
+	if err == nil {
+		e.deregisterQuietly()
+	}
 	return err
+}
+
+// deregisterQuietly removes this instance's row on a fresh, short context (the
+// stop context may have expired). A failure only leaves a row that goes stale
+// and is pruned; with nothing left running there is nothing to reclaim.
+func (e *Engine) deregisterQuietly() {
+	ctx, cancel := context.WithTimeout(context.Background(), deregisterTimeout)
+	defer cancel()
+	if err := e.deregister(ctx); err != nil {
+		e.r.log.Warn("engine stop", "err", err)
+	}
 }
 
 // RunOnce performs one sync of every source, then one scan pass of every due

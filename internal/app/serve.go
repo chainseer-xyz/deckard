@@ -9,10 +9,26 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chainseer-xyz/deckard/internal/engine"
 	"github.com/chainseer-xyz/deckard/internal/metrics"
 )
 
-const shutdownGrace = 30 * time.Second
+// Shutdown budget. On SIGTERM in-flight jobs get shutdownGrace to finish, then
+// Engine.Stop cancels them and may take engine.StopOverrun more to record
+// them as retryable. All of it must end before the orchestrator SIGKILLs the
+// process (the chart's terminationGracePeriodSeconds, podTerminationGrace by
+// default): a kill mid-cancel leaves jobs 'running' until a peer reclaims them.
+// The API and metrics servers shut down concurrently and within the same time.
+const (
+	shutdownGrace       = 30 * time.Second
+	podTerminationGrace = 60 * time.Second // deploy/helm values.yaml terminationGracePeriodSeconds
+	shutdownSlack       = 10 * time.Second // signal delivery, process exit, a slow database
+)
+
+// Compile-time guard: raising shutdownGrace (or the engine's overrun) past the
+// pod's grace period fails the build here. Raise terminationGracePeriodSeconds
+// in the chart and podTerminationGrace together first.
+const _ = uint(podTerminationGrace - shutdownGrace - engine.StopOverrun - shutdownSlack)
 
 func (a *App) hasRole(role string) bool { return slices.Contains(a.cfg.Server.Roles, role) }
 

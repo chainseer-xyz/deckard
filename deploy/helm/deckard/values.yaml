@@ -198,6 +198,13 @@ extraVolumeMounts: []
 podAnnotations: {}
 podLabels: {}
 
+# -- Seconds Kubernetes waits after SIGTERM before SIGKILL. deckard drains
+# in-flight jobs for 30s (shutdownGrace), then cancels the rest and needs up to
+# ~12s more to record them as retryable. The Kubernetes default of 30s kills it
+# mid-drain and leaves jobs 'running' until a peer reclaims them. Keep this at
+# or above 60 (the binary refuses to build with a budget that does not fit).
+terminationGracePeriodSeconds: 60
+
 # -- Requests only. deckard deliberately sets no CPU limit (avoids throttling);
 # the chart refuses a resources.limits.cpu value.
 resources:

@@ -45,6 +45,9 @@ func TestRecorderMetrics(t *testing.T) {
 	m.InitHeartbeat("ok", "error", "unhealthy")
 	m.HeartbeatResult("ok")
 	m.HeartbeatResult("ok")
+	m.JobsReclaimed("sync_source", 0)
+	m.JobsReclaimed("scan_asset", 0)
+	m.JobsReclaimed("scan_asset", 3)
 
 	out := scrape(t, m)
 	for _, want := range []string{
@@ -54,6 +57,8 @@ func TestRecorderMetrics(t *testing.T) {
 		`deckard_heartbeat_total{result="ok"} 2`,
 		`deckard_heartbeat_total{result="error"} 0`,
 		`deckard_heartbeat_total{result="unhealthy"} 0`,
+		`deckard_jobs_reclaimed_total{kind="sync_source"} 0`,
+		`deckard_jobs_reclaimed_total{kind="scan_asset"} 3`,
 		`deckard_scan_errors_total{check="tls.cert"} 1`,
 		`deckard_scan_duration_seconds_count{check="tls.cert",tier="passive"} 2`,
 		`deckard_scan_duration_seconds_sum{check="tls.cert",tier="passive"} 2.5`,
@@ -152,6 +157,7 @@ func TestNopRecorder(t *testing.T) {
 	r.ObserveSync("a", 0, true)
 	r.InventoryChange("a", 1)
 	r.SetQueueDepth("a", 1)
+	r.JobsReclaimed("a", 1)
 }
 
 func TestServeListener(t *testing.T) {

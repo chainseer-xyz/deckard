@@ -24,8 +24,8 @@ func TestDocumentedMetricsExist(t *testing.T) {
 		src.Write(b)
 	}
 	code := src.String()
-	// Non-metric tokens that share the prefix (cookies, labels).
-	skip := map[string]bool{"deckard_session": true, "deckard_csrf": true, "deckard_check": true}
+	// Non-metric tokens that share the prefix (cookies, labels, tables).
+	skip := map[string]bool{"deckard_session": true, "deckard_csrf": true, "deckard_check": true, "deckard_instances": true}
 	re := regexp.MustCompile(`deckard_[a-z_]+`)
 	for _, doc := range []string{"../../deploy/examples/prometheus-rules.yml", "../../docs/operations.md", "../../docs/configuration.md", "../../README.md"} {
 		b, err := os.ReadFile(doc) // #nosec G304 -- repo file

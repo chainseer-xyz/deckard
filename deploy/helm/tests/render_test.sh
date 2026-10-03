@@ -23,6 +23,11 @@ check "non-root"                     "runAsNonRoot: true" "$cnpg"
 check "read-only rootfs"             "readOnlyRootFilesystem: true" "$cnpg"
 absent "no cpu limit by default"     "cpu: " "$(print -r -- "$cnpg" | awk "/limits:/{f=1} f&&/cpu/{print} /requests:/{f=0}")"
 check "roles env"                    "api,scheduler,worker" "$cnpg"
+# deckard drains for 30s then cancels for up to ~12s; Kubernetes' default 30s
+# grace would SIGKILL it mid-cancel and orphan running jobs.
+check "termination grace default"    "terminationGracePeriodSeconds: 60" "$cnpg"
+grace=$(helm template t deckard --set database.cnpg.enabled=true --set worker.enabled=true --set "roles={api,scheduler}" --set terminationGracePeriodSeconds=120)
+if [[ $(print -r -- "$grace" | grep -c "terminationGracePeriodSeconds: 120") == 2 ]]; then print "ok   termination grace override on server and worker"; else print "FAIL termination grace override on server and worker"; fail=1; fi
 
 # extraSpec may replace bootstrap (e.g. recovery from a backup) or storage:
 # appending them after the defaults would render duplicate mapping keys.

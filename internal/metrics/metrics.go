@@ -25,6 +25,7 @@ type Recorder interface {
 	ObserveSync(source string, d time.Duration, ok bool)
 	InventoryChange(kind string, n int)
 	SetQueueDepth(queue string, n int)
+	JobsReclaimed(kind string, n int)
 }
 
 // Nop is a Recorder that discards everything.
@@ -35,6 +36,7 @@ func (Nop) ObserveSkip(string, string, string)               {}
 func (Nop) ObserveSync(string, time.Duration, bool)          {}
 func (Nop) InventoryChange(string, int)                      {}
 func (Nop) SetQueueDepth(string, int)                        {}
+func (Nop) JobsReclaimed(string, int)                        {}
 
 // StateSource is the slice of store.Store the scrape-time collector needs.
 type StateSource interface {
@@ -55,6 +57,7 @@ type Metrics struct {
 	syncDuration  *prometheus.HistogramVec
 	queueDepth    *prometheus.GaugeVec
 	invChanges    *prometheus.CounterVec
+	reclaimed     *prometheus.CounterVec
 	collectErrors prometheus.Counter
 	ref           *refdataMetrics
 
@@ -98,6 +101,9 @@ func New(version, commit string) *Metrics {
 	m.invChanges = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "deckard_inventory_changes_total", Help: "Inventory changes by type (added, removed, changed, revived).",
 	}, []string{"type"})
+	m.reclaimed = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "deckard_jobs_reclaimed_total", Help: "Running jobs moved back to retryable (or finalized, like River's rescuer) because the instance running them stopped heartbeating: an instance died without a graceful stop.",
+	}, []string{"kind"})
 	m.collectErrors = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "deckard_metrics_collect_errors_total", Help: "Failed refreshes of store-backed gauges.",
 	})
@@ -110,7 +116,7 @@ func New(version, commit string) *Metrics {
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		m.scanDuration, m.scanErrors, m.checksRun, m.checksSkipped, m.scopeRefusals, m.heartbeats, m.syncDuration,
-		m.queueDepth, m.invChanges, m.collectErrors, build,
+		m.queueDepth, m.invChanges, m.reclaimed, m.collectErrors, build,
 		m.ref.entries, m.ref.total, m.ref,
 		m.vi.refresh, m.vi.kevOpen, m.vi,
 	)
@@ -175,6 +181,15 @@ func (m *Metrics) InventoryChange(kind string, n int) {
 // SetQueueDepth sets the depth gauge for a queue.
 func (m *Metrics) SetQueueDepth(queue string, n int) {
 	m.queueDepth.WithLabelValues(queue).Set(float64(n))
+}
+
+// JobsReclaimed counts n jobs of kind reclaimed from a dead instance. n == 0
+// creates the series at zero, so increase() sees the first reclaim.
+func (m *Metrics) JobsReclaimed(kind string, n int) {
+	c := m.reclaimed.WithLabelValues(kind)
+	if n > 0 {
+		c.Add(float64(n))
+	}
 }
 
 var (
