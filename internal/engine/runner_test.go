@@ -688,3 +688,28 @@ func TestRunScanOpenFindingsLookupFailureFailsTheRun(t *testing.T) {
 		t.Fatalf("runs = %+v", runs)
 	}
 }
+
+// Target.Baseline holds other checks' baselines only for checks that ask for
+// them (and only the ones that exist); the check's own is always loaded.
+func TestRunScanOtherBaselinesOnlyForChecksThatWantThem(t *testing.T) {
+	a := hostAsset(1, "a.example.com")
+	plain := passiveCheck("c.plain")
+	wants := baselinesCheck{passiveCheck("c.wants"), []string{"net.ports", "c.wants", "never.ran"}}
+	h := newHarness(nil, []model.Asset{a}, plain, wants)
+	h.st.baselines[ScanKey{1, "net.ports"}] = &store.Baseline{AssetID: 1, Check: "net.ports", Data: map[string]any{"ports": []any{"22"}}}
+	h.st.baselines[ScanKey{1, "c.wants"}] = &store.Baseline{AssetID: 1, Check: "c.wants", Data: map[string]any{"own": true}}
+	h.st.baselines[ScanKey{2, "net.ports"}] = &store.Baseline{AssetID: 2, Check: "net.ports", Data: map[string]any{"other": "asset"}}
+	if err := h.r.runScan(context.Background(), scanJob{AssetID: 1, Tier: model.TierPassive}); err != nil {
+		t.Fatal(err)
+	}
+	if got := plain.targets[0].Baseline; len(got) != 0 {
+		t.Errorf("a check that did not ask got baselines: %v", got)
+	}
+	got := wants.targets[0].Baseline
+	if len(got) != 2 || got["net.ports"]["ports"] == nil || got["c.wants"]["own"] != true {
+		t.Errorf("baselines = %v, want net.ports and its own, nothing for never.ran", got)
+	}
+	if _, ok := got["never.ran"]; ok {
+		t.Error("a missing baseline must stay absent")
+	}
+}

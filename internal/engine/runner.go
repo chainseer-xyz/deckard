@@ -321,6 +321,19 @@ func (r *runner) runCheck(ctx context.Context, c check.Check, asset model.Asset,
 	} else if err != nil && !errors.Is(err, store.ErrNotFound) && runErr == nil {
 		runErr = fmt.Errorf("load baseline: %w", err)
 	}
+	if w, ok := c.(check.WantsBaselines); ok && runErr == nil {
+		for _, name := range w.BaselineChecks() {
+			if name == c.Name() {
+				continue
+			}
+			if b, err := r.Store.GetBaseline(cctx, asset.ID, name); err == nil && b != nil {
+				target.Baseline[name] = b.Data
+			} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+				runErr = fmt.Errorf("load baseline %s: %w", name, err)
+				break
+			}
+		}
+	}
 	if runErr == nil {
 		res, runErr = safeRun(cctx, c, target)
 	}

@@ -223,6 +223,14 @@ type wantsCheck struct{ *fakeCheck }
 
 func (wantsCheck) WantsOpenFindings() bool { return true }
 
+// baselinesCheck is a fakeCheck that asks for other checks' baselines.
+type baselinesCheck struct {
+	*fakeCheck
+	names []string
+}
+
+func (b baselinesCheck) BaselineChecks() []string { return b.names }
+
 type fakeCheck struct {
 	name    string
 	tier    model.Tier

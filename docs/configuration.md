@@ -355,6 +355,7 @@ checks:
 | Key | Default | Effect |
 |---|---|---|
 | `interval` | the tier's (or asset group's) interval; `12h` for `domain.expiry`, `7d` for `domain.lookalike` | Replaces the tier interval for this check. May shorten or lengthen it. Must be a duration `> 0`. A check with its own default cadence (`domain.expiry`: registry data moves slowly; `domain.lookalike`: a sweep costs hundreds of DNS queries) uses it instead of the tier's; this key still overrides it. |
+| `interval` | the tier's (or asset group's) interval; `12h` for `domain.expiry`, `24h` for `intel.internetdb` | Replaces the tier interval for this check. May shorten or lengthen it. Must be a duration `> 0`. A check with its own default cadence (`domain.expiry`, `intel.internetdb`: slow-moving third-party data) uses it instead of the tier's; this key still overrides it. |
 | `on_new_asset` | `true` | Scan this check as soon as an asset is added, changed or revived. Can only switch the tier's `on_inventory_change` off for this check, never on. |
 
 ### Check-specific options
@@ -376,6 +377,12 @@ ignored):
 | `domain.lookalike` | `max_candidates_per_zone`, `max_findings_per_zone` | `600`, `50` | Cap on the names queried per apex per run (taken evenly across the techniques; the observation says how many were dropped) and on the findings reported (highest severity first; the observation says how many were cut). `1` to `5000` and `1` to `500`. |
 | `domain.lookalike` | `min_label_length` | `5` | Brand labels shorter than this are not permuted at all: a 3-letter label yields mostly meaningless noise. `1` to `63`. |
 | `domain.lookalike` | `rate_per_second` | `20` | Hard ceiling on DNS queries per second for the whole process, however many zones run at once. `(0, 1000]`. Read at startup. Invalid values fall back to the default and are noted. |
+| `mail.policy` | `expects_mail` | `false` | Same meaning as for `dns.hygiene`: judge the zone as a mail zone even without MX records. MTA-STS and TLS-RPT absence is still raised only for zones with a real MX. |
+| `mail.policy` | `check_mta_sts`, `check_tls_rpt` | `true`, `true` | `false` skips every MTA-STS (respectively TLS-RPT) finding and, for MTA-STS, the policy fetch. |
+| `mail.policy` | `min_max_age` | `604800` | MTA-STS `max_age` in seconds below which `mta-sts-max-age-short` is raised (one week). |
+| `mail.policy` | `timeout_seconds` | `10` | Timeout of the MTA-STS policy fetch. |
+| `intel.internetdb` | `expected_ports` | `[]` | Ports that may be open although `net.ports` does not list them (outside its scan range, or reachable from some networks only). They never raise `unexpected-port`. |
+| `intel.internetdb` | `max_cves` | `200` | At most this many CVE findings per IP (`1` to `2000`); a longer list is cut after sorting and the run is partial. |
 | `dns.takeover` | `timeout_seconds` | `10` | Per-request timeout. Before reporting, the check handshakes with the owned hostname over HTTPS: a certificate valid for the host that is not the provider's default certificate suppresses the finding. |
 
 `tls.cert` reports hostname-mismatch, self-signed and untrusted-chain findings
@@ -437,6 +444,66 @@ earlier to store its result) is partial too and records `unchecked`. Partial
 runs still raise and refresh findings. See
 [operations.md](operations.md#lookalike-sweeps-domainlookalike) for the query
 volume and the design.
+`mail.policy` runs on owned zones that are registrable domains and covers what
+`dns.hygiene` does not; it never repeats hygiene's findings (SPF and DMARC
+presence, `+all`, `?all`, a missing `all`, more than ten SPF lookups, multiple
+SPF records, `p=none`). A zone counts as a mail zone when it has MX records (or
+`expects_mail` is set); MTA-STS and TLS-RPT protect inbound mail, so their
+absence is raised only for zones with a real MX. Findings, none above medium:
+
+| Key | Severity | Raised when |
+|---|---|---|
+| `mta-sts-missing` | low | the zone has MX records but no `_mta-sts` TXT record |
+| `mta-sts-txt-invalid` | medium | more than one `v=STSv1` record, or no valid `id` |
+| `mta-sts-policy-unavailable` | medium | the TXT record is published but `https://mta-sts.<zone>/.well-known/mta-sts.txt` answers 4xx |
+| `mta-sts-policy-redirect` | medium | the policy URL redirects (RFC 8461 forbids following redirects, so senders ignore it) |
+| `mta-sts-policy-invalid` | medium | the policy lacks `version: STSv1`, a valid `mode`, `max_age` or (unless `mode: none`) an `mx:` line |
+| `mta-sts-mode-none`, `mta-sts-mode-testing` | low | the policy is switched off, or only tests and never makes a sender refuse delivery |
+| `mta-sts-max-age-short` | low | `max_age` is below `min_max_age` |
+| `mta-sts-mx-mismatch` | medium (`enforce`), low (`testing`) | a real MX host matches no `mx:` pattern (a `*.example.com` pattern matches exactly one label) |
+| `tls-rpt-missing` | info; low when MTA-STS is published | no `_smtp._tls` TXT record |
+| `tls-rpt-invalid` | low | more than one record, or no `mailto:`/`https:` `rua` |
+| `dmarc-multiple` | medium | more than one DMARC record (receivers discard all of them) |
+| `dmarc-pct`, `dmarc-sp-none` | low | `pct` below 100, or `sp=none`, on an enforcing (`quarantine`/`reject`) policy |
+| `dmarc-no-rua` | info | no aggregate report address |
+| `spf-softfail` | low; info when DMARC is enforcing | the SPF record ends in `~all` |
+| `null-mx-missing` | info | the zone has no MX at all and no null MX (`example.com. IN MX 0 .`, RFC 7505) |
+
+A zone with no MX is treated as parked and is not asked about its mail
+policies; `dns.hygiene` already reports its missing null SPF and DMARC records
+(`v=spf1 -all`, `v=DMARC1; p=reject;`). The policy file is fetched with the
+scope-guarded HTTP client, at most 64 KiB. Anything the check could not
+establish (MX not answered, a TXT lookup that failed, a policy fetch that
+failed, timed out, was refused or answered 5xx/429) is noted in the observation
+and makes the run partial, so no finding resolves on missing data.
+
+`intel.internetdb` runs on owned `ip` assets that are public addresses
+(private, loopback, link-local, CGNAT, documentation and other reserved ranges
+are skipped) and asks Shodan's key-free
+[InternetDB](https://internetdb.shodan.io) what internet scanners know about
+each one, through [`intel`](#third-party-metadata-intel): one request per IP.
+**The data is a snapshot that Shodan refreshes about weekly**, so it lags behind
+changes: a port closed or a CVE patched days ago can still be listed. Findings:
+
+| Key | Severity | Raised when |
+|---|---|---|
+| `cve:<id>` | medium, raised by exploit intelligence | InternetDB lists the CVE for the IP. The finding goes through the same KEV/EPSS enrichment as `cve.nuclei` findings (a CISA KEV listing raises it to `vulnintel.kev_floor`, critical by default, and tags it `kev`; an EPSS at or above `vulnintel.epss_high`, `0.7` by default, makes it high; see [Exploit intelligence](#exploit-intelligence-cisa-kev-and-first-epss)). Evidence: the CVE, CPEs, ports, hostnames and tags. InternetDB infers CVEs from banners and CPEs, so a match can be a **false positive**: confirm the running version, then patch or restrict the port, or mark it false positive. |
+| `unexpected-port:<n>` | medium | scanners saw port `n` open and the latest `net.ports` observation of the same IP does not list it. Close it, add it to `checks.net.ports.ports` so it is scanned, or to `expected_ports`. |
+| `tag:compromised`, `tag:malware`, `tag:c2`, `tag:botnet` | critical | InternetDB flags the IP with that tag. |
+
+Other tags (`honeypot`, `cdn`, `self-signed`, ...) and the hostnames are
+evidence only. A 404 means the scanners know nothing about the IP and is a
+clean result. `unexpected-port` needs a `net.ports` observation of the IP: until
+there is one (the active tier is off, or the IP has not been scanned yet) no
+port finding is raised and the run is partial (`ports_baseline: missing`). The
+observation records only the lookup state (`internetdb: ok` or `not_found`),
+never the scanners' lists, so Shodan's refreshes do not raise baseline drift
+findings.
+
+For all checks that use `intel`: a lookup that fails, is rate limited, blocked
+or unsupported, an unusable answer, `intel.enabled: false` and a missing intel
+client never raise a finding: the observation says `skipped` or `unavailable`
+and the run is partial.
 
 Order of evaluation: the scope guard, then the tier's `enabled` (global, then
 asset-group overrides), then the per-check values. A per-check override can
@@ -608,7 +675,8 @@ then makes no request to cisa.gov or api.first.org and never enriches.
 
 Some checks ask public metadata services about *your own* domains and IPs:
 `domain.expiry` asks the registry's RDAP service when a zone apex expires and
-who its registrar is. That is not a probe of your assets, so it does not go
+who its registrar is; `intel.internetdb` asks Shodan's InternetDB what internet
+scanners know about your public IPs. That is not a probe of your assets, so it does not go
 through the scope guard; it goes through a separate, narrower client instead:
 
 ```yaml
@@ -623,7 +691,7 @@ intel:
 
 | Key | Default | Description |
 |---|---|---|
-| `intel.enabled` | `true` | `false` turns every lookup into "skipped": the consuming check records an observation (`rdap: skipped`), marks the run partial and raises nothing. |
+| `intel.enabled` | `true` | `false` turns every lookup into "skipped": the consuming check records an observation (`rdap: skipped`, `internetdb: skipped`), marks the run partial and raises nothing. |
 | `intel.user_agent_contact` | | An e-mail address or URL appended to `User-Agent: deckard/<version> (+https://github.com/chainseer-xyz/deckard; <contact>)`. Printable ASCII, at most 128 characters, no `(`, `)`, `;`, `\` or quotes. |
 | `intel.services.<name>.enabled` | `true` | Switch one service off (`rdap`, `internetdb`, `wayback`). |
 | `intel.services.<name>.rate_per_second` | rdap `2`, internetdb `1`, wayback `1` | Token-bucket rate per service (shared by the whole process). `(0, 50]`. |

@@ -677,3 +677,18 @@ func TestRetryAfterParsing(t *testing.T) {
 		}
 	}
 }
+
+func TestIsPublicAddr(t *testing.T) {
+	for a, want := range map[string]bool{
+		"1.2.3.4": true, "93.184.216.34": true, "2606:4700:4700::1111": true, "::ffff:1.2.3.4": true,
+		"10.0.0.1": false, "127.0.0.1": false, "169.254.169.254": false, "100.64.0.1": false, "192.0.2.1": false,
+		"::1": false, "fe80::1": false, "fd00::1": false, "2001:db8::1": false, "224.0.0.1": false, "0.0.0.0": false,
+	} {
+		if got := IsPublicAddr(netip.MustParseAddr(a)); got != want {
+			t.Errorf("IsPublicAddr(%s) = %v, want %v", a, got, want)
+		}
+	}
+	if IsPublicAddr(netip.Addr{}) {
+		t.Error("the zero address is not public")
+	}
+}

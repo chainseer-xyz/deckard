@@ -12,7 +12,7 @@ func TestRegisterAllPassive(t *testing.T) {
 	if err := Register(r, map[string]map[string]any{"tls.cert": {"warn_days": 30}}); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"dns.dangling", "dns.hygiene", "dns.takeover", "domain.expiry", "domain.lookalike", "http.headers", "http.probe", "origin.correlation", "origin.exposed", "tls.cert"}
+	want := []string{"dns.dangling", "dns.hygiene", "dns.takeover", "domain.expiry", "domain.lookalike", "http.headers", "http.probe", "intel.internetdb", "mail.policy", "origin.correlation", "origin.exposed", "tls.cert"}
 	all := r.All()
 	if len(all) != len(want) {
 		t.Fatalf("got %d checks", len(all))

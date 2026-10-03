@@ -134,7 +134,7 @@ there is no setting that adds one:
 | --- | --- | --- |
 | `data.iana.org` | `rdap`: the RDAP bootstrap file (`/rdap/dns.json`, once per 24h) | `domain.expiry` |
 | the RDAP server of each TLD you own (from the bootstrap file, for example `rdap.verisign.com` for `.com` and `.net`, `rdap.publicinterestregistry.org` for `.org`) | `rdap`: one `GET /domain/<apex>` per owned zone apex, at most every 6h (cache) | `domain.expiry` |
-| `internetdb.shodan.io` | `internetdb` | reserved for upcoming checks; no traffic yet |
+| `internetdb.shodan.io` | `internetdb`: one `GET /<ip>` per owned public IP, at most every 6h (cache) | `intel.internetdb` |
 | `web.archive.org` | `wayback` | reserved for upcoming checks; no traffic yet |
 
 To find the RDAP host for a TLD, look it up in
@@ -150,8 +150,11 @@ should stay at zero (example alert `DeckardIntelRequestBlocked` in
 1. Disable the updaters: `nuclei.update.enabled: false`, `refdata.enabled: false`,
    `vulnintel.enabled: false` (check configuration.md for the exact keys), and
    turn discovery expansion off (no `crt.sh`). Set `intel.enabled: false` to stop
-   RDAP and other metadata lookups: `domain.expiry` then records `rdap: skipped`
-   and raises nothing.
+   RDAP, InternetDB and other metadata lookups: `domain.expiry` then records
+   `rdap: skipped` and `intel.internetdb` records `internetdb: skipped`; neither
+   raises anything. `mail.policy` fetches each mail zone's MTA-STS policy from
+   `mta-sts.<zone>` through the scope-guarded client, so it needs no extra egress
+   rule beyond your own zones.
 2. Provide the data yourself: mount a templates directory at
    `nuclei.templates_dir`, and mount reference-data / vulnintel snapshots at the
    configured paths. Refresh them on your own schedule (for example a CronJob in
