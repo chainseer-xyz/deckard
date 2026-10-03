@@ -42,7 +42,10 @@ func edgeKeys(e *env, id int64) []string {
 // relations (review item C3).
 func testReplaceDerived(t *testing.T, f Factory) {
 	const check = "net.ports"
-	setup := func() (*env, *model.Asset) {
+	// setup takes the subtest's t: skipping the parent from inside a subtest (which a
+	// missing database container does) is reported as a failure, not a skip.
+	setup := func(t *testing.T) (*env, *model.Asset) {
+		t.Helper()
 		e := newEnv(t, f)
 		return e, e.seedHost("h.x.io", "cf", at(0))
 	}
@@ -50,7 +53,7 @@ func testReplaceDerived(t *testing.T, f Factory) {
 	twoRels := []model.RelationInput{exposes("h.x.io", "h.x.io:80"), exposes("h.x.io", "h.x.io:443")}
 
 	t.Run("unobserved children are removed with their relations, then revive", func(t *testing.T) {
-		e, h := setup()
+		e, h := setup(t)
 		d := e.replace(h.ID, check, two, twoRels, at(1))
 		if len(d.Added) != 2 || len(d.Removed) != 0 {
 			t.Fatalf("first diff = %+v", d)
@@ -92,7 +95,7 @@ func testReplaceDerived(t *testing.T, f Factory) {
 	})
 
 	t.Run("removal resolves findings of the removed child", func(t *testing.T) {
-		e, h := setup()
+		e, h := setup(t)
 		e.replace(h.ID, check, two, twoRels, at(1))
 		c := e.asset(model.KindService, "h.x.io:80")
 		e.reconcile(c.ID, "tls.cert", []model.FindingInput{fi("tls.cert", "k", model.SeverityHigh)}, 1, at(2))
@@ -130,7 +133,7 @@ func testReplaceDerived(t *testing.T, f Factory) {
 	})
 
 	t.Run("a source-claimed child is never garbage-collected", func(t *testing.T) {
-		e, h := setup()
+		e, h := setup(t)
 		e.replace(h.ID, check, two, twoRels, at(1))
 		e.snapshot("k8s", []store.AssetUpsert{au(model.KindService, "h.x.io:80", "k8s", model.ScopeOwned, nil)}, nil, at(2))
 		if d := e.replace(h.ID, check, two[1:], twoRels[1:], at(3)); len(d.Removed) != 0 {
@@ -142,7 +145,7 @@ func testReplaceDerived(t *testing.T, f Factory) {
 	})
 
 	t.Run("source-removed assets are ignored and counted", func(t *testing.T) {
-		e, h := setup()
+		e, h := setup(t)
 		e.snapshot("k8s", []store.AssetUpsert{au(model.KindService, "h.x.io:80", "k8s", model.ScopeOwned, nil)}, nil, at(1))
 		e.snapshot("k8s", nil, nil, at(2))
 		d := e.replace(h.ID, check, two[:1], nil, at(3))
