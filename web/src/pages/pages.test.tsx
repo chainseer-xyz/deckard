@@ -408,19 +408,129 @@ describe('Inventory', () => {
 });
 
 describe('Asset detail', () => {
-  it('shows relations, observations, baselines, findings and triggers a rescan', async () => {
+  const panel = async (name: string) => within(await screen.findByRole('region', { name }));
+
+  it('leads with a properties panel: kind, scope meaning, source, zone, times, status, findings by severity', async () => {
+    renderRoute(<AssetDetail />, '/assets/:id', '/assets/2');
+    expect(await screen.findByRole('heading', { name: 'www.example.com' })).toBeInTheDocument();
+    const props = await panel('Properties');
+    expect(props.getByText('hostname')).toBeInTheDocument();
+    expect(props.getByText('owned')).toBeInTheDocument();
+    expect(props.getByText(/passive, active and intrusive checks/)).toBeInTheDocument();
+    expect(props.getByText('cloudflare')).toBeInTheDocument();
+    expect(props.getByRole('link', { name: 'example.com' })).toHaveAttribute('href', '/inventory?zone=example.com');
+    expect(props.getByText(/30d ago/)).toBeInTheDocument(); // first seen
+    expect(props.getByText('Live')).toBeInTheDocument();
+    expect(props.getByLabelText('1 open critical findings')).toHaveAttribute('href', '/findings?asset_id=2&severity=critical');
+    expect(props.getByLabelText('1 open medium findings')).toBeInTheDocument();
+    expect(props.getByLabelText('1 open low findings')).toBeInTheDocument();
+    expect(props.queryByLabelText(/open high findings/)).not.toBeInTheDocument();
+  });
+
+  it('shows the latest observation time per check and flags stale ones', async () => {
+    renderRoute(<AssetDetail />, '/assets/:id', '/assets/2');
+    const props = await panel('Properties');
+    const list = (await props.findByText('http.headers', { selector: 'span.font-mono' })).closest('ul') as HTMLElement;
+    const row = (check: string) => within(list).getByText(check).closest('li') as HTMLElement;
+    expect(within(row('http.headers')).getByText('7m ago')).toBeInTheDocument();
+    expect(within(row('http.headers')).queryByText(/stale/)).not.toBeInTheDocument();
+    expect(within(row('net.ports')).getByText(/2d ago/)).toBeInTheDocument();
+    expect(within(row('net.ports')).getByText(/stale/)).toBeInTheDocument(); // 40h > 36h
+  });
+
+  it('shows a readable DNS path for a healthy chain, with the addresses it resolves to', async () => {
+    renderRoute(<AssetDetail />, '/assets/:id', '/assets/2');
+    const dns = await panel('DNS chain');
+    const hops = within(dns.getByRole('list', { name: 'Chain' })).getAllByRole('listitem');
+    expect(hops.map((h) => h.textContent)).toEqual(['www.example.com', 'www.example.com.cdn.cloudflare.netresolves']);
+    expect(dns.getByText('203.0.113.10')).toBeInTheDocument();
+    expect(dns.getByText('The chain resolves.')).toBeInTheDocument();
+  });
+
+  it('highlights an NXDOMAIN chain end in red, with text', async () => {
+    renderRoute(<AssetDetail />, '/assets/:id', '/assets/11');
+    const dns = await panel('DNS chain');
+    const hops = within(dns.getByRole('list', { name: 'Chain' })).getAllByRole('listitem');
+    expect(hops.map((h) => h.textContent?.replace(/NXDOMAIN$/, ' NXDOMAIN'))).toEqual([
+      'promo.example.com',
+      'promo-site.trafficmanager.net',
+      'promo-site.azurewebsites.net NXDOMAIN',
+    ]);
+    const last = within(hops[2] as HTMLElement).getByText('promo-site.azurewebsites.net', { exact: false }).closest('span') as HTMLElement;
+    expect(last.className).toContain('text-bad');
+    expect(dns.getByText(/does not exist \(NXDOMAIN\)/)).toBeInTheDocument();
+    expect(dns.queryByText(/Resolves to/)).not.toBeInTheDocument();
+  });
+
+  it('marks a removed asset', async () => {
+    renderRoute(<AssetDetail />, '/assets/:id', '/assets/4');
+    const props = await panel('Properties');
+    expect(props.getByText('Removed')).toBeInTheDocument();
+    expect(props.queryByText('Live')).not.toBeInTheDocument();
+  });
+
+  it('shows observations readably and baselines with changed-since markers', async () => {
+    renderRoute(<AssetDetail />, '/assets/:id', '/assets/2');
+    const obs = await panel('Latest observations');
+    expect((await obs.findAllByText(/1 differ from baseline/)).length).toBe(2); // dns.baseline + net.ports
+    await userEvent.click(obs.getByText('dns.baseline'));
+    const table = obs.getByRole('table', { name: 'Observation dns.baseline' });
+    expect(within(table).getByText('203.0.113.77')).toBeInTheDocument();
+    expect(within(table).getByText('changed')).toBeInTheDocument();
+    expect(table.textContent).not.toContain('{');
+
+    const base = await panel('Baselines');
+    expect(base.getByText('stable')).toBeInTheDocument();
+    expect(base.getByText('learning (2)')).toBeInTheDocument();
+    expect(base.getAllByText(/1 changed since 2d ago/).length).toBe(2);
+    const dns = base.getByRole('table', { name: 'Baseline dns.baseline' });
+    expect(within(dns).getAllByText('203.0.113.10')).toHaveLength(2); // baseline and latest
+    expect(within(dns).getByText('changed')).toBeInTheDocument();
+    expect(within(dns).getByText('203.0.113.77')).toBeInTheDocument();
+  });
+
+  it('lists open findings, opens one in the drawer, and triggers a rescan', async () => {
     let rescanned = false;
     server.use(http.post('*/api/v1/assets/2/rescan', () => { rescanned = true; return HttpResponse.json({}, { status: 202 }); }));
     renderRoute(<AssetDetail />, '/assets/:id', '/assets/2');
-    expect(await screen.findByRole('heading', { name: 'www.example.com' })).toBeInTheDocument();
-    expect(await screen.findByText('203.0.113.10')).toBeInTheDocument(); // relation
-    expect(screen.getByText('http.headers', { selector: 'span' })).toBeInTheDocument();
-    expect(screen.getByText('stable')).toBeInTheDocument();
-    expect(screen.getByText('learning (2)')).toBeInTheDocument();
-    expect(screen.getByText('Missing Strict-Transport-Security header')).toBeInTheDocument();
+    expect(await screen.findByText('Missing Strict-Transport-Security header')).toBeInTheDocument();
+    expect(await screen.findByText('203.0.113.10', { selector: 'a' })).toBeInTheDocument(); // relation, from the wire-shape edge
+    await userEvent.click(screen.getByRole('button', { name: 'Missing Strict-Transport-Security header' }));
+    const dlg = await screen.findByRole('dialog', { name: 'Finding details' });
+    expect(screen.getByTestId('location')).toHaveTextContent('/assets/2?finding=6');
+    expect(await within(dlg).findByRole('heading', { name: 'Missing Strict-Transport-Security header' })).toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     await userEvent.click(screen.getByRole('button', { name: /Rescan now/ }));
     await waitFor(() => expect(rescanned).toBe(true));
     expect(await screen.findByText('Rescan queued.')).toBeInTheDocument();
+  });
+
+  it('says what to do when nothing is known yet', async () => {
+    server.use(
+      http.get('*/api/v1/assets/16', () =>
+        HttpResponse.json({
+          asset: { id: 16, kind: 'url', key: 'https://staging.example.com/', source: 'kubernetes', scope: 'owned', first_seen: new Date().toISOString(), last_seen: new Date().toISOString() },
+          edges: [],
+          observations: [],
+          baselines: [],
+          findings: [],
+        }),
+      ),
+    );
+    renderRoute(<AssetDetail />, '/assets/:id', '/assets/16');
+    expect(await screen.findByText('No open findings on this asset.')).toBeInTheDocument();
+    expect(screen.getByText(/Never scanned/)).toBeInTheDocument();
+    expect(screen.getByText(/No baselines learned yet/)).toBeInTheDocument();
+    expect(screen.getByText('No relations.')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'DNS chain' })).not.toBeInTheDocument();
+  });
+
+  it('explains what shared and external scope mean for probing', async () => {
+    renderRoute(<AssetDetail />, '/assets/:id', '/assets/6');
+    const props = await panel('Properties');
+    expect(props.getByText('external')).toBeInTheDocument();
+    expect(props.getByText(/never probed by IP or service port/)).toBeInTheDocument();
   });
 
   it('shows an error for unknown assets', async () => {

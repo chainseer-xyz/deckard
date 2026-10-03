@@ -73,7 +73,8 @@ export function ChainPath({ hops, endLabel, endBad }: { hops: string[]; endLabel
   );
 }
 
-function Value({ row, now }: { row: EvidenceRow; now?: number }) {
+/** One evidence value, rendered by its kind. */
+export function EvidenceValue({ row, now }: { row: Pick<EvidenceRow, 'kind' | 'label' | 'value'>; now?: number }) {
   const v = row.value;
   switch (row.kind) {
     case 'bool':
@@ -174,7 +175,7 @@ export function EvidenceTable({
                 {r.label}
               </th>
               <td className="py-1.5 align-top">
-                <Value row={r} now={now} />
+                <EvidenceValue row={r} now={now} />
                 {changes?.get(r.key) && <ChangeMark change={changes.get(r.key) as DataChange} />}
               </td>
             </tr>

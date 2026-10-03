@@ -262,7 +262,7 @@ const OBS: Record<number, Observation[]> = {
     { asset_id: 2, check: 'http.headers', data: { status: 200, headers: { server: 'nginx', hsts: false } }, observed_at: T(7) },
     { asset_id: 2, check: 'tls.cert', data: { port: 443, not_after: ago(-60 * 24 * 52), days_remaining: 52 }, observed_at: T(12) },
     { asset_id: 2, check: 'dns.baseline', data: { a: ['203.0.113.10', '203.0.113.77'] }, observed_at: T(6) },
-    { asset_id: 2, check: 'net.ports', data: { ports: [22, 443, 8080] }, observed_at: T(60 * 30) },
+    { asset_id: 2, check: 'net.ports', data: { ports: [22, 443, 8080] }, observed_at: T(60 * 40) },
     {
       asset_id: 2,
       check: 'dns.dangling',

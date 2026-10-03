@@ -1,22 +1,37 @@
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Network, RefreshCw } from 'lucide-react';
 import { useAsset, useMe, useRescan } from '../api/hooks';
-import { Card, Empty, ErrorBox, Field, JsonViewer, KindBadge, Loading, PageHeader, ScopeBadge } from '../components/ui';
+import { AssetProperties } from '../components/AssetProperties';
+import { DnsChainView } from '../components/DnsChainView';
+import { FindingDrawer } from '../components/FindingDrawer';
 import { FindingsTable } from '../components/FindingsTable';
-import { absTime, relTime } from '../lib/format';
+import { BaselinesCard, ObservationsCard } from '../components/ObservationsPanel';
+import { Card, Empty, ErrorBox, KindBadge, Loading, PageHeader, ScopeBadge } from '../components/ui';
+import { buildDnsChain } from '../lib/dnsChain';
+import { sortFindings } from '../lib/findingsFilter';
 
 export default function AssetDetail() {
   const id = Number(useParams().id);
   const q = useAsset(id);
   const me = useMe();
   const rescan = useRescan();
-  const navigate = useNavigate();
+  const [sp, setSp] = useSearchParams();
+  const drawerId = Number(sp.get('finding')) || undefined;
 
   if (q.isLoading) return <Loading />;
   if (q.isError) return <ErrorBox error={q.error} onRetry={() => void q.refetch()} />;
   if (!q.data) return null;
-  const { asset, edges, observations, baselines, findings } = q.data;
+  const d = q.data;
+  const { asset, edges, observations, baselines, findings } = d;
   const canWrite = me.data?.can_write ?? false;
+  const chain = buildDnsChain(d);
+  const sorted = sortFindings(findings, 'severity', 'desc');
+  const setDrawer = (fid?: number) => {
+    const n = new URLSearchParams(sp);
+    if (fid) n.set('finding', String(fid));
+    else n.delete('finding');
+    setSp(n, { replace: !fid });
+  };
 
   return (
     <>
@@ -36,32 +51,28 @@ export default function AssetDetail() {
           <RefreshCw size={12} aria-hidden="true" /> Rescan now
         </button>
       </PageHeader>
-      <div role="status" aria-live="polite" className="mb-2 text-sm">
+      <div role="status" aria-live="polite" className="mb-2 min-h-5 text-sm">
         {rescan.isSuccess && <span className="text-ok">Rescan queued.</span>}
         {rescan.isError && <span role="alert" className="text-bad">Rescan failed: {(rescan.error as Error).message}</span>}
       </div>
 
       <div className="space-y-4">
-        <Card title="Overview">
-          <dl className="grid grid-cols-2 gap-3 p-3 md:grid-cols-4">
-            <Field label="Kind"><KindBadge kind={asset.kind} /></Field>
-            <Field label="Scope"><ScopeBadge scope={asset.scope} /></Field>
-            <Field label="Source">{asset.source}</Field>
-            <Field label="Zone">{asset.zone ?? '-'}</Field>
-            <Field label="First seen">{absTime(asset.first_seen)}</Field>
-            <Field label="Last seen">{relTime(asset.last_seen)}</Field>
-            <Field label="Status">{asset.removed_at ? `Removed ${relTime(asset.removed_at)}` : 'Active'}</Field>
-          </dl>
-          {asset.attrs && Object.keys(asset.attrs).length > 0 && (
-            <div className="border-t border-line p-3">
-              <JsonViewer value={asset.attrs} label="Asset attributes" />
-            </div>
+        <AssetProperties d={d} />
+
+        {chain && <DnsChainView chain={chain} />}
+
+        <Card title={`Open findings (${findings.length})`}>
+          {findings.length === 0 ? (
+            <Empty>No open findings on this asset.</Empty>
+          ) : (
+            <FindingsTable items={sorted} compact selectedId={drawerId} onOpen={(f) => setDrawer(f.id)} />
           )}
         </Card>
 
-        <Card title={`Open findings (${findings.length})`}>
-          <FindingsTable items={findings} compact onOpen={(f) => navigate(`/findings?finding=${f.id}`)} />
-        </Card>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <ObservationsCard observations={observations} baselines={baselines} />
+          <BaselinesCard observations={observations} baselines={baselines} />
+        </div>
 
         <Card title={`Relations (${edges.length})`}>
           {edges.length === 0 ? (
@@ -81,6 +92,7 @@ export default function AssetDetail() {
                     <td className="td font-mono text-xs">
                       <KindBadge kind={e.other.kind} />{' '}
                       <Link className="text-accent hover:underline" to={`/assets/${e.other.id}`}>{e.other.key}</Link>
+                      {e.other.removed_at && <span className="ml-2 rounded-sm border border-line px-1 text-[10px] uppercase">removed</span>}
                     </td>
                     <td className="td"><ScopeBadge scope={e.other.scope} /></td>
                   </tr>
@@ -89,36 +101,9 @@ export default function AssetDetail() {
             </table>
           )}
         </Card>
-
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Card title="Latest observations">
-            {observations.length === 0 && <Empty>No observations yet.</Empty>}
-            {observations.map((o) => (
-              <details key={o.check} className="border-b border-line px-3 py-2 last:border-b-0">
-                <summary className="cursor-pointer text-sm">
-                  <span className="font-mono text-xs font-semibold">{o.check}</span>{' '}
-                  <span className="text-xs text-muted" title={absTime(o.observed_at)}>{relTime(o.observed_at)}</span>
-                </summary>
-                <div className="mt-2"><JsonViewer value={o.data} label={`Observation ${o.check}`} /></div>
-              </details>
-            ))}
-          </Card>
-          <Card title="Baselines">
-            {baselines.length === 0 && <Empty>No baselines learned yet.</Empty>}
-            {baselines.map((b) => (
-              <details key={b.check} className="border-b border-line px-3 py-2 last:border-b-0">
-                <summary className="cursor-pointer text-sm">
-                  <span className="font-mono text-xs font-semibold">{b.check}</span>{' '}
-                  <span className={`text-xs ${b.stable ? 'text-ok' : 'text-warn'}`}>
-                    {b.stable ? 'stable' : `learning (${b.consistent})`}
-                  </span>
-                </summary>
-                <div className="mt-2"><JsonViewer value={b.data} label={`Baseline ${b.check}`} /></div>
-              </details>
-            ))}
-          </Card>
-        </div>
       </div>
+
+      {drawerId && <FindingDrawer id={drawerId} seed={findings.find((f) => f.id === drawerId)} onClose={() => setDrawer(undefined)} />}
     </>
   );
 }
