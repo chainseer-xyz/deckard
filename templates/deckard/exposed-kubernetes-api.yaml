@@ -1,0 +1,18 @@
+id: deckard-exposed-kubernetes-api
+info:
+  name: Exposed Kubernetes API
+  author: deckard
+  severity: critical
+  tags: [deckard, exposure, kubernetes]
+  description: A Kubernetes API discovery endpoint responds on the public host without authentication.
+  remediation: Keep the Kubernetes API private and enforce authentication and authorization at the API boundary.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/version"
+      - "{{BaseURL}}/api"
+    matchers:
+      - type: word
+        part: body
+        words: ["gitVersion", "major", "minor"]
+        condition: and

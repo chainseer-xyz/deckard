@@ -1,0 +1,16 @@
+id: deckard-spring-actuator-heapdump
+info:
+  name: Exposed Spring Boot actuator heap dump
+  author: deckard
+  severity: high
+  tags: [deckard, exposure, spring, secrets]
+  description: A Spring Boot actuator heap dump endpoint is reachable without authentication.
+  remediation: Disable heapdump in production or protect actuator endpoints with strong authentication.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/actuator/heapdump"
+    matchers:
+      - type: word
+        part: header
+        words: ["application/octet-stream"]

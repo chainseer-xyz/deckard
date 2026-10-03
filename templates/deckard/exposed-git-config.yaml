@@ -1,0 +1,17 @@
+id: deckard-exposed-git-config
+info:
+  name: Exposed Git configuration
+  author: deckard
+  severity: high
+  tags: [deckard, exposure, source-control]
+  description: A Git configuration file is publicly readable and may disclose repository remotes or credentials.
+  remediation: Deny web access to .git metadata and remove credentials from repository configuration.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/.git/config"
+    matchers:
+      - type: word
+        part: body
+        words: ["[core]", "repositoryformatversion"]
+        condition: and

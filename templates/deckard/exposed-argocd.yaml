@@ -1,0 +1,18 @@
+id: deckard-exposed-argocd
+info:
+  name: Exposed Argo CD API
+  author: deckard
+  severity: high
+  tags: [deckard, exposure, kubernetes, gitops]
+  description: Argo CD API metadata is accessible without authentication.
+  remediation: Require SSO or token authentication and restrict the Argo CD endpoint to operators.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/v1/version"
+      - "{{BaseURL}}/api/v1/settings"
+    matchers:
+      - type: word
+        part: body
+        words: ["argocd", "Version"]
+        condition: and

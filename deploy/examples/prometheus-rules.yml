@@ -158,6 +158,15 @@ groups:
           summary: "deckard has never installed nuclei templates"
           description: "cve.nuclei cannot run until the first template update succeeds."
 
+      - alert: DeckardNucleiCheckStale
+        expr: absent(deckard_nuclei_last_clean_run_timestamp) or time() - deckard_nuclei_last_clean_run_timestamp > 6 * 3600
+        for: 30m
+        labels:
+          severity: high
+        annotations:
+          summary: "deckard cve.nuclei has not completed a clean run for more than 6 hours"
+          description: "No successful nuclei process has completed recently. Check the active queue, nuclei timeout and memory metrics, and the pod logs."
+
   - name: deckard-intel
     rules:
       # The metadata client refused a request before connecting: a host off the

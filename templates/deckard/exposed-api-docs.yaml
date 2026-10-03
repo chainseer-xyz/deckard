@@ -1,0 +1,19 @@
+id: deckard-exposed-api-docs
+info:
+  name: Exposed API documentation
+  author: deckard
+  severity: low
+  tags: [deckard, exposure, api, swagger]
+  description: Swagger or OpenAPI documentation is publicly readable.
+  remediation: Restrict production API documentation or require authentication before serving it.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/swagger-ui.html"
+      - "{{BaseURL}}/swagger/index.html"
+      - "{{BaseURL}}/v3/api-docs"
+      - "{{BaseURL}}/openapi.json"
+    matchers:
+      - type: word
+        part: body
+        words: ["swagger", "openapi", "paths"]

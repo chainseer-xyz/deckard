@@ -41,6 +41,29 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
  && go mod tidy -e \
  && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w" -o /out/nuclei ./cmd/nuclei
 
+# The full image carries a known-good cold-start snapshot. The installer is
+# still used so the archive layout and metadata are exactly what the pinned
+# engine expects; the version assertion makes a template release change an
+# explicit Dockerfile update instead of silently changing an image layer.
+FROM --platform=$BUILDPLATFORM alpine:3.24 AS nuclei-templates
+ARG NUCLEI_TEMPLATES_VERSION=v10.4.9
+COPY --from=nuclei /out/nuclei /usr/local/bin/nuclei
+RUN mkdir -p /out/home /out/templates \
+ && HOME=/out/home XDG_CONFIG_HOME=/out/home/config NUCLEI_CONFIG_DIR=/out/home/config/nuclei \
+    /usr/local/bin/nuclei -update-templates -update-template-dir /out/templates -no-color \
+ && version=$(sed -n 's/.*"nuclei-templates-version":"\([^"]*\)".*/\1/p' /out/home/config/nuclei/.templates-config.json) \
+ && test "$version" = "$NUCLEI_TEMPLATES_VERSION" \
+ && test "$(find /out/templates -type f \( -name '*.yaml' -o -name '*.yml' \) | wc -l)" -ge 1000 \
+ && test "$(find /out/templates/http -type f \( -name '*.yaml' -o -name '*.yml' \) | wc -l)" -ge 100 \
+ && test "$(find /out/templates -type f | wc -l)" -le 200000 \
+ && test "$(du -sk /out/templates | awk '{print $1}')" -le 524288 \
+ && test -z "$(find /out/templates -type l -o -type c -o -type b -o -type p -o -type s)"
+COPY templates/deckard /out/templates/deckard
+RUN HOME=/out/home XDG_CONFIG_HOME=/out/home/config NUCLEI_CONFIG_DIR=/out/home/config/nuclei \
+    /usr/local/bin/nuclei -validate -duc \
+      -t /out/templates/http -t /out/templates/ssl -t /out/templates/dns -t /out/templates/network -t /out/templates/deckard \
+ && test "$(find /out/templates -type f \( -name '*.yaml' -o -name '*.yml' \) | wc -l)" -le 200000
+
 # An empty state directory for the nuclei template updater. distroless has no
 # shell, so the directory is prepared here and copied with its ownership.
 FROM --platform=$BUILDPLATFORM alpine:3.24 AS state
@@ -64,6 +87,9 @@ CMD ["serve"]
 # stays read-only. HOME points at the always-writable /tmp tmpfs for any nuclei
 # run that does not use the updater's own per-run directories.
 FROM slim AS full
+ARG NUCLEI_TEMPLATES_VERSION=v10.4.9
 COPY --from=nuclei /out/nuclei /usr/local/bin/nuclei
+COPY --from=nuclei-templates --chown=65532:65532 /out/templates /usr/local/share/deckard/nuclei-templates
 COPY --from=state --chown=65532:65532 /state/var/lib/deckard /var/lib/deckard
 ENV HOME=/tmp
+LABEL org.opencontainers.image.nuclei.templates="${NUCLEI_TEMPLATES_VERSION}"

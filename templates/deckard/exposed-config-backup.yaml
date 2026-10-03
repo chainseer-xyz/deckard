@@ -1,0 +1,19 @@
+id: deckard-exposed-config-backup
+info:
+  name: Exposed configuration backup
+  author: deckard
+  severity: high
+  tags: [deckard, exposure, backup]
+  description: A configuration backup or editor temporary file is publicly readable.
+  remediation: Remove backup artifacts from the web root and deny access to temporary files.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/config.php.bak"
+      - "{{BaseURL}}/application.yml~"
+      - "{{BaseURL}}/settings.json.bak"
+    matchers:
+      - type: regex
+        part: body
+        regex:
+          - "(?i)(password|secret|client_secret|access_key)\\s*[:=]"

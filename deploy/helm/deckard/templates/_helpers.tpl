@@ -60,6 +60,9 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if and .Values.worker.enabled (has "worker" .Values.roles) }}
 {{- fail "worker.enabled=true: remove \"worker\" from roles so scanning runs only in the worker Deployment" }}
 {{- end }}
+{{- if and .Values.nuclei.customTemplates.configMap .Values.nuclei.customTemplates.existingClaim }}
+{{- fail "nuclei.customTemplates.configMap and existingClaim are mutually exclusive" }}
+{{- end }}
 {{- end }}
 
 {{/* True unless config.nuclei.update.enabled is explicitly false (air-gapped installs). */}}
@@ -158,6 +161,9 @@ spec:
         {{- if $nucleiUpdate }}
         - { name: nuclei-templates, mountPath: {{ include "deckard.nucleiUpdateDir" $root | quote }} }
         {{- end }}
+        {{- if or $root.Values.nuclei.customTemplates.configMap $root.Values.nuclei.customTemplates.existingClaim }}
+        - { name: custom-templates, mountPath: "/var/lib/deckard/custom-templates", readOnly: true }
+        {{- end }}
         {{- with $root.Values.extraVolumeMounts }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -185,6 +191,14 @@ spec:
       emptyDir:
         sizeLimit: {{ $root.Values.nuclei.emptyDirSizeLimit }}
     {{- end }}
+    {{- end }}
+    {{- if $root.Values.nuclei.customTemplates.configMap }}
+    - name: custom-templates
+      configMap: { name: {{ $root.Values.nuclei.customTemplates.configMap }} }
+    {{- else if $root.Values.nuclei.customTemplates.existingClaim }}
+    - name: custom-templates
+      persistentVolumeClaim:
+        claimName: {{ $root.Values.nuclei.customTemplates.existingClaim }}
     {{- end }}
     {{- with $root.Values.extraVolumes }}
     {{- toYaml . | nindent 4 }}

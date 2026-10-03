@@ -6,7 +6,15 @@ metadata:
     {{- include "deckard.labels" . | nindent 4 }}
 data:
   deckard.yaml: |
-    {{- toYaml .Values.config | nindent 4 }}
+    {{- $config := deepCopy .Values.config }}
+    {{- $custom := .Values.nuclei.customTemplates }}
+    {{- if or $custom.configMap $custom.existingClaim }}
+    {{- $nuclei := default (dict) (get $config "nuclei") }}
+    {{- $dirs := default (list) (get $nuclei "extra_templates_dirs") }}
+    {{- $_ := set $nuclei "extra_templates_dirs" (append $dirs "/var/lib/deckard/custom-templates") }}
+    {{- $_ := set $config "nuclei" $nuclei }}
+    {{- end }}
+    {{- toYaml $config | nindent 4 }}
 {{- if .Values.secretEnv }}
 ---
 apiVersion: v1

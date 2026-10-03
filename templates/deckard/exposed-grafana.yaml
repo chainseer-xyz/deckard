@@ -1,0 +1,17 @@
+id: deckard-exposed-grafana
+info:
+  name: Exposed Grafana service
+  author: deckard
+  severity: medium
+  tags: [deckard, exposure, monitoring]
+  description: A Grafana login or API endpoint is exposed on the public surface.
+  remediation: Put Grafana behind authentication and an access-controlled network boundary.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/health"
+      - "{{BaseURL}}/login"
+    matchers:
+      - type: word
+        part: body
+        words: ["Grafana", "grafana-app"]

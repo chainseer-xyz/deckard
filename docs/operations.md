@@ -17,7 +17,8 @@ under `/var/lib/deckard` (see [Writable state](#writable-state)).
 ### 1. nuclei templates (`nuclei.update.*`)
 
 The `cve.nuclei` check runs templates from a directory (by default the updater's
-`current` release under `nuclei.update.dir`; `nuclei.templates_dir` overrides it
+valid `current` release under `nuclei.update.dir`, falling back to the baked image snapshot;
+`nuclei.templates_dir` overrides it
 and turns the updater off). A background updater refreshes the community corpus **every 6 hours by
 default**. When a refresh brings in new templates, deckard schedules a scan of
 the affected assets with just those templates ("new-template scans"), so a
@@ -30,9 +31,12 @@ rather than at the next full cadence.
   you restrict egress (see the egress table).
 - A refresh that fails or looks wrong leaves the previous templates in place;
   scanning continues with what it has.
+- A pod restart before the first refresh still scans with the baked official snapshot. Operator packs in
+  `nuclei.extra_templates_dirs` are validated independently; a bad pack is skipped and logged.
 - Staleness metric: `deckard_nuclei_templates_age_seconds`, compared with
   `deckard_nuclei_templates_max_age_warn_seconds` (`nuclei.update.max_age_warn`,
-  default 72h) by the `DeckardNucleiTemplatesStale` rule.
+  default 72h) by the `DeckardNucleiTemplatesStale` rule. The `DeckardNucleiCheckStale` rule fires when no
+  clean nuclei run has completed for six hours; tune it if the active cadence is intentionally slower.
 
 ### 2. Reference data (`refdata.*`)
 

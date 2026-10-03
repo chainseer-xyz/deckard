@@ -1,0 +1,17 @@
+id: deckard-graphql-introspection
+info:
+  name: Public GraphQL introspection
+  author: deckard
+  severity: medium
+  tags: [deckard, exposure, graphql, api]
+  description: A GraphQL endpoint answers a read-only schema introspection query without authentication.
+  remediation: Disable introspection on production endpoints or require authenticated access.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/graphql?query=%7B__schema%7Btypes%7Bname%7D%7D%7D"
+    matchers:
+      - type: word
+        part: body
+        words: ["__schema", "types", "name"]
+        condition: and

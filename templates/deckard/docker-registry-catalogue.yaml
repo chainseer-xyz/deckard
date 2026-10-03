@@ -1,0 +1,17 @@
+id: deckard-docker-registry-catalogue
+info:
+  name: Open Docker registry catalogue
+  author: deckard
+  severity: high
+  tags: [deckard, exposure, container]
+  description: A Docker Registry catalogue can be listed without authentication.
+  remediation: Require authentication for the registry API and restrict it to trusted networks.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/v2/_catalog"
+    matchers:
+      - type: regex
+        part: body
+        regex:
+          - "\\{\\s*\\\"repositories\\\"\\s*:\\s*\\["
