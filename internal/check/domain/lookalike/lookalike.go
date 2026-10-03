@@ -120,6 +120,13 @@ func (*Check) Tier() model.Tier               { return model.TierPassive }
 func (*Check) DefaultInterval() time.Duration { return DefaultInterval }
 func (*Check) DefaultTimeout() time.Duration  { return DefaultTimeout }
 
+// SlowLookups: a sweep sends up to DefaultMaxCandidates queries behind one
+// process-wide rate ceiling (DefaultRate per second), so a run lasts at least
+// half a minute and longer while zones share the ceiling. The queries are
+// DNS-only, but the wait is the same as for a third-party service, so it runs
+// in the intel queue.
+func (*Check) SlowLookups() bool { return true }
+
 // WantsOwnedZones: every owned zone's names are never lookalikes.
 func (*Check) WantsOwnedZones() bool { return true }
 

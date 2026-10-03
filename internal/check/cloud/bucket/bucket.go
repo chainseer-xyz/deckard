@@ -119,6 +119,11 @@ func (*Check) Name() string                   { return Name }
 func (*Check) Tier() model.Tier               { return model.TierPassive }
 func (*Check) DefaultInterval() time.Duration { return DefaultInterval }
 
+// SlowLookups: the requests go to the object-storage provider's endpoint
+// (up to two, each with its own timeout), not to local infrastructure, so the
+// check runs in the intel queue.
+func (*Check) SlowLookups() bool { return true }
+
 // Applies matches owned hostnames; whether the CNAME ends at object storage is
 // only known after resolving, so Run filters further.
 func (*Check) Applies(a model.Asset) bool {

@@ -89,6 +89,10 @@ func (*Check) Name() string                   { return Name }
 func (*Check) Tier() model.Tier               { return model.TierPassive }
 func (*Check) DefaultInterval() time.Duration { return DefaultInterval }
 
+// SlowLookups: every run waits on a rate-limited RDAP registry, so it runs in
+// the intel queue.
+func (*Check) SlowLookups() bool { return true }
+
 // Applies matches owned zones that are registrable domains.
 func (*Check) Applies(a model.Asset) bool {
 	if a.Kind != model.KindZone || a.Scope != model.ScopeOwned {

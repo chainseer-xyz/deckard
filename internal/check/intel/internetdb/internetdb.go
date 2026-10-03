@@ -104,6 +104,10 @@ func (*Check) Name() string                   { return Name }
 func (*Check) Tier() model.Tier               { return model.TierPassive }
 func (*Check) DefaultInterval() time.Duration { return DefaultInterval }
 
+// SlowLookups: every run waits on the rate-limited InternetDB service, so it
+// runs in the intel queue.
+func (*Check) SlowLookups() bool { return true }
+
 // BaselineChecks asks the engine for net.ports' learned observation.
 func (*Check) BaselineChecks() []string { return []string{portsCheck} }
 
