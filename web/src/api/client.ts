@@ -2,6 +2,7 @@ import { clearToken, getToken, markRejected } from './auth';
 import type {
   AssetDetail,
   Asset,
+  AssetEdge,
   Baseline,
   ChangeEvent,
   Finding,
@@ -220,6 +221,14 @@ function normBaseline(b: Record<string, unknown>): Baseline {
   };
 }
 
+// The server sends edges as {direction: 'out'|'in', type, asset}; the UI works
+// with {outbound, type, other}. Accept both so either shape renders.
+function normEdge(e: Record<string, unknown>): AssetEdge {
+  const other = (e.other ?? e.asset) as Asset;
+  const outbound = typeof e.outbound === 'boolean' ? e.outbound : e.direction !== 'in';
+  return { other, type: e.type as string, outbound };
+}
+
 export const api = {
   me: async (signal?: AbortSignal) => {
     const me = await request<Me>('/me', { signal });
@@ -232,7 +241,7 @@ export const api = {
     const d = await request<AssetDetail>(`/assets/${id}`);
     return {
       ...d,
-      edges: d.edges ?? [],
+      edges: ((d.edges ?? []) as unknown as Record<string, unknown>[]).map(normEdge),
       observations: d.observations ?? [],
       findings: d.findings ?? [],
       baselines: ((d.baselines ?? []) as unknown as Record<string, unknown>[]).map(normBaseline),

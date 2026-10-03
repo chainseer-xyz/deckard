@@ -1,13 +1,26 @@
-import { Suspense, lazy, useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { List, Network } from 'lucide-react';
-import { useAssets, useGraph, useStats } from '../api/hooks';
+import { useAllAssets, useAllFindings, useAssets, useGraph, useScans, useStats } from '../api/hooks';
 import { ASSET_KINDS, SCOPES } from '../api/types';
-import { Card, Empty, ErrorBox, KindBadge, Loading, PageHeader, Pagination, ScopeBadge } from '../components/ui';
+import type { AssetKind, ScopeClass } from '../api/types';
+import { Card, Empty, ErrorBox, KindBadge, Loading, PageHeader, Pagination, ScopeBadge, SeverityBadge } from '../components/ui';
 import { relTime, absTime } from '../lib/format';
+import {
+  INVENTORY_PAGE_SIZE,
+  assetFindingStats,
+  hasNeedle,
+  lastScanByAsset,
+  parseInventory,
+  sortByFindings,
+  toAssetsApi,
+  toInventoryParams,
+} from '../lib/inventory';
+import type { InventoryFilter } from '../lib/inventory';
+import { pageOf } from '../lib/findingsFilter';
 
 const AssetGraph = lazy(() => import('../components/AssetGraph'));
-const LIMIT = 50;
+const SCAN_WINDOW = 500;
 
 function MapView({ assetId, depth, onPick, onDepth }: { assetId?: number; depth: number; onPick: (id: number) => void; onDepth: (d: number) => void }) {
   const [text, setText] = useState('');
@@ -72,38 +85,60 @@ export default function Inventory() {
   const [sp, setSp] = useSearchParams();
   const stats = useStats();
   const view = sp.get('view') === 'map' ? 'map' : 'table';
-  const page = Math.max(1, Number(sp.get('page')) || 1);
-  const params = {
-    kind: sp.get('kind') ?? undefined,
-    source: sp.get('source') ?? undefined,
-    scope: sp.get('scope') ?? undefined,
-    zone: sp.get('zone') ?? undefined,
-    q: sp.get('q') ?? undefined,
-    include_removed: sp.get('include_removed') === '1',
-    limit: LIMIT,
-    offset: (page - 1) * LIMIT,
-  };
-  const assets = useAssets(params);
+  const filter = useMemo(() => parseInventory(sp), [sp]);
+  const apiParams = useMemo(() => toAssetsApi(filter), [filter]);
 
-  const set = (patch: Record<string, string | undefined>, keepPage = false) => {
+  // Open findings and recent scan runs feed the findings and last-scanned
+  // columns; the API has neither per asset.
+  const openFindings = useAllFindings({ status: ['open'] }, view === 'table');
+  const scans = useScans(SCAN_WINDOW, 0);
+  const findingStats = useMemo(() => assetFindingStats(openFindings.data ?? []), [openFindings.data]);
+  const lastScan = useMemo(() => lastScanByAsset(scans.data?.items ?? []), [scans.data]);
+
+  // Plain browsing pages on the server; the "findings >= medium" toggle needs
+  // every matching asset to intersect with the findings, so it pages locally.
+  const paged = useAssets({ ...apiParams, limit: INVENTORY_PAGE_SIZE, offset: (filter.page - 1) * INVENTORY_PAGE_SIZE });
+  const all = useAllAssets(apiParams, filter.needles && view === 'table');
+  const needleAssets = useMemo(
+    () => (all.data ? sortByFindings(all.data.filter((a) => hasNeedle(findingStats.get(a.id))), findingStats) : []),
+    [all.data, findingStats],
+  );
+  const q = filter.needles ? all : paged;
+  const rows = useMemo(
+    () => (filter.needles ? pageOf(needleAssets, filter.page, INVENTORY_PAGE_SIZE) : (paged.data?.items ?? [])),
+    [filter.needles, filter.page, needleAssets, paged.data],
+  );
+  const total = filter.needles ? needleAssets.length : (paged.data?.total ?? 0);
+  const waitingOnFindings = filter.needles && openFindings.isLoading;
+
+  const set = (patch: Partial<InventoryFilter>, keepPage = false) =>
+    setSp(toInventoryParams({ ...filter, ...patch, page: keepPage ? (patch.page ?? filter.page) : 1 }, sp), { replace: true });
+  const setView = (v: string | undefined) => {
     const n = new URLSearchParams(sp);
-    for (const [k, v] of Object.entries(patch)) {
-      if (v) n.set(k, v);
-      else n.delete(k);
-    }
-    if (!keepPage) n.delete('page');
+    if (v) n.set('view', v);
+    else n.delete('view');
+    setSp(n, { replace: true });
+  };
+  const setMap = (patch: Record<string, string>) => {
+    const n = new URLSearchParams(sp);
+    for (const [k, v] of Object.entries(patch)) n.set(k, v);
     setSp(n, { replace: true });
   };
 
-  const [text, setText] = useState(sp.get('q') ?? '');
+  const [text, setText] = useState(filter.q);
+  useEffect(() => setText(filter.q), [filter.q]);
   useEffect(() => {
-    if (text === (sp.get('q') ?? '')) return;
-    const t = setTimeout(() => set({ q: text || undefined }), 300);
+    if (text === filter.q) return;
+    const t = setTimeout(() => set({ q: text }), 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text]);
 
   const sources = Object.keys(stats.data?.assets_by_source ?? {});
+  const zones = useMemo(
+    () => [...new Set([...(openFindings.data ?? []).map((f) => f.zone), ...rows.map((a) => a.zone)].filter((z): z is string => !!z))].sort(),
+    [openFindings.data, rows],
+  );
   const assetParam = Number(sp.get('asset')) || undefined;
 
   return (
@@ -116,7 +151,7 @@ export default function Inventory() {
               role="tab"
               aria-selected={view === v}
               className={`btn btn-sm ${view === v ? 'border-accent bg-surface2' : ''}`}
-              onClick={() => set({ view: v === 'map' ? 'map' : undefined }, true)}
+              onClick={() => setView(v === 'map' ? 'map' : undefined)}
             >
               <Icon size={12} aria-hidden="true" />
               {label}
@@ -129,8 +164,8 @@ export default function Inventory() {
         <MapView
           assetId={assetParam}
           depth={Number(sp.get('depth')) || 2}
-          onPick={(id) => set({ asset: String(id) }, true)}
-          onDepth={(d) => set({ depth: String(d) }, true)}
+          onPick={(id) => setMap({ asset: String(id) })}
+          onDepth={(d) => setMap({ depth: String(d) })}
         />
       ) : (
         <>
@@ -142,39 +177,60 @@ export default function Inventory() {
               </div>
               <div>
                 <label htmlFor="i-kind" className="mb-1 block text-xs text-muted">Kind</label>
-                <select id="i-kind" className="input" value={params.kind ?? ''} onChange={(e) => set({ kind: e.target.value || undefined })}>
+                <select id="i-kind" className="input" value={filter.kind ?? ''} onChange={(e) => set({ kind: (e.target.value || undefined) as AssetKind | undefined })}>
                   <option value="">Any</option>
                   {ASSET_KINDS.map((k) => <option key={k}>{k}</option>)}
                 </select>
               </div>
               <div>
                 <label htmlFor="i-scope" className="mb-1 block text-xs text-muted">Scope</label>
-                <select id="i-scope" className="input" value={params.scope ?? ''} onChange={(e) => set({ scope: e.target.value || undefined })}>
+                <select id="i-scope" className="input" value={filter.scope ?? ''} onChange={(e) => set({ scope: (e.target.value || undefined) as ScopeClass | undefined })}>
                   <option value="">Any</option>
                   {SCOPES.map((k) => <option key={k}>{k}</option>)}
                 </select>
               </div>
               <div>
                 <label htmlFor="i-src" className="mb-1 block text-xs text-muted">Source</label>
-                <select id="i-src" className="input" value={params.source ?? ''} onChange={(e) => set({ source: e.target.value || undefined })}>
+                <select id="i-src" className="input" value={filter.source} onChange={(e) => set({ source: e.target.value })}>
                   <option value="">Any</option>
-                  {params.source && !sources.includes(params.source) && <option>{params.source}</option>}
+                  {filter.source && !sources.includes(filter.source) && <option>{filter.source}</option>}
                   {sources.map((k) => <option key={k}>{k}</option>)}
                 </select>
               </div>
+              <div>
+                <label htmlFor="i-zone" className="mb-1 block text-xs text-muted">Zone</label>
+                <input
+                  id="i-zone"
+                  className="input w-40"
+                  list="i-zones"
+                  defaultValue={filter.zone}
+                  key={filter.zone}
+                  onBlur={(e) => e.target.value !== filter.zone && set({ zone: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') set({ zone: e.currentTarget.value }); }}
+                />
+                <datalist id="i-zones">{zones.map((z) => <option key={z} value={z} />)}</datalist>
+              </div>
               <label className="flex items-center gap-1.5 pb-1 text-sm">
-                <input type="checkbox" checked={params.include_removed} onChange={(e) => set({ include_removed: e.target.checked ? '1' : undefined })} />
+                <input type="checkbox" checked={filter.needles} onChange={(e) => set({ needles: e.target.checked })} />
+                Has open findings ≥ medium
+              </label>
+              <label className="flex items-center gap-1.5 pb-1 text-sm">
+                <input type="checkbox" checked={filter.includeRemoved} onChange={(e) => set({ includeRemoved: e.target.checked })} />
                 Include removed
               </label>
             </form>
           </Card>
           <Card>
-            {assets.isLoading && <Loading />}
-            {assets.isError && <ErrorBox error={assets.error} onRetry={() => void assets.refetch()} />}
-            {assets.data && (
+            {(q.isLoading || waitingOnFindings) && <Loading />}
+            {q.isError && <ErrorBox error={q.error} onRetry={() => void q.refetch()} />}
+            {q.data && !waitingOnFindings && (
               <>
-                {assets.data.items.length === 0 ? (
-                  <Empty>No assets match.</Empty>
+                {rows.length === 0 ? (
+                  <Empty>
+                    {filter.needles
+                      ? 'No assets with an open finding at medium or above match these filters.'
+                      : 'No assets match. Clear a filter, or check that a source has synced (Sources & Scans).'}
+                  </Empty>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
@@ -185,34 +241,59 @@ export default function Inventory() {
                           <th className="th">Scope</th>
                           <th className="th">Source</th>
                           <th className="th">Zone</th>
+                          <th className="th">Open findings</th>
+                          <th className="th">Last scanned</th>
                           <th className="th">Last seen</th>
                           <th className="th"><span className="sr-only">Map</span></th>
                         </tr>
                       </thead>
                       <tbody>
-                        {assets.data.items.map((a) => (
-                          <tr key={a.id} className={`border-b border-line/60 hover:bg-surface2/50 ${a.removed_at ? 'opacity-60' : ''}`}>
-                            <td className="td"><KindBadge kind={a.kind} /></td>
-                            <td className="td font-mono text-xs">
-                              <Link className="text-accent hover:underline" to={`/assets/${a.id}`}>{a.key}</Link>
-                              {a.removed_at && <span className="ml-2 rounded-sm border border-line px-1 text-[10px] uppercase">removed</span>}
-                            </td>
-                            <td className="td"><ScopeBadge scope={a.scope} /></td>
-                            <td className="td text-xs">{a.source}</td>
-                            <td className="td text-xs">{a.zone ?? '-'}</td>
-                            <td className="td text-xs text-muted" title={absTime(a.last_seen)}>{relTime(a.last_seen)}</td>
-                            <td className="td">
-                              <Link className="btn btn-sm" to={`/inventory?view=map&asset=${a.id}`} aria-label={`Show ${a.key} on map`}>
-                                <Network size={12} aria-hidden="true" /> Map
-                              </Link>
-                            </td>
-                          </tr>
-                        ))}
+                        {rows.map((a) => {
+                          const fs = findingStats.get(a.id);
+                          const scanned = lastScan.get(a.id);
+                          return (
+                            <tr key={a.id} className={`border-b border-line/60 hover:bg-surface2/50 ${a.removed_at ? 'opacity-60' : ''}`}>
+                              <td className="td"><KindBadge kind={a.kind} /></td>
+                              <td className="td font-mono text-xs">
+                                <Link className="text-accent hover:underline" to={`/assets/${a.id}`}>{a.key}</Link>
+                                {a.removed_at && <span className="ml-2 rounded-sm border border-line px-1 text-[10px] uppercase">removed</span>}
+                              </td>
+                              <td className="td"><ScopeBadge scope={a.scope} /></td>
+                              <td className="td text-xs">{a.source}</td>
+                              <td className="td text-xs">{a.zone ?? '-'}</td>
+                              <td className="td min-w-28 text-xs">
+                                {openFindings.isLoading ? (
+                                  <span className="text-muted">…</span>
+                                ) : fs ? (
+                                  <Link
+                                    to={`/findings?asset_id=${a.id}&min_severity=info`}
+                                    className="inline-flex items-center gap-1.5 hover:underline"
+                                    aria-label={`${fs.total} open findings on ${a.key}, worst ${fs.top}`}
+                                  >
+                                    <SeverityBadge severity={fs.top} />
+                                    <span className="tabular-nums">{fs.total}</span>
+                                  </Link>
+                                ) : (
+                                  <span className="text-muted">0</span>
+                                )}
+                              </td>
+                              <td className="td whitespace-nowrap text-xs text-muted" title={scanned ? absTime(scanned) : 'No scan in the most recent runs'}>
+                                {scanned ? relTime(scanned) : '-'}
+                              </td>
+                              <td className="td whitespace-nowrap text-xs text-muted" title={absTime(a.last_seen)}>{relTime(a.last_seen)}</td>
+                              <td className="td">
+                                <Link className="btn btn-sm" to={`/inventory?view=map&asset=${a.id}`} aria-label={`Show ${a.key} on map`}>
+                                  <Network size={12} aria-hidden="true" /> Map
+                                </Link>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
                 )}
-                <Pagination total={assets.data.total} limit={assets.data.limit || LIMIT} offset={assets.data.offset} onPage={(p) => set({ page: p > 1 ? String(p) : undefined }, true)} />
+                <Pagination total={total} limit={INVENTORY_PAGE_SIZE} offset={(filter.page - 1) * INVENTORY_PAGE_SIZE} onPage={(p) => set({ page: p }, true)} />
               </>
             )}
           </Card>

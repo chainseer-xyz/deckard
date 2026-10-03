@@ -17,17 +17,42 @@ export function LiveProvider({ children, enabled = true }: { children: ReactNode
     if (!enabled) return;
     const ac = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // The fetch-all queries walk several pages, so only refetch them when the
+    // event can have changed their rows.
+    const touched = { findings: true, assets: true };
     const invalidate = () => {
       clearTimeout(timer);
       timer = setTimeout(() => {
-        void qc.invalidateQueries({ predicate: (q) => q.queryKey[0] !== 'me' });
+        const { findings, assets } = touched;
+        touched.findings = touched.assets = false;
+        void qc.invalidateQueries({
+          predicate: (q) => {
+            const [root, kind] = q.queryKey;
+            if (root === 'me') return false;
+            if (kind === 'all') return root === 'findings' ? findings : root === 'assets' ? assets : true;
+            return true;
+          },
+        });
       }, 250);
+    };
+    const note = (data: string) => {
+      let type = '';
+      try {
+        type = String((JSON.parse(data) as { type?: unknown }).type ?? '');
+      } catch {
+        /* unparseable: refetch everything */
+      }
+      if (type === '' || type.startsWith('finding_')) touched.findings = true;
+      if (type === '' || type.startsWith('asset_')) touched.assets = true;
     };
     let wasOffline = false;
     void runEventStream({
       signal: ac.signal,
       onEvent: (m) => {
-        if (m.event === 'change') invalidate();
+        if (m.event === 'change') {
+          note(m.data);
+          invalidate();
+        }
       },
       onState: (s) => {
         setState(s);
@@ -35,6 +60,7 @@ export function LiveProvider({ children, enabled = true }: { children: ReactNode
         if (s.status === 'offline') wasOffline = true;
         if (s.status === 'live' && wasOffline) {
           wasOffline = false;
+          touched.findings = touched.assets = true;
           invalidate();
         }
       },

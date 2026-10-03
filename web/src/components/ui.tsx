@@ -7,6 +7,7 @@ import {
   Flame,
   Gauge,
   Info,
+  RotateCcw,
   ShieldAlert,
   type LucideIcon,
 } from 'lucide-react';
@@ -229,5 +230,44 @@ export function Field({ label, children }: { label: string; children: ReactNode 
       <dt className="text-xs text-muted">{label}</dt>
       <dd className="mt-0.5 text-sm">{children}</dd>
     </div>
+  );
+}
+
+/** First seen within 24h. Text, not colour alone. */
+export function NewBadge() {
+  return (
+    <span
+      className="inline-flex items-center rounded-sm border border-accent bg-accent/10 px-1.5 py-0.5 text-xs font-semibold uppercase text-accent"
+      title="First seen in the last 24 hours"
+    >
+      New<span className="sr-only"> in the last 24 hours</span>
+      <span aria-hidden="true">&nbsp;24h</span>
+    </span>
+  );
+}
+
+export function ReopenedBadge({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-sm border border-warn px-1.5 py-0.5 text-xs font-semibold text-warn"
+      title={`Reopened ${count} time${count === 1 ? '' : 's'} after being resolved`}
+    >
+      <RotateCcw size={11} aria-hidden="true" />
+      Reopened {count}×
+    </span>
+  );
+}
+
+/** A source whose last sync was partial: data is incomplete and removals were skipped. */
+export function PartialBadge({ reason }: { reason?: string }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-sm border border-warn bg-warn/10 px-1.5 py-0.5 text-xs font-semibold uppercase text-warn"
+      title={reason ? `Partial sync: ${reason}` : 'Partial sync: data is incomplete and removals were skipped'}
+    >
+      <AlertTriangle size={11} aria-hidden="true" />
+      Partial
+    </span>
   );
 }

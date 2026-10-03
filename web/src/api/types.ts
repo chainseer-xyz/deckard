@@ -95,6 +95,7 @@ export interface Baseline {
   updated_at: string;
 }
 
+/** Normalised edge; the wire form is `{direction, type, asset}` (see api.asset). */
 export interface AssetEdge {
   other: Asset;
   type: RelationType;
@@ -139,6 +140,8 @@ export interface SyncStatus {
   last_run: string;
   last_ok: string;
   error?: string;
+  /** Set when the last run succeeded with caveats, e.g. partial discovery (removals skipped). */
+  warning?: string;
   asset_count: number;
   duration_ms: number;
 }

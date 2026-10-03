@@ -1,25 +1,59 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ArrowDown, ArrowUp } from 'lucide-react';
-import { useFindings, useStats } from '../api/hooks';
+import { useAllFindings, useFindingTotal, useStats } from '../api/hooks';
 import { SEVERITIES, STATUSES } from '../api/types';
-import type { FindingStatus, Severity } from '../api/types';
+import type { Finding, FindingStatus, Severity } from '../api/types';
+import { FindingDrawer } from '../components/FindingDrawer';
+import { FindingGroups } from '../components/FindingGroups';
 import { FindingsTable } from '../components/FindingsTable';
 import { Card, ErrorBox, Loading, PageHeader, Pagination } from '../components/ui';
-import { PAGE_SIZE, parseFilter, sortFindings, toApiParams, toSearchParams } from '../lib/findingsFilter';
+import {
+  PAGE_SIZE,
+  applyExactSeverity,
+  pageOf,
+  parseFilter,
+  sortFindings,
+  toApiParams,
+  toSearchParams,
+  withoutSeverity,
+} from '../lib/findingsFilter';
 import type { FindingsFilter, SortKey } from '../lib/findingsFilter';
 import { titleCase } from '../lib/format';
+import { GROUP_BYS, groupFindings } from '../lib/triage';
+import type { GroupBy } from '../lib/triage';
+
+const GROUP_PAGE_SIZE = 25;
+const DRAWER_PARAM = 'finding';
 
 export default function Findings() {
   const [sp, setSp] = useSearchParams();
   const filter = useMemo(() => parseFilter(sp), [sp]);
+  const drawerId = Number(sp.get(DRAWER_PARAM)) || undefined;
   const stats = useStats();
-  const q = useFindings(toApiParams(filter));
+  const apiParams = useMemo(() => toApiParams(filter), [filter]);
+  const q = useAllFindings(apiParams);
+  const total = useFindingTotal(withoutSeverity(apiParams));
 
+  // Filters live in the URL; the open drawer (`finding`) is carried along.
+  const writeUrl = (next: FindingsFilter) => {
+    const out = toSearchParams(next);
+    const d = sp.get(DRAWER_PARAM);
+    if (d) out.set(DRAWER_PARAM, d);
+    setSp(out, { replace: true });
+  };
   const update = (patch: Partial<FindingsFilter>, keepPage = false) =>
-    setSp(toSearchParams({ ...filter, ...patch, page: keepPage ? (patch.page ?? filter.page) : 1 }), {
-      replace: true,
-    });
+    writeUrl({ ...filter, ...patch, page: keepPage ? (patch.page ?? filter.page) : 1 });
+
+  const open = (f: Finding) => {
+    const n = new URLSearchParams(sp);
+    n.set(DRAWER_PARAM, String(f.id));
+    setSp(n);
+  };
+  const closeDrawer = () => {
+    const n = new URLSearchParams(sp);
+    n.delete(DRAWER_PARAM);
+    setSp(n, { replace: true });
+  };
 
   // search box is debounced into the URL
   const [text, setText] = useState(filter.q);
@@ -35,37 +69,24 @@ export default function Findings() {
     update({ status: filter.status.includes(s) ? filter.status.filter((x) => x !== s) : [...filter.status, s] });
 
   const setSort = (key: SortKey) =>
-    update(
-      filter.sort === key ? { dir: filter.dir === 'desc' ? 'asc' : 'desc' } : { sort: key, dir: 'desc' },
-      true,
-    );
+    update(filter.sort === key ? { dir: filter.dir === 'desc' ? 'asc' : 'desc' } : { sort: key, dir: 'desc' }, true);
 
-  const items = useMemo(
-    () => (q.data ? sortFindings(q.data.items, filter.sort, filter.dir) : []),
-    [q.data, filter.sort, filter.dir],
+  const sorted = useMemo(
+    () => (q.data ? sortFindings(applyExactSeverity(q.data, filter), filter.sort, filter.dir) : []),
+    [q.data, filter],
+  );
+  const groups = useMemo(
+    () => (filter.groupBy === 'none' ? [] : groupFindings(sorted, filter.groupBy)),
+    [sorted, filter.groupBy],
   );
   const checks = Object.keys(stats.data?.findings_by_check ?? {});
   const sources = Object.keys(stats.data?.assets_by_source ?? {});
-  const DirIcon = filter.dir === 'desc' ? ArrowDown : ArrowUp;
+  const seed = drawerId ? q.data?.find((f) => f.id === drawerId) : undefined;
+  const showingAll = filter.minSeverity === 'info' && !filter.severity;
 
   return (
     <>
-      <PageHeader title="Findings">
-        <div className="flex items-center gap-1 text-xs" role="group" aria-label="Sort by">
-          <span className="text-muted">Sort</span>
-          {(['severity', 'age'] as SortKey[]).map((k) => (
-            <button
-              key={k}
-              className={`btn btn-sm ${filter.sort === k ? 'border-accent' : ''}`}
-              aria-pressed={filter.sort === k}
-              onClick={() => setSort(k)}
-            >
-              {titleCase(k)}
-              {filter.sort === k && <DirIcon size={12} aria-label={filter.dir === 'desc' ? 'descending' : 'ascending'} />}
-            </button>
-          ))}
-        </div>
-      </PageHeader>
+      <PageHeader title="Findings" />
 
       <Card className="mb-4">
         <form className="flex flex-wrap items-end gap-3 p-3" role="search" onSubmit={(e) => e.preventDefault()}>
@@ -75,10 +96,14 @@ export default function Findings() {
           </div>
           <div>
             <label htmlFor="f-sev" className="mb-1 block text-xs text-muted">Min severity</label>
-            <select id="f-sev" className="input" value={filter.minSeverity ?? ''} onChange={(e) => update({ minSeverity: (e.target.value || undefined) as Severity | undefined })}>
-              <option value="">Any</option>
+            <select
+              id="f-sev"
+              className="input"
+              value={filter.minSeverity}
+              onChange={(e) => update({ minSeverity: e.target.value as Severity, severity: undefined })}
+            >
               {[...SEVERITIES].reverse().map((s) => (
-                <option key={s} value={s}>{s}</option>
+                <option key={s} value={s}>{s === 'info' ? 'info (all)' : s}</option>
               ))}
             </select>
           </div>
@@ -102,6 +127,12 @@ export default function Findings() {
             <label htmlFor="f-zone" className="mb-1 block text-xs text-muted">Zone</label>
             <input id="f-zone" className="input w-40" defaultValue={filter.zone} key={filter.zone} onBlur={(e) => e.target.value !== filter.zone && update({ zone: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') update({ zone: e.currentTarget.value }); }} />
           </div>
+          <div>
+            <label htmlFor="f-group" className="mb-1 block text-xs text-muted">Group by</label>
+            <select id="f-group" className="input" value={filter.groupBy} onChange={(e) => update({ groupBy: e.target.value as GroupBy })}>
+              {GROUP_BYS.map((g) => <option key={g} value={g}>{g === 'none' ? 'None' : titleCase(g)}</option>)}
+            </select>
+          </div>
           <fieldset>
             <legend className="mb-1 text-xs text-muted">Status</legend>
             <div className="flex flex-wrap gap-1">
@@ -122,6 +153,11 @@ export default function Findings() {
               })}
             </div>
           </fieldset>
+          {filter.severity && (
+            <button type="button" className="btn btn-sm" onClick={() => update({ severity: undefined })}>
+              Severity: {filter.severity} ×
+            </button>
+          )}
           {filter.assetId && (
             <button type="button" className="btn btn-sm" onClick={() => update({ assetId: undefined })}>
               Asset #{filter.assetId} ×
@@ -131,15 +167,66 @@ export default function Findings() {
       </Card>
 
       <Card>
+        <div className="flex min-h-10 flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2 text-sm" aria-live="polite">
+          {q.data ? (
+            <span>
+              {filter.severity ? (
+                <>Showing {sorted.length} {filter.severity} findings.</>
+              ) : showingAll ? (
+                <>Showing all {sorted.length} findings.</>
+              ) : (
+                <>
+                  Showing {sorted.length} of {total.data ?? '…'} findings
+                  {filter.minSeverity !== 'info' ? ` (${filter.minSeverity} and above)` : ''}.
+                </>
+              )}
+            </span>
+          ) : (
+            <span className="text-muted">Loading…</span>
+          )}
+          {!filter.severity && (
+            <button
+              className="btn btn-sm"
+              aria-pressed={showingAll}
+              onClick={() => update({ minSeverity: showingAll ? 'medium' : 'info' })}
+            >
+              {showingAll ? 'Hide low and info' : 'Include low and info'}
+            </button>
+          )}
+        </div>
         {q.isLoading && <Loading />}
         {q.isError && <ErrorBox error={q.error} onRetry={() => void q.refetch()} />}
-        {q.data && (
-          <>
-            <FindingsTable items={items} />
-            <Pagination total={q.data.total} limit={q.data.limit || PAGE_SIZE} offset={q.data.offset} onPage={(p) => update({ page: p }, true)} />
-          </>
-        )}
+        {q.data &&
+          (filter.groupBy === 'none' ? (
+            <>
+              <FindingsTable
+                items={pageOf(sorted, filter.page)}
+                onOpen={open}
+                selectedId={drawerId}
+                sort={filter.sort}
+                dir={filter.dir}
+                onSort={setSort}
+              />
+              <Pagination total={sorted.length} limit={PAGE_SIZE} offset={(filter.page - 1) * PAGE_SIZE} onPage={(p) => update({ page: p }, true)} />
+            </>
+          ) : (
+            <>
+              <FindingGroups
+                key={filter.groupBy}
+                groups={pageOf(groups, filter.page, GROUP_PAGE_SIZE)}
+                by={filter.groupBy}
+                onOpen={open}
+                selectedId={drawerId}
+                sort={filter.sort}
+                dir={filter.dir}
+                onSort={setSort}
+              />
+              <Pagination total={groups.length} limit={GROUP_PAGE_SIZE} offset={(filter.page - 1) * GROUP_PAGE_SIZE} onPage={(p) => update({ page: p }, true)} />
+            </>
+          ))}
       </Card>
+
+      {drawerId && <FindingDrawer id={drawerId} seed={seed} onClose={closeDrawer} />}
     </>
   );
 }

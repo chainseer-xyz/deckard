@@ -216,3 +216,37 @@ describe('api client', () => {
     expect(d.edges).toEqual([]);
   });
 });
+
+describe('api.asset edge normalisation', () => {
+  const peer = { id: 2, kind: 'hostname', key: 'peer.example.com', scope: 'owned' };
+  it('maps the server wire shape {direction, asset} to {outbound, other}', async () => {
+    server.use(
+      http.get('*/api/v1/assets/1', () =>
+        HttpResponse.json({
+          asset: { id: 1 },
+          edges: [
+            { direction: 'out', type: 'cname_to', asset: peer },
+            { direction: 'in', type: 'in_zone', asset: peer },
+          ],
+          observations: [],
+          baselines: [],
+          findings: [],
+        }),
+      ),
+    );
+    const d = await api.asset(1);
+    expect(d.edges).toEqual([
+      { outbound: true, type: 'cname_to', other: peer },
+      { outbound: false, type: 'in_zone', other: peer },
+    ]);
+  });
+
+  it('passes already-normalised edges through', async () => {
+    server.use(
+      http.get('*/api/v1/assets/1', () =>
+        HttpResponse.json({ asset: { id: 1 }, edges: [{ outbound: false, type: 'x', other: peer }], observations: [] }),
+      ),
+    );
+    expect((await api.asset(1)).edges).toEqual([{ outbound: false, type: 'x', other: peer }]);
+  });
+});
