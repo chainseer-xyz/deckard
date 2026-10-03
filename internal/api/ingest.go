@@ -16,6 +16,7 @@ import (
 
 	"github.com/chainseer-xyz/deckard/internal/config"
 	"github.com/chainseer-xyz/deckard/internal/ingest"
+	"github.com/chainseer-xyz/deckard/internal/metrics"
 	"github.com/chainseer-xyz/deckard/internal/model"
 	"github.com/chainseer-xyz/deckard/internal/store"
 )
@@ -82,10 +83,7 @@ func (s *Server) registerIngestMetrics() {
 	if s.d.Registry == nil {
 		return
 	}
-	total := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "deckard_ingest_requests_total",
-		Help: "POST /api/v1/ingest requests by tool and result (ok, partial, replay, rejected, invalid, too_large, rate_limited, disabled, error). Tools not listed in ingest.tools share tool=\"other\" past a cap; unparseable bodies count as tool=\"unknown\".",
-	}, []string{"tool", "result"})
+	total := metrics.NewIngestRequests()
 	if err := s.d.Registry.Register(total); err != nil {
 		s.log.Warn("could not register ingest metrics", "err", err)
 		return
