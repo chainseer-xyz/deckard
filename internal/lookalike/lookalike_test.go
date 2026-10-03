@@ -369,3 +369,26 @@ func TestQwertyTable(t *testing.T) {
 		t.Error("a key is its own neighbour")
 	}
 }
+
+// TestCandidateVolume pins the order of magnitude documented for operators
+// (docs/operations.md): with the default TLD list, a brand label of 5 to 12
+// letters yields a few hundred candidates, and the default cap of 600 only
+// bites for long labels.
+func TestCandidateVolume(t *testing.T) {
+	for _, tc := range []struct {
+		label    string
+		min, max int
+	}{
+		{"acme1", 100, 200},
+		{"example", 150, 250},
+		{"northwind", 200, 350},
+		{"contosofinance", 300, 500},
+		{"internationalisationltd", 500, 800},
+	} {
+		n := len(Generate(tc.label, "com", Options{}))
+		t.Logf("%-24s %4d candidates", tc.label, n)
+		if n < tc.min || n > tc.max {
+			t.Errorf("%s: %d candidates, documented range %d..%d", tc.label, n, tc.min, tc.max)
+		}
+	}
+}

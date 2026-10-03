@@ -115,6 +115,9 @@ traffic to your assets is separate and governed by the scope guard):
 | `api.first.org` | EPSS scores | `vulnintel.*` enabled |
 | `crt.sh` | Certificate Transparency discovery | `expansion.ct_logs` is on |
 
+`domain.lookalike` sends plain DNS to your configured resolvers and needs no
+extra egress host ([details](#lookalike-sweeps-domainlookalike)).
+
 Plus whatever your configured sources use (Cloudflare API, AWS APIs, Google
 Cloud DNS at `dns.googleapis.com` with tokens from `oauth2.googleapis.com` or the
 GKE metadata server, your Kubernetes API). If you restrict egress with a NetworkPolicy or proxy, allow
@@ -158,6 +161,68 @@ should stay at zero (example alert `DeckardIntelRequestBlocked` in
    with `nuclei.enabled: false` if you do not run nuclei at all.
 4. Expect the staleness metrics to grow; alert on your own thresholds (below)
    so a forgotten snapshot refresh is noticed.
+
+## Lookalike sweeps (`domain.lookalike`)
+
+`domain.lookalike` looks for domains that imitate yours (typosquats,
+confusable characters, other TLDs) and are registered by someone else. Judge it
+by what it sends:
+
+- **DNS only.** It asks your recursive resolvers (`scope.resolvers`, otherwise
+  the system's) whether a name exists and what its NS, A, AAAA and MX records
+  are. It never opens an HTTP or TLS connection to a lookalike and never
+  fetches a page from one: those are third parties' hosts, possibly hostile.
+  It adds no egress host: the only new traffic is plain DNS to resolvers you
+  already configured.
+- **One narrow path.** The names are not yours, so they cannot go through the
+  scope guard (which refuses them). They go through one client built in one
+  place (`internal/app/lookup.go`, handed to checks as `Target.Lookup`) that
+  only sends DNS queries to those resolvers.
+- **A hard rate ceiling.** `checks.domain.lookalike.rate_per_second` (default
+  20) caps queries per second for the whole process, however many zones run at
+  once, with no burst.
+
+**Query volume.** Per apex and run, about N + 3E queries, where N is the number
+of candidates and E the number of candidate names that exist. A name that does
+not exist costs one query (the NS query answers NXDOMAIN); one that exists
+costs four (NS, A, AAAA, MX). N depends on the brand label (the part before the
+registrable suffix) and is capped by `max_candidates_per_zone` (600), taken
+evenly across the techniques:
+
+| Brand label | Candidates (default TLD list) |
+| --- | --- |
+| 5 letters (`acme1`) | about 145 |
+| 7 letters (`example`) | about 190 |
+| 9 letters (`northwind`) | about 270 |
+| 14 letters | about 410 |
+| 20 letters or more | the cap, 600 |
+
+So a typical apex costs 150 to 450 queries per run, which is under half a
+minute at the default rate when nothing else is running, and an estate of 20
+apexes costs about 6000 queries a week at the default 7-day interval, spread
+over a few minutes. Labels shorter than `min_label_length` (5) are not swept.
+Lower `rate_per_second` or `max_candidates_per_zone` to be gentler on the
+resolvers; raise the rate only against resolvers you operate.
+
+**Timing.** The engine gives a run `checks.domain.lookalike.timeout` (30m by
+default, instead of the 2m of other checks). The check stops its sweep a tenth
+earlier so that the result can be stored. If the budget ends first, the
+observation records `budget_exhausted` and `unchecked`, and the run is partial:
+absence proves nothing, so no finding resolves.
+
+**Unknown is not absent.** A SERVFAIL, a timeout or a resolver error on any
+candidate marks the run partial (`unknown` and `unknown_sample` in the
+observation). Lame delegations and broken DNSSEC among hundreds of random names
+make this common; findings are still raised and refreshed, but a lookalike that
+went away resolves only after a complete run.
+
+**Switching it off.** `checks.domain.lookalike.enabled: false` skips the check
+everywhere (its findings resolve), `zones: [...]` limits it to some apexes, and
+`exclude: [...]` ignores names (partners, defensive registrations). Air-gapped
+deployments keep it off or give it internal resolvers; `intel.enabled: false`
+does not affect it because it uses no metadata service. There is no Certificate
+Transparency escalation to `high`; see
+[configuration](configuration.md#check-specific-options).
 
 ## Skipped checks
 

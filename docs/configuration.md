@@ -304,7 +304,8 @@ resolvers, so inside a cluster or VPC with split-horizon DNS your internal names
 resolve to private addresses (which the scope guard refuses to probe) and you see
 the inside view. List public resolvers to see your names as an outside attacker
 does: the same answers the internet gets, including CDN and proxy addresses. Both
-the DNS checks and the address lookup before every connection use them; entries
+the DNS checks and the address lookup before every connection use them, and so
+does the lookalike sweep of `domain.lookalike`; entries
 are tried in rotation. Leave it empty to keep the system resolvers. Notifier and
 source calls (for example an in-cluster Alertmanager URL) are not affected and
 keep using the system resolver.
@@ -353,7 +354,7 @@ checks:
 
 | Key | Default | Effect |
 |---|---|---|
-| `interval` | the tier's (or asset group's) interval; `12h` for `domain.expiry` | Replaces the tier interval for this check. May shorten or lengthen it. Must be a duration `> 0`. A check with its own default cadence (`domain.expiry`: registry data moves slowly) uses it instead of the tier's; this key still overrides it. |
+| `interval` | the tier's (or asset group's) interval; `12h` for `domain.expiry`, `7d` for `domain.lookalike` | Replaces the tier interval for this check. May shorten or lengthen it. Must be a duration `> 0`. A check with its own default cadence (`domain.expiry`: registry data moves slowly; `domain.lookalike`: a sweep costs hundreds of DNS queries) uses it instead of the tier's; this key still overrides it. |
 | `on_new_asset` | `true` | Scan this check as soon as an asset is added, changed or revived. Can only switch the tier's `on_inventory_change` off for this check, never on. |
 
 ### Check-specific options
@@ -368,6 +369,13 @@ ignored):
 | `dns.hygiene` | `expects_mail` | `false` | Force mail treatment of a zone. Without it, a zone with MX records gets medium for a missing DMARC/SPF record and a zone without MX (parked) gets low, with a null-sender recommendation (`v=spf1 -all`, `v=DMARC1; p=reject;`). |
 | `domain.expiry` | `high_days`, `medium_days`, `low_days` | `14`, `30`, `60` | Days before expiry at which `expiring` is high, medium and low. Must satisfy `1 <= high_days <= medium_days <= low_days <= 3650`; invalid values fall back to the defaults and are noted in the observation. |
 | `domain.expiry` | `lock_exempt_tlds` | `[]` | TLDs (for example `[de]`) whose registrars cannot set transfer or delete locks: `transfer-unlocked` and `no-delete-protection` are not raised for them. |
+| `domain.lookalike` | `enabled` | `true` | `false` switches the check off (and resolves its findings). The check is DNS-only and does not depend on `intel`. |
+| `domain.lookalike` | `zones` | every owned apex | Only these registrable domains are swept. Apexes not listed record `lookalike: not_selected` and their findings resolve. |
+| `domain.lookalike` | `exclude` | `[]` | Names to ignore, for example known partners or defensive registrations: a name and everything under it is never queried or reported. Every owned zone is ignored automatically. |
+| `domain.lookalike` | `tlds` | about 25 common suffixes (`com`, `net`, `org`, `io`, `co`, `app`, ...) | Suffixes tried by the TLD-swap technique. `[]` turns the technique off. Invalid names are ignored and noted. |
+| `domain.lookalike` | `max_candidates_per_zone`, `max_findings_per_zone` | `600`, `50` | Cap on the names queried per apex per run (taken evenly across the techniques; the observation says how many were dropped) and on the findings reported (highest severity first; the observation says how many were cut). `1` to `5000` and `1` to `500`. |
+| `domain.lookalike` | `min_label_length` | `5` | Brand labels shorter than this are not permuted at all: a 3-letter label yields mostly meaningless noise. `1` to `63`. |
+| `domain.lookalike` | `rate_per_second` | `20` | Hard ceiling on DNS queries per second for the whole process, however many zones run at once. `(0, 1000]`. Read at startup. Invalid values fall back to the default and are noted. |
 | `dns.takeover` | `timeout_seconds` | `10` | Per-request timeout. Before reporting, the check handshakes with the owned hostname over HTTPS: a certificate valid for the host that is not the provider's default certificate suppresses the finding. |
 
 `tls.cert` reports hostname-mismatch, self-signed and untrusted-chain findings
@@ -391,6 +399,44 @@ a domain the registry does not know, a lookup failure or `intel.enabled:
 false` raise nothing: the observation says `rdap: unsupported`, `not_found`,
 `unavailable` or `skipped` and the run is partial, so no finding resolves on
 missing data.
+
+`domain.lookalike` finds registered lookalikes of your registrable domains
+(typosquats such as `exmple.com`, `examp1e.com`, `ex-ample.com`, `example.net`
+and confusable Unicode as `xn--` names), a common phishing and brand-abuse
+vector. It runs once per owned apex (`example.com`, not
+`corp.example.com`), by default every 7 days. It is **DNS-only**: it generates
+permutations of the brand label and asks your recursive resolvers whether each
+name exists and what its NS, A, AAAA and MX answers are. It never connects to,
+or fetches anything from, a lookalike. The techniques are omission,
+repetition, transposition, QWERTY-neighbour replacement and insertion, vowel
+swap, hyphen insertion, ASCII homoglyphs (`rn`/`m`, `vv`/`w`, `l`/`1`/`i`,
+`o`/`0`), a capped set of confusable Unicode letters rendered as punycode,
+splitting the label into a subdomain (`ex.ample.com`), single-bit flips that
+stay in the hostname alphabet, and swapping the TLD. Names inside any owned zone
+(the estate legitimately owns many variants of its own names, including your
+other apexes) and names under `exclude` are never generated.
+
+A candidate is registered when it has NS records, an A/AAAA record or a usable
+MX (a null MX, `0 .`, does not count), or is an alias (CNAME). Each registered
+lookalike is its own finding, `registered:<domain>`, so a new registration
+opens a new finding and alerts and one that disappears resolves normally:
+`medium` when it has MX (it can receive mail: business e-mail compromise,
+phishing), `low` when it only resolves or only delegates (typically parked).
+Evidence carries the technique, the A/AAAA/MX/NS answers and when it was first
+seen. There is no escalation to `high` for a lookalike that already has a
+certificate in Certificate Transparency: the only CT client deckard has belongs
+to discovery expansion (it queries crt.sh outside the scope guard and `intel`),
+and checks may reach the network only through those two, so no certificate data
+is consulted.
+
+SERVFAIL, timeouts and resolver errors are unknown, never "does not exist":
+the run is partial, so nothing resolves, and the observation lists a sample
+under `unknown_sample`. A run that exhausts its time budget (the engine's
+`checks.domain.lookalike.timeout`, 30m by default; the check stops a tenth
+earlier to store its result) is partial too and records `unchecked`. Partial
+runs still raise and refresh findings. See
+[operations.md](operations.md#lookalike-sweeps-domainlookalike) for the query
+volume and the design.
 
 Order of evaluation: the scope guard, then the tier's `enabled` (global, then
 asset-group overrides), then the per-check values. A per-check override can
