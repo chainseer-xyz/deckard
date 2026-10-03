@@ -1,13 +1,10 @@
 // Package all builds every built-in passive check from the global per-check
 // config map, for the wiring code to register.
-//
-// cloud.bucket is deliberately NOT implemented yet (deferred): it needs bucket
-// existence/ACL probing against third-party cloud APIs, which does not fit the
-// owned-hostname-only passive contract without further design.
 package all
 
 import (
 	"github.com/chainseer-xyz/deckard/internal/check"
+	"github.com/chainseer-xyz/deckard/internal/check/cloud/bucket"
 	"github.com/chainseer-xyz/deckard/internal/check/dns/dangling"
 	"github.com/chainseer-xyz/deckard/internal/check/dns/hygiene"
 	"github.com/chainseer-xyz/deckard/internal/check/dns/takeover"
@@ -32,6 +29,7 @@ func Checks(cfg map[string]map[string]any) []check.Check {
 		dangling.Checks, takeover.Checks, hygiene.Checks, cert.Checks,
 		probe.Checks, headers.Checks, exposed.Checks, correlation.Checks, expiry.Checks, lookalike.Checks, internetdb.Checks, policy.Checks,
 		probe.Checks, headers.Checks, exposed.Checks, correlation.Checks, expiry.Checks, history.Checks,
+		probe.Checks, headers.Checks, exposed.Checks, correlation.Checks, expiry.Checks, history.Checks, bucket.Checks,
 	} {
 		out = append(out, ctor(cfg)...)
 	}

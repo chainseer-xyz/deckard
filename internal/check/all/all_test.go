@@ -14,6 +14,7 @@ func TestRegisterAllPassive(t *testing.T) {
 	}
 	want := []string{"dns.dangling", "dns.hygiene", "dns.takeover", "domain.expiry", "domain.lookalike", "http.headers", "http.probe", "intel.internetdb", "mail.policy", "origin.correlation", "origin.exposed", "tls.cert"}
 	want := []string{"dns.dangling", "dns.hygiene", "dns.takeover", "domain.expiry", "http.headers", "http.probe", "origin.correlation", "origin.exposed", "tls.cert", "web.history"}
+	want := []string{"cloud.bucket", "dns.dangling", "dns.hygiene", "dns.takeover", "domain.expiry", "http.headers", "http.probe", "origin.correlation", "origin.exposed", "tls.cert", "web.history"}
 	all := r.All()
 	if len(all) != len(want) {
 		t.Fatalf("got %d checks", len(all))
