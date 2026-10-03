@@ -481,6 +481,15 @@ func (r *runner) checkTimeout(name string) time.Duration {
 // timeoutFor is the deadline of one run of c: checks.<name>.timeout, else the
 // check's own default (check.DefaultTimeouter), else 2m.
 func (r *runner) timeoutFor(c check.Check) time.Duration {
+	// nuclei.check.timeout is the per-request flag consumed by the scanner.
+	// Its process deadline is run_timeout, exposed through DefaultTimeout.
+	if strings.HasSuffix(c.Name(), ".nuclei") {
+		if dt, ok := c.(check.DefaultTimeouter); ok {
+			if d := dt.DefaultTimeout(); d > 0 {
+				return d
+			}
+		}
+	}
 	if d, ok := r.configuredTimeout(c.Name()); ok {
 		return d
 	}

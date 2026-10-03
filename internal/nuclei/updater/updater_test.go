@@ -89,6 +89,44 @@ func (e *env) noStaging() {
 	}
 }
 
+func TestActiveDirUsesDownloadedThenBakedFallback(t *testing.T) {
+	baked := release(t)
+	e := newEnv(t, func(c *updater.Config) { c.BakedDir = baked })
+	if got, source, err := e.u.ActiveDir(); err != nil || source != "baked" || got != resolve(t, baked) {
+		t.Fatalf("missing current = %s/%s/%v, want baked", got, source, err)
+	}
+	current := filepath.Join(e.dir, "releases", "good")
+	if err := os.MkdirAll(filepath.Dir(current), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	good := release(t)
+	if err := os.Symlink(good, current); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(current, e.u.CurrentLink()); err != nil {
+		t.Fatal(err)
+	}
+	if got, source, err := e.u.ActiveDir(); err != nil || source != "downloaded" || got != resolve(t, good) {
+		t.Fatalf("valid current = %s/%s/%v, want downloaded", got, source, err)
+	}
+	bad := filepath.Join(e.dir, "releases", "bad")
+	if err := os.MkdirAll(bad, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bad, "broken.yaml"), []byte("id: [\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(e.u.CurrentLink()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(bad, e.u.CurrentLink()); err != nil {
+		t.Fatal(err)
+	}
+	if got, source, err := e.u.ActiveDir(); err != nil || source != "baked" || got != resolve(t, baked) {
+		t.Fatalf("corrupt current = %s/%s/%v, want baked", got, source, err)
+	}
+}
+
 func TestFirstInstall(t *testing.T) {
 	e := newEnv(t, nil)
 	e.publish("v10.0.0", release(t), "http/misconfiguration/filler-1.yaml")

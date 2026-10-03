@@ -155,7 +155,8 @@ type runOptions struct {
 	// explicit, when set, replaces the template directory and tag selection
 	// with exactly these template files (already verified to lie inside the
 	// active set): the re-verification run of open findings.
-	explicit []string
+	explicit  []string
+	extraDirs []string
 }
 
 // excludeTags returns -etags: configured exclusions, always including dos
@@ -238,6 +239,7 @@ func buildArgs(tg target, a model.Asset, o runOptions) ([]string, error) {
 		}
 		args = append(args, "-t", resolveDir(d))
 	}
+	args = customTemplateArgs(args, o.extraDirs)
 	if o.cfg.ScanMode != "all" && len(o.explicit) == 0 {
 		args = append(args, "-tags", strings.Join(tags, ","))
 	}

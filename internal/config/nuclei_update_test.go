@@ -22,6 +22,9 @@ func TestNucleiUpdateDefaults(t *testing.T) {
 	if cfg.Nuclei.ScanMode != "tech" {
 		t.Errorf("scan_mode default = %q, want tech", cfg.Nuclei.ScanMode)
 	}
+	if cfg.Nuclei.ProcessConcurrency != 1 || cfg.Nuclei.ProcessMemoryLimit != "768MiB" {
+		t.Errorf("process defaults = %d/%q", cfg.Nuclei.ProcessConcurrency, cfg.Nuclei.ProcessMemoryLimit)
+	}
 	if cfg.Nuclei.UpdateCurrentDir() != cfg.Nuclei.TemplatesDir {
 		t.Errorf("UpdateCurrentDir = %q", cfg.Nuclei.UpdateCurrentDir())
 	}
@@ -55,14 +58,19 @@ func TestNucleiUpdateOptOutAndOverrides(t *testing.T) {
 
 func TestNucleiUpdateValidation(t *testing.T) {
 	for name, body := range map[string]string{
-		"interval":     "nuclei: {update: {interval: 0s}}",
-		"neg interval": "nuclei: {update: {interval: -1h}}",
-		"timeout":      "nuclei: {update: {timeout: 0s}}",
-		"max_age_warn": "nuclei: {update: {max_age_warn: 0s}}",
-		"empty dir":    "nuclei: {update: {dir: ''}}",
-		"relative dir": "nuclei: {update: {dir: relative/dir}}",
-		"scan_mode":    "nuclei: {scan_mode: everything}",
-		"leading dash": "nuclei: {update: {dir: -x}}",
+		"interval":            "nuclei: {update: {interval: 0s}}",
+		"neg interval":        "nuclei: {update: {interval: -1h}}",
+		"timeout":             "nuclei: {update: {timeout: 0s}}",
+		"max_age_warn":        "nuclei: {update: {max_age_warn: 0s}}",
+		"empty dir":           "nuclei: {update: {dir: ''}}",
+		"relative dir":        "nuclei: {update: {dir: relative/dir}}",
+		"scan_mode":           "nuclei: {scan_mode: everything}",
+		"leading dash":        "nuclei: {update: {dir: -x}}",
+		"process concurrency": "nuclei: {process_concurrency: 0}",
+		"process memory":      "nuclei: {process_memory_limit: 12MB}",
+		"relative custom":     "nuclei: {extra_templates_dirs: [templates/custom]}",
+		"empty custom":        "nuclei: {extra_templates_dirs: ['']}",
+		"dash custom":         "nuclei: {extra_templates_dirs: [/tmp/-templates]}",
 	} {
 		_, err := Load(writeCfg(t, body), nil)
 		if err == nil {

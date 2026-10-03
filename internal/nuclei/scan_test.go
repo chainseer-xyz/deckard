@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/chainseer-xyz/deckard/internal/config"
 	"github.com/chainseer-xyz/deckard/internal/model"
@@ -368,5 +369,14 @@ func TestScanWithFakeBinary(t *testing.T) {
 	calls := bin.ScanCalls()
 	if len(calls) != 1 || len(calls[0].Targets) != 2 {
 		t.Fatalf("calls = %+v", calls)
+	}
+}
+
+func TestScaledRunTimeoutGrowsWithBatch(t *testing.T) {
+	if got := scaledRunTimeout(10*time.Second, 1); got != 10*time.Second {
+		t.Errorf("one target timeout = %s", got)
+	}
+	if got := scaledRunTimeout(10*time.Second, 20); got != 10*time.Second+19*30*time.Second {
+		t.Errorf("twenty target timeout = %s, want %s", got, 10*time.Second+19*30*time.Second)
 	}
 }

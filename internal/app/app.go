@@ -237,7 +237,20 @@ func (a *App) checks() []check.Check {
 	cs = append(cs, tlsconfig.Checks(a.cfg.Checks)...)
 	cs = append(cs, exposed.Checks(a.cfg.Checks)...)
 	nw := a.nuclei()
-	cs = append(cs, nuclei.Checks(nw.cfg, a.cfg.Checks, nuclei.ScopeVerifier(verify), nw.opts...)...)
+	opts := append([]nuclei.Option{}, nw.opts...)
+	opts = append(opts, nuclei.WithEnv(nw.env), nuclei.WithLogger(a.log),
+		nuclei.WithRunObserver(a.metrics.ObserveNucleiRun), nuclei.WithProcessGate(nw.gate))
+	if nw.upd != nil {
+		upd := nw.upd
+		opts = append(opts, nuclei.WithTemplateSource(func() string {
+			_, source, err := upd.ActiveDir()
+			if err != nil {
+				return "configured"
+			}
+			return source
+		}))
+	}
+	cs = append(cs, nuclei.Checks(nw.cfg, a.cfg.Checks, nuclei.ScopeVerifier(verify), opts...)...)
 	cs = append(cs, plugin.Checks(a.cfg.Plugins, plugin.ScopeVerifier(verify))...)
 	return append(cs, a.opts.ExtraChecks...)
 }

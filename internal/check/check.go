@@ -151,9 +151,8 @@ type WantsOwnedZones interface {
 
 // DefaultTimeouter is an optional Check interface for checks whose runs
 // legitimately take longer than the engine's 2m default (a rate-limited sweep
-// of DNS names, for example). checks.<name>.timeout still overrides it. The
-// engine's deadline also covers storing the result, so a check should finish
-// its own work before it.
+// of DNS names, for example). The engine's deadline also covers storing the
+// result, so a check should finish its own work before it.
 type DefaultTimeouter interface {
 	DefaultTimeout() time.Duration
 }

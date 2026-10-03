@@ -270,12 +270,15 @@ type LearningConfig struct {
 }
 
 type NucleiConfig struct {
-	Enabled      bool     `koanf:"enabled"`
-	Binary       string   `koanf:"binary"`
-	TemplatesDir string   `koanf:"templates_dir"`
-	SeverityMin  string   `koanf:"severity_min"`
-	TagsExclude  []string `koanf:"tags_exclude"`
-	ExtraTags    []string `koanf:"extra_tags"`
+	Enabled            bool     `koanf:"enabled"`
+	Binary             string   `koanf:"binary"`
+	TemplatesDir       string   `koanf:"templates_dir"`
+	ExtraTemplatesDirs []string `koanf:"extra_templates_dirs"`
+	SeverityMin        string   `koanf:"severity_min"`
+	TagsExclude        []string `koanf:"tags_exclude"`
+	ExtraTags          []string `koanf:"extra_tags"`
+	ProcessConcurrency int      `koanf:"process_concurrency"`
+	ProcessMemoryLimit string   `koanf:"process_memory_limit"`
 	// ScanMode is "tech" (default: templates selected by detected technology,
 	// with a generic fallback) or "all" (every non-excluded template).
 	ScanMode string             `koanf:"scan_mode"`
@@ -450,6 +453,8 @@ func Defaults() map[string]any {
 		"learning.stable_after":                   3,
 		"nuclei.enabled":                          true,
 		"nuclei.binary":                           "nuclei",
+		"nuclei.process_concurrency":              1,
+		"nuclei.process_memory_limit":             "768MiB",
 		"nuclei.severity_min":                     "low",
 		"nuclei.tags_exclude":                     []string{"dos", "fuzz"},
 		"nuclei.scan_mode":                        "tech",
@@ -769,6 +774,23 @@ func (c *Config) validateNuclei(add func(string, ...any)) {
 	if n.ScanMode != "tech" && n.ScanMode != "all" {
 		add("nuclei.scan_mode %q: must be tech|all", n.ScanMode)
 	}
+	if n.ProcessConcurrency < 1 {
+		add("nuclei.process_concurrency must be >= 1")
+	}
+	if _, err := parseByteSize(n.ProcessMemoryLimit); err != nil {
+		add("nuclei.process_memory_limit: %v", err)
+	}
+	for i, d := range n.ExtraTemplatesDirs {
+		d = strings.TrimSpace(d)
+		switch {
+		case d == "":
+			add("nuclei.extra_templates_dirs[%d] must not be empty", i)
+		case !filepath.IsAbs(d):
+			add("nuclei.extra_templates_dirs[%d] %q must be an absolute path", i, d)
+		case strings.HasPrefix(filepath.Base(filepath.Clean(d)), "-"):
+			add("nuclei.extra_templates_dirs[%d] must not have a directory name beginning with -", i)
+		}
+	}
 	u := n.Update
 	if !u.Enabled {
 		return
@@ -788,6 +810,31 @@ func (c *Config) validateNuclei(add func(string, ...any)) {
 	case !filepath.IsAbs(u.Dir):
 		add("nuclei.update.dir %q must be an absolute path", u.Dir)
 	}
+}
+
+func parseByteSize(s string) (int64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("must not be empty")
+	}
+	units := []struct {
+		name string
+		mult int64
+	}{{"GiB", 1 << 30}, {"MiB", 1 << 20}, {"KiB", 1 << 10}, {"B", 1}}
+	for _, u := range units {
+		unit, multiplier := u.name, u.mult
+		if strings.HasSuffix(s, unit) {
+			n, err := strconv.ParseInt(strings.TrimSpace(strings.TrimSuffix(s, unit)), 10, 64)
+			if err != nil || n <= 0 {
+				return 0, fmt.Errorf("must be a positive byte size such as 768MiB")
+			}
+			if n > (1<<62)/multiplier {
+				return 0, fmt.Errorf("is too large")
+			}
+			return n * multiplier, nil
+		}
+	}
+	return 0, fmt.Errorf("must use B, KiB, MiB or GiB")
 }
 
 func (c *Config) validateSources(add func(string, ...any)) {

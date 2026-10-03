@@ -26,6 +26,10 @@ import (
 // the profile's per-host rate.
 const maxBulkHosts = 25
 
+// maxScanTargets bounds one process and keeps target lists and worst-case
+// request time predictable. Delta jobs use the same limit when they enqueue.
+const maxScanTargets = 50
+
 // ScanTarget is one web target of a template-limited scan. ID is opaque to
 // this package (the engine passes the asset id) and keys the result.
 type ScanTarget struct {
@@ -277,7 +281,18 @@ func (s *Scanner) runSettings(req ScanRequest, hosts int) (args []string, runTim
 	if cfg["interactsh"] != true {
 		args = append(args, "-no-interactsh")
 	}
-	return args, time.Duration(secondsOf(cfg["run_timeout"], 600)) * time.Second, nil
+	base := time.Duration(secondsOf(cfg["run_timeout"], 600)) * time.Second
+	return args, scaledRunTimeout(base, hosts), nil
+}
+
+func scaledRunTimeout(base time.Duration, targets int) time.Duration {
+	if base <= 0 {
+		base = 10 * time.Minute
+	}
+	if targets < 1 {
+		targets = 1
+	}
+	return base + time.Duration(targets-1)*30*time.Second
 }
 
 // Scan runs req.Templates against req.Targets in one nuclei process. Targets
@@ -286,6 +301,28 @@ func (s *Scanner) runSettings(req ScanRequest, hosts int) (args []string, runTim
 // findings are valid even when the error is non-nil (nuclei may have crashed
 // after matching); the caller should process them and still surface the error.
 func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (ScanResult, error) {
+	if len(req.Targets) > maxScanTargets {
+		all := ScanResult{Findings: map[int64][]model.FindingInput{}}
+		for start := 0; start < len(req.Targets); start += maxScanTargets {
+			end := min(start+maxScanTargets, len(req.Targets))
+			part := req
+			part.Targets = req.Targets[start:end]
+			got, err := s.scanBatch(ctx, part)
+			for id, fs := range got.Findings {
+				all.Findings[id] = append(all.Findings[id], fs...)
+			}
+			all.Refused = append(all.Refused, got.Refused...)
+			all.Scanned += got.Scanned
+			if err != nil {
+				return all, err
+			}
+		}
+		return all, nil
+	}
+	return s.scanBatch(ctx, req)
+}
+
+func (s *Scanner) scanBatch(ctx context.Context, req ScanRequest) (ScanResult, error) {
 	res := ScanResult{Findings: map[int64][]model.FindingInput{}}
 	root, err := s.TemplateRoot()
 	if err != nil {
@@ -328,6 +365,7 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (ScanResult, error)
 	if len(lines) == 0 {
 		return res, nil
 	}
+	extra := validExtraDirs(s.cfg.ExtraTemplatesDirs, s.opts)
 
 	args, runTimeout, err := s.runSettings(req, len(hosts))
 	if err != nil {
@@ -349,10 +387,15 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (ScanResult, error)
 	// A template list file is accepted by -t (verified against nuclei v3.11.1);
 	// it keeps argv small however many templates a release adds.
 	args = append([]string{"-l", targetsFile, "-t", templatesFile}, args...)
+	args = customTemplateArgs(args, extra)
 
 	rctx, cancel := context.WithTimeout(ctx, runTimeout)
 	defer cancel()
+	start := time.Now()
 	out, runErr := s.runner.Run(rctx, s.cfg.Binary, args)
+	if s.opts.observe != nil {
+		s.opts.observe(time.Since(start), res.Scanned, s.opts.templateSource(), runErr)
+	}
 	matches, perr := ParseMatches(bytes.NewReader(out))
 	if perr != nil {
 		return res, perr

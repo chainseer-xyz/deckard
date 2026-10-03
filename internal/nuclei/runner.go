@@ -28,7 +28,8 @@ type ExecRunner struct {
 	// Env, when set, is called before every run for extra environment
 	// variables (they override the minimal inherited set) and a cleanup to run
 	// afterwards. An error fails the run before the binary starts.
-	Env func() ([]string, func(), error)
+	Env  func() ([]string, func(), error)
+	Gate *ProcessGate
 }
 
 type capBuffer struct {
@@ -67,6 +68,11 @@ func (t *truncBuffer) Write(p []byte) (int, error) {
 // Run implements Runner. When nuclei exits non-zero the captured stdout is
 // still returned alongside the error so callers can salvage matches.
 func (r ExecRunner) Run(ctx context.Context, binary string, args []string) ([]byte, error) {
+	release, err := r.Gate.acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("nuclei: waiting for process slot: %w", err)
+	}
+	defer release()
 	env := minimalEnv()
 	if r.Env != nil {
 		extra, cleanup, err := r.Env()
@@ -85,7 +91,7 @@ func (r ExecRunner) Run(ctx context.Context, binary string, args []string) ([]by
 	cmd.Env = env
 	setProcessGroup(cmd)
 	cmd.WaitDelay = 3 * time.Second
-	err := cmd.Run()
+	err = cmd.Run()
 	if out.over {
 		return out.buf.Bytes(), fmt.Errorf("nuclei output exceeded %d bytes", maxStdout)
 	}

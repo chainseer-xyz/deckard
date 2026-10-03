@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
+	"github.com/chainseer-xyz/deckard/internal/nuclei"
 	"github.com/chainseer-xyz/deckard/internal/store"
 )
 
@@ -66,6 +67,11 @@ type Metrics struct {
 	templates       *templateState
 	vi              *vulnintelMetrics
 	intel           *intelMetrics
+	nucleiDuration  *prometheus.HistogramVec
+	nucleiTargets   *prometheus.HistogramVec
+	nucleiErrors    *prometheus.CounterVec
+	nucleiSource    *prometheus.GaugeVec
+	nucleiLastClean prometheus.Gauge
 }
 
 var _ Recorder = (*Metrics)(nil)
@@ -81,6 +87,24 @@ func New(version, commit string) *Metrics {
 	m.scanErrors = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "deckard_scan_errors_total", Help: "Check executions that returned an error.",
 	}, []string{"check"})
+	m.nucleiDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "deckard_nuclei_run_duration_seconds", Help: "Duration of nuclei processes by template source.", Buckets: buckets,
+	}, []string{"source"})
+	m.nucleiTargets = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "deckard_nuclei_targets_per_run", Help: "Targets handed to each nuclei process.", Buckets: []float64{1, 2, 5, 10, 20, 50},
+	}, []string{"source"})
+	m.nucleiErrors = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "deckard_nuclei_errors_total", Help: "Nuclei process and template errors by reason.",
+	}, []string{"reason"})
+	m.nucleiSource = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "deckard_nuclei_templates_source", Help: "The template source last used by nuclei (one series is 1).",
+	}, []string{"source"})
+	m.nucleiLastClean = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "deckard_nuclei_last_clean_run_timestamp", Help: "Unix time of the last successful nuclei run.",
+	})
+	for _, source := range []string{"downloaded", "baked", "configured"} {
+		m.nucleiSource.WithLabelValues(source)
+	}
 	m.checksRun = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "deckard_checks_run_total", Help: "Check executions.",
 	}, []string{"check", "tier"})
@@ -118,12 +142,33 @@ func New(version, commit string) *Metrics {
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		m.scanDuration, m.scanErrors, m.checksRun, m.checksSkipped, m.scopeRefusals, m.heartbeats, m.syncDuration,
 		m.queueDepth, m.invChanges, m.reclaimed, m.collectErrors, build,
+		m.nucleiDuration, m.nucleiTargets, m.nucleiErrors, m.nucleiSource, m.nucleiLastClean,
 		m.ref.entries, m.ref.total, m.ref,
 		m.vi.refresh, m.vi.kevOpen, m.vi,
 		m.intel.requests, m.intel.duration,
 	)
 	m.initTemplateMetrics()
 	return m
+}
+
+// ObserveNucleiRun records process-level metrics. A zero-duration call is a
+// validation event rather than a process execution.
+func (m *Metrics) ObserveNucleiRun(d time.Duration, targets int, source string, err error) {
+	if source != "downloaded" && source != "baked" && source != "configured" {
+		source = "configured"
+	}
+	m.nucleiSource.WithLabelValues(source).Set(1)
+	if d > 0 {
+		m.nucleiDuration.WithLabelValues(source).Observe(d.Seconds())
+	}
+	if targets > 0 {
+		m.nucleiTargets.WithLabelValues(source).Observe(float64(targets))
+	}
+	if err != nil {
+		m.nucleiErrors.WithLabelValues(nuclei.ErrorReason(err)).Inc()
+	} else if targets > 0 {
+		m.nucleiLastClean.Set(float64(time.Now().Unix()))
+	}
 }
 
 // Registry returns the underlying registry.

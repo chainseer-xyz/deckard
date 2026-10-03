@@ -57,6 +57,9 @@ type Exec func(ctx context.Context, binary string, args, env []string) ([]byte, 
 type Config struct {
 	// Dir is the writable state root (nuclei.update.dir).
 	Dir string
+	// BakedDir is the read-only template snapshot shipped in the full image.
+	// It is used when the writable current release is absent or invalid.
+	BakedDir string
 	// Binary is the nuclei executable (default "nuclei").
 	Binary string
 	// Timeout bounds one update, download included (default 10m).
@@ -117,8 +120,10 @@ type Status struct {
 
 // Updater downloads, validates and publishes nuclei template releases.
 type Updater struct {
-	cfg Config
-	mu  sync.Mutex
+	cfg     Config
+	mu      sync.Mutex
+	validMu sync.Mutex
+	valid   map[string]bool
 }
 
 // New validates cfg and returns an Updater. It does not touch the disk.
@@ -160,7 +165,7 @@ func New(cfg Config) (*Updater, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.New(slog.DiscardHandler)
 	}
-	return &Updater{cfg: cfg}, nil
+	return &Updater{cfg: cfg, valid: map[string]bool{}}, nil
 }
 
 // Dir returns the state root.
@@ -173,6 +178,41 @@ func (u *Updater) CurrentLink() string { return filepath.Join(u.cfg.Dir, "curren
 // fails when no release has been installed yet.
 func (u *Updater) CurrentDir() (string, error) {
 	return filepath.EvalSymlinks(u.CurrentLink())
+}
+
+// ActiveDir returns the current validated release, or the validated baked
+// snapshot when the writable volume is empty or damaged. source is either
+// "downloaded" or "baked".
+func (u *Updater) ActiveDir() (dir, source string, err error) {
+	if current, currentErr := u.CurrentDir(); currentErr == nil {
+		if u.validated(current) {
+			return current, "downloaded", nil
+		}
+	}
+	if strings.TrimSpace(u.cfg.BakedDir) != "" {
+		if u.validated(u.cfg.BakedDir) {
+			real, realErr := filepath.EvalSymlinks(u.cfg.BakedDir)
+			if realErr == nil {
+				return real, "baked", nil
+			}
+		}
+	}
+	return "", "", fmt.Errorf("no valid downloaded or baked nuclei templates")
+}
+
+func (u *Updater) validated(dir string) bool {
+	dir = filepath.Clean(dir)
+	u.validMu.Lock()
+	if ok, found := u.valid[dir]; found {
+		u.validMu.Unlock()
+		return ok
+	}
+	u.validMu.Unlock()
+	_, err := u.validate(dir)
+	u.validMu.Lock()
+	u.valid[dir] = err == nil
+	u.validMu.Unlock()
+	return err == nil
 }
 
 var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
@@ -288,6 +328,9 @@ func (u *Updater) update(ctx context.Context) (Update, error) {
 	if real, err := filepath.EvalSymlinks(rel); err == nil {
 		rel = real
 	}
+	u.validMu.Lock()
+	u.valid[rel] = true
+	u.validMu.Unlock()
 	return Update{
 		Version: version, TemplateCount: st.TemplateCount, NewTemplates: newPaths, NewIDs: newIDs,
 		UpdatedAt: now, Changed: true, Dir: rel,
@@ -386,81 +429,10 @@ func readVersion(cfgDir string) string {
 // links escaping the tree, no special files, bounded size and file count, and
 // enough real templates (including http ones) to be a plausible release.
 func (u *Updater) validate(root string) (*templates.Tree, error) {
-	real, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return nil, err
-	}
-	var bytesTotal int64
-	files := 0
-	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		files++
-		if files > u.cfg.MaxFiles {
-			return fmt.Errorf("more than %d files", u.cfg.MaxFiles)
-		}
-		switch {
-		case d.Type()&fs.ModeSymlink != 0:
-			target, err := filepath.EvalSymlinks(p)
-			if err != nil {
-				return fmt.Errorf("dangling symlink %s", rel(root, p))
-			}
-			if !within(real, target) {
-				return fmt.Errorf("symlink %s escapes the template directory", rel(root, p))
-			}
-			return nil // WalkDir does not follow it; the link target was checked above
-		case d.IsDir():
-			return nil
-		case !d.Type().IsRegular():
-			return fmt.Errorf("special file %s", rel(root, p))
-		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		bytesTotal += info.Size()
-		if bytesTotal > u.cfg.MaxBytes {
-			return fmt.Errorf("larger than %d bytes", u.cfg.MaxBytes)
-		}
-		return nil
+	return templates.Validate(root, templates.Limits{
+		MinTemplates: u.cfg.MinTemplates, MinHTTPTemplates: u.cfg.MinHTTPTemplates,
+		MaxBytes: u.cfg.MaxBytes, MaxFiles: u.cfg.MaxFiles,
 	})
-	if err != nil {
-		return nil, err
-	}
-	tree, err := templates.Scan(root)
-	if err != nil {
-		return nil, err
-	}
-	if len(tree.Templates) < u.cfg.MinTemplates {
-		return nil, fmt.Errorf("only %d templates (minimum %d)", len(tree.Templates), u.cfg.MinTemplates)
-	}
-	httpN := 0
-	for _, m := range tree.Templates {
-		if m.Protocol == "http" {
-			httpN++
-		}
-	}
-	if httpN < u.cfg.MinHTTPTemplates {
-		return nil, fmt.Errorf("only %d http templates (minimum %d)", httpN, u.cfg.MinHTTPTemplates)
-	}
-	if total := len(tree.Templates) + tree.Skipped; tree.Skipped*10 > total {
-		return nil, fmt.Errorf("%d of %d template files are unparseable", tree.Skipped, total)
-	}
-	return tree, nil
-}
-
-func rel(root, p string) string {
-	if r, err := filepath.Rel(root, p); err == nil {
-		return r
-	}
-	return p
-}
-
-// within reports whether target is root or below it.
-func within(root, target string) bool {
-	r, err := filepath.Rel(root, target)
-	return err == nil && r != ".." && !strings.HasPrefix(r, ".."+string(filepath.Separator))
 }
 
 // ---- layout, state, pruning ---------------------------------------------------
