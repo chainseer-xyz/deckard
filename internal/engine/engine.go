@@ -73,6 +73,11 @@ type Engine struct {
 	r      *runner
 	client *river.Client[pgx.Tx] // nil without a pool
 	roles  map[string]bool
+	// clientID is the River client id, recorded by River in
+	// river_job.attempted_by and registered in deckard_instances.
+	clientID string
+	// kinds are the job kinds this engine's client works.
+	kinds []string
 
 	vulnOnce sync.Once
 	vuln     *vulnintelJob
@@ -84,6 +89,9 @@ type Engine struct {
 
 	stopGuard context.CancelFunc
 	guardDone chan struct{}
+
+	stopInst context.CancelFunc
+	instDone chan struct{}
 }
 
 // New validates deps and builds the engine (and, with a Pool, the River
@@ -150,22 +158,39 @@ func New(d Deps, opts ...Option) (*Engine, error) {
 	return e, nil
 }
 
+// workerSet registers River workers and remembers what it registered.
+type workerSet struct {
+	workers *river.Workers
+	kinds   []string
+}
+
+func addWorker[T river.JobArgs](s *workerSet, w river.Worker[T]) {
+	river.AddWorker(s.workers, w)
+	var args T
+	s.kinds = append(s.kinds, args.Kind())
+}
+
 func (e *Engine) newClient() (*river.Client[pgx.Tx], error) {
-	workers := river.NewWorkers()
-	river.AddWorker(workers, &syncWorker{r: e.r})
-	river.AddWorker(workers, &scanWorker{r: e.r})
-	river.AddWorker(workers, &scheduleWorker{r: e.r})
-	river.AddWorker(workers, &housekeepingWorker{r: e.r})
-	river.AddWorker(workers, &expandWorker{r: e.r})
-	river.AddWorker(workers, &scheduleExpansionWorker{r: e.r})
-	river.AddWorker(workers, &refdataWorker{e: e})
-	river.AddWorker(workers, &updateTemplatesWorker{r: e.r})
-	river.AddWorker(workers, &scanNewTemplatesWorker{r: e.r})
-	river.AddWorker(workers, &scanCVEsWorker{r: e.r})
-	river.AddWorker(workers, &vulnintelWorker{e: e})
+	ws := &workerSet{workers: river.NewWorkers()}
+	addWorker(ws, &syncWorker{r: e.r})
+	addWorker(ws, &scanWorker{r: e.r})
+	addWorker(ws, &scheduleWorker{r: e.r})
+	addWorker(ws, &housekeepingWorker{r: e.r})
+	addWorker(ws, &expandWorker{r: e.r})
+	addWorker(ws, &scheduleExpansionWorker{r: e.r})
+	addWorker(ws, &refdataWorker{e: e})
+	addWorker(ws, &updateTemplatesWorker{r: e.r})
+	addWorker(ws, &scanNewTemplatesWorker{r: e.r})
+	addWorker(ws, &scanCVEsWorker{r: e.r})
+	addWorker(ws, &vulnintelWorker{e: e})
+	e.kinds = ws.kinds
+	e.clientID = newClientID(time.Now())
 
 	cfg := &river.Config{
-		Workers: workers,
+		// Explicit (River's default shape) so the instance heartbeat knows
+		// which attempted_by entries are ours; see instances.go.
+		ID:      e.clientID,
+		Workers: ws.workers,
 		Logger:  e.r.log,
 		// Default River retry policy: exponential backoff (attempt^4 seconds
 		// with jitter); per-kind MaxAttempts are set in jobs.go.
@@ -249,10 +274,22 @@ func (e *Engine) Start(ctx context.Context) error {
 	if e.client == nil {
 		return fmt.Errorf("engine: start: %w", ErrNoQueue)
 	}
+	// Register before River fetches anything, so every job this client runs
+	// belongs to a registered, heartbeating instance.
+	if err := e.heartbeat(ctx); err != nil {
+		return fmt.Errorf("engine: start: %w", err)
+	}
 	if err := e.client.Start(ctx); err != nil {
+		e.deregisterQuietly()
 		return fmt.Errorf("engine: start river: %w", err)
 	}
 	e.started = true
+	for _, k := range e.kinds {
+		e.r.rec.JobsReclaimed(k, 0) // series exist from the start, so increase() sees the first reclaim
+	}
+	ictx, icancel := context.WithCancel(context.WithoutCancel(ctx))
+	e.stopInst, e.instDone = icancel, make(chan struct{})
+	go e.instanceLoop(ictx, e.instDone)
 	gctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	e.stopGau, e.gauDone = cancel, make(chan struct{})
 	go e.gaugeLoop(gctx, e.gauDone)
@@ -272,7 +309,9 @@ func (e *Engine) templateUpdateEnabled() bool {
 
 // Stop stops fetching new jobs and waits for in-flight ones until ctx expires,
 // after which running jobs are cancelled (their contexts are cancelled and
-// River retries them on the next start).
+// River retries them on the next start). Once River has stopped cleanly the
+// instance is deregistered; if it has not, the row stays and goes stale, so
+// peers reclaim whatever is still marked running.
 func (e *Engine) Stop(ctx context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -287,6 +326,10 @@ func (e *Engine) Stop(ctx context.Context) error {
 		<-e.guardDone
 		e.stopGuard = nil
 	}
+	// The heartbeat stops first: from here on the row only says "this client
+	// existed", and it is either deleted below or left to go stale.
+	e.stopInst()
+	<-e.instDone
 	err := e.client.Stop(ctx)
 	if err != nil && ctx.Err() != nil {
 		cctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -294,9 +337,24 @@ func (e *Engine) Stop(ctx context.Context) error {
 		if cerr := e.client.StopAndCancel(cctx); cerr != nil {
 			return errors.Join(err, cerr)
 		}
+		e.deregisterQuietly()
 		return fmt.Errorf("engine: graceful stop deadline hit, in-flight jobs cancelled: %w", err)
 	}
+	if err == nil {
+		e.deregisterQuietly()
+	}
 	return err
+}
+
+// deregisterQuietly removes this instance's row on a fresh, short context (the
+// stop context may have expired). A failure only leaves a row that goes stale
+// and is pruned; with nothing left running there is nothing to reclaim.
+func (e *Engine) deregisterQuietly() {
+	ctx, cancel := context.WithTimeout(context.Background(), deregisterTimeout)
+	defer cancel()
+	if err := e.deregister(ctx); err != nil {
+		e.r.log.Warn("engine stop", "err", err)
+	}
 }
 
 // RunOnce performs one sync of every source, then one scan pass of every due

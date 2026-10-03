@@ -353,10 +353,11 @@ type fakeRec struct {
 	syncs   map[string][]bool
 	changes map[string]int
 	depth   map[string]int
+	reclaim map[string]int
 }
 
 func newFakeRec() *fakeRec {
-	return &fakeRec{syncs: map[string][]bool{}, changes: map[string]int{}, depth: map[string]int{}}
+	return &fakeRec{syncs: map[string][]bool{}, changes: map[string]int{}, depth: map[string]int{}, reclaim: map[string]int{}}
 }
 
 func (r *fakeRec) ObserveScan(c, t string, _ time.Duration, err error) {
@@ -383,6 +384,11 @@ func (r *fakeRec) SetQueueDepth(q string, n int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.depth[q] = n
+}
+func (r *fakeRec) JobsReclaimed(k string, n int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.reclaim[k] += n
 }
 
 // ---- sources ----

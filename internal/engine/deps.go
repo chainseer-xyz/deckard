@@ -49,6 +49,9 @@ type Recorder interface {
 	ObserveSync(source string, d time.Duration, ok bool)
 	InventoryChange(kind string, n int)
 	SetQueueDepth(queue string, n int)
+	// JobsReclaimed counts n running jobs of kind reclaimed from a dead
+	// instance; n == 0 only creates the series.
+	JobsReclaimed(kind string, n int)
 }
 
 type noopRecorder struct{}
@@ -58,6 +61,7 @@ func (noopRecorder) ObserveSkip(string, string, string)               {}
 func (noopRecorder) ObserveSync(string, time.Duration, bool)          {}
 func (noopRecorder) InventoryChange(string, int)                      {}
 func (noopRecorder) SetQueueDepth(string, int)                        {}
+func (noopRecorder) JobsReclaimed(string, int)                        {}
 
 // Guard is the subset of *scope.Guard the engine uses. If the implementation
 // also has an AllowedFor method it is consulted in addition to (never instead
