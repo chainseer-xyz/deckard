@@ -22,6 +22,9 @@ import (
 // Classifier is the slice of scope.Guard the inventory needs.
 type Classifier interface {
 	Classify(kind model.AssetKind, key string) model.ScopeClass
+	// ClassifyUnregistered classifies an IP ignoring the prefixes registered
+	// through SetOwnedPrefixes.
+	ClassifyUnregistered(ip string) model.ScopeClass
 	SetZones(zones []string)
 	SetOwnedPrefixes(p []netip.Prefix)
 }
@@ -450,7 +453,9 @@ func (s *Service) upserts(source string, in []model.AssetInput) []store.AssetUps
 // assets: IPs flagged owned/origin (static, origin and LB-pool IPs) and every
 // IP a kubernetes source reports (its LoadBalancer and node external IPs).
 // IPs the classifier already calls shared or excluded are never registered:
-// a shared-edge IP is not owned just because a record points at it.
+// a shared-edge IP is not owned just because a record points at it. The
+// verdict ignores earlier registrations, which would otherwise keep an IP
+// owned after its range became shared.
 func (s *Service) acceptPrefixes(srcType string, assets []model.AssetInput) []netip.Prefix {
 	seen := map[netip.Prefix]bool{}
 	var out []netip.Prefix
@@ -462,7 +467,7 @@ func (s *Service) acceptPrefixes(srcType string, assets []model.AssetInput) []ne
 		if !ok {
 			continue
 		}
-		switch s.cls.Classify(model.KindIP, p.Masked().Addr().String()) {
+		switch s.cls.ClassifyUnregistered(p.Masked().Addr().String()) {
 		case model.ScopeShared, model.ScopeExcluded:
 			s.log.Info("inventory: not registering shared/excluded IP as owned", "ip", a.Key)
 			continue

@@ -259,8 +259,24 @@ func (g *Guard) classifyIPString(s string) model.ScopeClass {
 	return g.classifyIP(ip)
 }
 
+// ClassifyUnregistered classifies an IP like Classify but ignores the
+// dynamically registered owned prefixes (SetOwnedPrefixes). The inventory
+// vets a registration with it, so an IP's own earlier registration cannot
+// vouch for it once its range has become shared or excluded.
+func (g *Guard) ClassifyUnregistered(ip string) model.ScopeClass {
+	a, ok := parseIP(ip)
+	if !ok {
+		return model.ScopeExternal
+	}
+	return g.classifyIPWith(a, false)
+}
+
 // classifyIP expects a normalised address (see normAddr).
 func (g *Guard) classifyIP(ip netip.Addr) model.ScopeClass {
+	return g.classifyIPWith(ip, true)
+}
+
+func (g *Guard) classifyIPWith(ip netip.Addr, registered bool) model.ScopeClass {
 	ip = normAddr(ip)
 	if inAny(g.excludeNets, ip) {
 		return model.ScopeExcluded
@@ -270,7 +286,7 @@ func (g *Guard) classifyIP(ip netip.Addr) model.ScopeClass {
 	}
 	g.mu.RLock()
 	defer g.mu.RUnlock()
-	if inAny(g.ownedPrefixes, ip) {
+	if registered && inAny(g.ownedPrefixes, ip) {
 		return model.ScopeOwned
 	}
 	if inAny(g.sharedEmbedded, ip) || inAny(g.sharedFile, ip) || inAny(g.sharedLive, ip) {

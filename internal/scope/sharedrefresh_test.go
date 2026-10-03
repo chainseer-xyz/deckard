@@ -189,6 +189,28 @@ func TestEC2RangesNeverShared(t *testing.T) {
 	}
 }
 
+func TestClassifyUnregisteredIgnoresRegisteredPrefixes(t *testing.T) {
+	g := mustGuard(t, config.ScopeConfig{Include: []string{"198.22.0.0/24"}}, nil, "198.20.0.0/24", "198.23.0.0/24")
+	g.SetSharedRanges([]netip.Prefix{
+		netip.MustParsePrefix("198.20.0.0/24"),
+		netip.MustParsePrefix("198.22.0.0/24"),
+	})
+	want := map[string]model.ScopeClass{
+		"198.20.0.5": model.ScopeShared,   // registered, but its range is shared
+		"198.22.0.5": model.ScopeOwned,    // scope.include still wins
+		"198.23.0.5": model.ScopeExternal, // registered only
+		"not-an-ip":  model.ScopeExternal,
+	}
+	for ip, w := range want {
+		if got := g.ClassifyUnregistered(ip); got != w {
+			t.Errorf("ClassifyUnregistered(%s) = %s, want %s", ip, got, w)
+		}
+	}
+	if got := g.Classify(model.KindIP, "198.20.0.5"); got != model.ScopeOwned {
+		t.Errorf("Classify precedence changed: %s", got)
+	}
+}
+
 func TestSetSharedRangesPrecedenceAndSafety(t *testing.T) {
 	g := mustGuard(t, config.ScopeConfig{Exclude: []string{"203.0.114.0/24"}}, nil, "198.20.0.0/24")
 	g.SetSharedRanges([]netip.Prefix{
