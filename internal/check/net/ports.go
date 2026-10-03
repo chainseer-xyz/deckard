@@ -90,7 +90,7 @@ func (c *portsCheck) Run(ctx context.Context, t check.Target) (*check.Result, er
 	if err != nil {
 		return nil, err // never report a partial scan: it would resolve findings wrongly
 	}
-	return buildPortsResult(ip, open, allowed, baselinePorts(t.Baseline), cfg), nil
+	return buildPortsResult(ip, open, allowed, baselinePorts(t.Baseline), cfg, ports), nil
 }
 
 func without(ports, excl []int) []int {
@@ -189,12 +189,20 @@ func baselinePorts(b map[string]map[string]any) map[int]bool {
 	return out
 }
 
-func buildPortsResult(ip string, open, allowed []int, baseline map[int]bool, cfg map[string]any) *check.Result {
+func buildPortsResult(ip string, open, allowed []int, baseline map[int]bool, cfg map[string]any, scanned ...[]int) *check.Result {
 	res := &check.Result{}
 	if open == nil {
 		open = []int{}
 	}
-	res.Observations = []model.ObservationInput{{Check: "net.ports", Data: map[string]any{"ports": open}}}
+	coverage := []int{}
+	if len(scanned) > 0 {
+		coverage = append(coverage, scanned[0]...)
+	}
+	res.Observations = []model.ObservationInput{{Check: "net.ports", Data: map[string]any{
+		"ports":            open,
+		"scanned_ports":    coverage,
+		"address_families": []string{"ipv4", "ipv6"},
+	}}}
 	allow := map[int]bool{}
 	for _, p := range allowed {
 		allow[p] = true

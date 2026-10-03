@@ -3,7 +3,7 @@
 // same converters the running service uses:
 //
 //	internal/check/dns/takeover/fingerprints_community.yaml  (can-i-take-over-xyz)
-//	internal/scope/shared_cidrs_snapshot.txt                 (Cloudflare, AWS CloudFront/GlobalAccelerator/S3, Fastly, GitHub Pages)
+//	internal/scope/shared_cidrs_snapshot.txt                 (Cloudflare, AWS CloudFront/GlobalAccelerator/S3, Fastly, GitHub Pages, Google)
 //
 // A scheduled CI job runs it (make refdata-snapshot) and opens a pull request
 // when the files change. The hand-curated files (fingerprints.yaml,

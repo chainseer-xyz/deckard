@@ -144,6 +144,9 @@ func TestPortsScan(t *testing.T) {
 				t.Fatal(err)
 			}
 			open := res.Observations[0].Data["ports"].([]int)
+			if got := res.Observations[0].Data["address_families"]; got == nil {
+				t.Error("missing address-family coverage metadata")
+			}
 			if len(open) != tc.wantOpen {
 				t.Errorf("open=%v", open)
 			}

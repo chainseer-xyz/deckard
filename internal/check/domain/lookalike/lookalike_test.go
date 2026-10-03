@@ -216,6 +216,24 @@ func TestOtherOwnedApexesAreNotLookalikes(t *testing.T) {
 	}
 }
 
+func TestExcludedZoneIsNotSweptAndWinsOverZones(t *testing.T) {
+	dnsf := estate()
+	o := execute(t, "brand-example.com", baseCfg(map[string]any{
+		"zones":         []any{"brand-example.com"},
+		"exclude_zones": []any{"BRAND-EXAMPLE.COM.", "bad name"},
+	}), checktest.WithLookup(dnsf))
+	if o.state() != StateExcluded || o.res.Partial || len(o.keys) != 0 {
+		t.Fatalf("excluded zone result = state=%s partial=%v findings=%v", o.state(), o.res.Partial, o.keys)
+	}
+	if len(dnsf.Calls) != 0 {
+		t.Fatalf("excluded zone was queried: %v", dnsf.Calls)
+	}
+	notes, _ := o.obs["config_notes"].([]string)
+	if !slices.Contains(notes, "exclude_zones: ignored invalid names [\"bad name\"]") {
+		t.Errorf("invalid exclude_zones entry was not noted: %v", o.obs)
+	}
+}
+
 func TestServfailAndTimeoutsAreUnknownAndMarkTheRunPartial(t *testing.T) {
 	dnsf := estate().Servfail("exampl.com").Timeout("exmaple.com")
 	o := execute(t, "example.com", baseCfg(nil), checktest.WithLookup(dnsf))

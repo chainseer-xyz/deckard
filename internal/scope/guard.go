@@ -199,8 +199,8 @@ func (g *Guard) SetZones(zones []string) {
 }
 
 // SetOwnedPrefixes replaces the dynamically registered owned IP prefixes
-// (origin IPs, LB pools, static sources). An IP is owned only if registered
-// here or via scope.include; resolving from an owned hostname never makes it so.
+// (inventory IPs from owned sources). An IP is owned only if registered here
+// or via scope.include; resolving from an owned hostname never makes it so.
 func (g *Guard) SetOwnedPrefixes(prefixes []netip.Prefix) {
 	out := make([]netip.Prefix, 0, len(prefixes))
 	for _, p := range prefixes {
@@ -242,7 +242,7 @@ func (g *Guard) Classify(kind model.AssetKind, key string) model.ScopeClass {
 		}
 		return g.classifyName(u.Hostname())
 	case model.KindService:
-		key = strings.TrimSpace(key)
+		key = strings.TrimSuffix(strings.TrimSpace(key), "/tcp")
 		if h, _, err := net.SplitHostPort(key); err == nil {
 			key = h
 		}

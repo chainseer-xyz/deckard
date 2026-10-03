@@ -314,7 +314,7 @@ strings never appear in logs, errors or warnings.
 
 ```yaml
 scope:
-  include: ["*.example.com"]          # extra hostnames treated as yours
+  include: ["*.example.com", "203.0.113.0/24"] # extra names or owned IP/CIDR space
   exclude: ["legacy.example.com", "198.51.100.5", "198.51.100.0/24"]  # always wins
   max_cidr_hosts: 1024                # static CIDRs larger than this are rejected
   resolvers: ["1.1.1.1", "8.8.8.8"]   # optional: DNS servers every scan uses (IP or IP:port)
@@ -332,9 +332,13 @@ source calls (for example an in-cluster Alertmanager URL) are not affected and
 keep using the system resolver.
 
 deckard only actively probes assets it can show are yours: names under zones from
-your sources, IPs from your static lists, origins, load balancers and cluster
-endpoints. Third-party CNAME targets (S3, Heroku, GitHub Pages, ...) are only
-fingerprinted by requesting *your* hostname. They are never port-scanned.
+your sources, IPs with ownership evidence from AWS, Kubernetes or static
+inventory, and addresses declared in `scope.include` as IPs or CIDRs. DNS
+records and origin discovery create relationships but do not prove that the
+address belongs to you; known provider ranges are classified as shared and
+other such addresses stay external for IP checks. Third-party CNAME targets
+(S3, Heroku, GitHub Pages, ...) are only fingerprinted by requesting *your*
+hostname. They are never port-scanned.
 
 ## Profiles (tiers and cadence)
 
@@ -394,6 +398,7 @@ ignored):
 | `domain.expiry` | `lock_exempt_tlds` | `[]` | TLDs (for example `[de]`) whose registrars cannot set transfer or delete locks: `transfer-unlocked` and `no-delete-protection` are not raised for them. |
 | `domain.lookalike` | `enabled` | `true` | `false` switches the check off (and resolves its findings). The check is DNS-only and does not depend on `intel`. |
 | `domain.lookalike` | `zones` | every owned apex | Only these registrable domains are swept. Apexes not listed record `lookalike: not_selected` and their findings resolve. |
+| `domain.lookalike` | `exclude_zones` | `[]` | Owned registrable apexes never swept. They record `lookalike: excluded`, and existing findings for them resolve on a clean run. Names are normalised; invalid entries are ignored and noted. |
 | `domain.lookalike` | `exclude` | `[]` | Names to ignore, for example known partners or defensive registrations: a name and everything under it is never queried or reported. Every owned zone is ignored automatically. |
 | `domain.lookalike` | `tlds` | about 25 common suffixes (`com`, `net`, `org`, `io`, `co`, `app`, ...) | Suffixes tried by the TLD-swap technique. `[]` turns the technique off. Invalid names are ignored and noted. |
 | `domain.lookalike` | `max_candidates_per_zone`, `max_findings_per_zone` | `600`, `50` | Cap on the names queried per apex per run (taken evenly across the techniques; the observation says how many were dropped) and on the findings reported (highest severity first; the observation says how many were cut). `1` to `5000` and `1` to `500`. |
@@ -451,6 +456,16 @@ splitting the label into a subdomain (`ex.ample.com`), single-bit flips that
 stay in the hostname alphabet, and swapping the TLD. Names inside any owned zone
 (the estate legitimately owns many variants of its own names, including your
 other apexes) and names under `exclude` are never generated.
+
+For example, sweep two active brand zones but leave a defensive registration
+out of the sweep:
+
+```yaml
+checks:
+  domain.lookalike:
+    zones: [brand-example.net, brand-example.org]
+    exclude_zones: [brand-example.com]
+```
 
 A candidate is registered when it has NS records, an A/AAAA record or a usable
 MX (a null MX, `0 .`, does not count), or is an alias (CNAME). Each registered
@@ -653,7 +668,7 @@ always the fallback.
 | Dataset | Sources | Merge rule |
 |---|---|---|
 | `takeover_fingerprints` | [can-i-take-over-xyz](https://github.com/EdOverflow/can-i-take-over-xyz) `fingerprints.json`: only `Vulnerable` / `Edge case` entries with a usable CNAME suffix and a plain-text body fingerprint or NXDOMAIN | The hand-curated entries (and their `default_cert` lists) win on provider-name conflicts; refreshed entries add new providers. Precision rules (valid-certificate suppression, unconfirmed edge case = medium) apply to every entry |
-| `shared_ranges` | Cloudflare `ips-v4`/`ips-v6`, AWS `ip-ranges.json` (**only** `CLOUDFRONT`, `GLOBALACCELERATOR`, `S3`; never `EC2`/`AMAZON`, which hold customers' own addresses), Fastly `public-ip-list`, GitHub `meta` (`pages`) | Added to the embedded list. Classification order is unchanged: excluded > owned > shared > external, so an address you declare owned stays owned |
+| `shared_ranges` | Cloudflare `ips-v4`/`ips-v6`, AWS `ip-ranges.json` (**only** `CLOUDFRONT`, `GLOBALACCELERATOR`, `S3`; never `EC2`/`AMAZON`, which hold customers' own addresses), Fastly `public-ip-list`, GitHub `meta` (`pages`), Google `goog.json` and Google Cloud `cloud.json` (IPv4 and IPv6) | Added to the embedded list. Classification order is unchanged: excluded > owned > shared > external, so an address you declare owned stays owned |
 
 How a refresh stays safe:
 

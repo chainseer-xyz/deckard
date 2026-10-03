@@ -40,7 +40,7 @@ func restartFixtures() (cf, k8s, stat *fakeSrc) {
 		Zones: []source.Zone{zone("example.com"), zone("other.net")},
 		Assets: []model.AssetInput{
 			zoneAsset("example.com"), zoneAsset("other.net"), host("www.example.com"),
-			ip("192.0.2.10", map[string]any{"origin": true}),
+			ip("192.0.2.10", map[string]any{"origin": true}),  // relation only, not ownership evidence
 			ip("104.16.1.1", map[string]any{"origin": true}),  // shared edge: never owned
 			ip("192.0.2.99", map[string]any{"proxied": true}), // no claim
 		},
@@ -83,7 +83,7 @@ func TestRehydrateAfterRestart(t *testing.T) {
 		}
 	}
 	want := classes(cls1)
-	if want[3] != model.ScopeOwned || want[4] != model.ScopeShared || want[7] != model.ScopeOwned {
+	if want[3] != model.ScopeExternal || want[4] != model.ScopeShared || want[7] != model.ScopeOwned {
 		t.Fatalf("fixture sanity: %v", want)
 	}
 

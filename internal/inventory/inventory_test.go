@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainseer-xyz/deckard/internal/check"
+	"github.com/chainseer-xyz/deckard/internal/finding"
 	"github.com/chainseer-xyz/deckard/internal/inventory"
 	"github.com/chainseer-xyz/deckard/internal/inventory/pgtest"
 	"github.com/chainseer-xyz/deckard/internal/model"
@@ -267,7 +269,7 @@ func TestOwnedPrefixRegistration(t *testing.T) {
 		}
 	}
 	want := map[string]model.ScopeClass{
-		"192.0.2.10": model.ScopeOwned, "104.16.1.1": model.ScopeShared, "192.0.2.99": model.ScopeExternal,
+		"192.0.2.10": model.ScopeExternal, "104.16.1.1": model.ScopeShared, "192.0.2.99": model.ScopeExternal,
 		"198.51.100.7": model.ScopeOwned, "203.0.113.5": model.ScopeOwned,
 	}
 	for k, w := range want {
@@ -280,7 +282,7 @@ func TestOwnedPrefixRegistration(t *testing.T) {
 		}
 	}
 
-	// The origin IP is removed from the source: its registration goes away.
+	// The origin IP is removed from the source; it was never an ownership claim.
 	cf.d = &source.Discovery{}
 	if _, err := svc.Sync(ctx, cf); err != nil {
 		t.Fatal(err)
@@ -293,22 +295,52 @@ func TestOwnedPrefixRegistration(t *testing.T) {
 	}
 }
 
-// An owned registration must not vouch for itself: once the IP's range is
-// shared (the shared list grew after it was registered), the next sync drops
-// the registration exactly as a first registration would have been refused.
-func TestOwnedPrefixDroppedWhenRangeBecomesShared(t *testing.T) {
+func TestOriginAddressesStayRelationsAndDoNotBecomeOwned(t *testing.T) {
+	ctx := context.Background()
+	st := pgtest.New(t)
+	cls := &fakeCls{sharedPfx: pfx("216.239.32.0/19", "2001:4860:4802::/48")}
+	svc := inventory.New(st, cls, quiet)
+	cf := &fakeSrc{name: "cf", typ: "cloudflare", d: &source.Discovery{Assets: []model.AssetInput{
+		ip("216.239.32.21", map[string]any{"origin": true, "proxied": true}),
+		ip("2001:4860:4802:32::15", map[string]any{"origin": true, "proxied": true}),
+	}}}
+	owned := &fakeSrc{name: "static", typ: "static", d: &source.Discovery{Assets: []model.AssetInput{
+		ip("1.2.3.4", map[string]any{"owned": true}),
+	}}}
+	for _, src := range []*fakeSrc{cf, owned} {
+		if _, err := svc.Sync(ctx, src); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		ip   string
+		want model.ScopeClass
+	}{
+		{"216.239.32.21", model.ScopeShared},
+		{"2001:4860:4802:32::15", model.ScopeShared},
+		{"1.2.3.4", model.ScopeOwned},
+	} {
+		if got := cls.Classify(model.KindIP, tc.ip); got != tc.want {
+			t.Errorf("%s classified %s, want %s", tc.ip, got, tc.want)
+		}
+	}
+}
+
+// Explicit inventory evidence remains authoritative even when a provider
+// range later becomes known as shared infrastructure.
+func TestOwnedPrefixSurvivesSharedRangeRefresh(t *testing.T) {
 	ctx := context.Background()
 	st := pgtest.New(t)
 	cls := &fakeCls{}
 	svc := inventory.New(st, cls, quiet)
 	cf := &fakeSrc{name: "cf", typ: "cloudflare", d: &source.Discovery{Assets: []model.AssetInput{
-		ip("192.0.2.10", map[string]any{"origin": true}),
+		ip("192.0.2.10", map[string]any{"owned": true}),
 	}}}
 	if _, err := svc.Sync(ctx, cf); err != nil {
 		t.Fatal(err)
 	}
 	if got := cls.Classify(model.KindIP, "192.0.2.10"); got != model.ScopeOwned {
-		t.Fatalf("precondition: origin IP should be owned, got %s", got)
+		t.Fatalf("precondition: inventory IP should be owned, got %s", got)
 	}
 
 	cls.mu.Lock()
@@ -318,8 +350,53 @@ func TestOwnedPrefixDroppedWhenRangeBecomesShared(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := cls.Classify(model.KindIP, "192.0.2.10"); got != model.ScopeShared {
-		t.Errorf("IP in a now-shared range stays registered as owned: got %s, want shared", got)
+	if got := cls.Classify(model.KindIP, "192.0.2.10"); got != model.ScopeOwned {
+		t.Errorf("inventory-owned IP in a shared range lost ownership: got %s, want owned", got)
+	}
+}
+
+func TestOutOfScopeTransitionResolvesFindingsButPartialSyncDoesNot(t *testing.T) {
+	ctx := context.Background()
+	st := pgtest.New(t)
+	cls := &fakeCls{}
+	svc := inventory.New(st, cls, quiet)
+	src := &fakeSrc{name: "static", typ: "static", d: &source.Discovery{Assets: []model.AssetInput{
+		ip("198.51.100.7", map[string]any{"owned": true}),
+	}}}
+	if _, err := svc.Sync(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+	a, err := st.GetAssetByKey(ctx, model.KindIP, "198.51.100.7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proc := finding.NewProcessor(st, finding.ProcessorConfig{ResolveAfter: 1, StableAfter: 1}, quiet)
+	if _, err := proc.Process(ctx, *a, "intel.internetdb", &check.Result{Findings: []model.FindingInput{{
+		Check: "intel.internetdb", Key: "tag:malware", Severity: model.SeverityCritical, Title: "malware",
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	cls.mu.Lock()
+	cls.sharedPfx = pfx("198.51.100.0/24")
+	cls.mu.Unlock()
+	src.d = &source.Discovery{Partial: true, PartialReasons: []string{"source unavailable"}, Assets: []model.AssetInput{
+		ip("198.51.100.7", map[string]any{"origin": true}),
+	}}
+	if _, err := svc.Sync(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+	fs, _, err := st.ListFindings(ctx, store.FindingFilter{AssetID: a.ID, Check: "intel.internetdb"})
+	if err != nil || len(fs) != 1 || fs[0].Status != model.StatusOpen {
+		t.Fatalf("partial sync findings = %+v err=%v, want open", fs, err)
+	}
+	src.d.Partial = false
+	src.d.PartialReasons = nil
+	if _, err := svc.Sync(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+	fs, _, err = st.ListFindings(ctx, store.FindingFilter{AssetID: a.ID, Check: "intel.internetdb"})
+	if err != nil || len(fs) != 1 || fs[0].Status != model.StatusResolved {
+		t.Fatalf("clean out-of-scope sync findings = %+v err=%v, want resolved", fs, err)
 	}
 }
 

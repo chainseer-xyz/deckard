@@ -45,6 +45,8 @@ func fixtures(t *testing.T) replay {
 		"ip-ranges.amazonaws.com/ip-ranges.json": read(t, sc+"aws-ip-ranges.json"),
 		"api.fastly.com/public-ip-list":          read(t, sc+"fastly-public-ip-list.json"),
 		"api.github.com/meta":                    read(t, sc+"github-meta.json"),
+		"www.gstatic.com/ipranges/goog.json":     read(t, sc+"google-ip-ranges.json"),
+		"www.gstatic.com/ipranges/cloud.json":    read(t, sc+"google-cloud-ip-ranges.json"),
 		"raw.githubusercontent.com/EdOverflow/can-i-take-over-xyz/master/fingerprints.json": read(t, "../../internal/check/dns/takeover/testdata/community_fingerprints.json"),
 	}
 }
@@ -71,7 +73,7 @@ func TestGenerateWritesLoadableSnapshots(t *testing.T) {
 		t.Error("missing generated-file header")
 	}
 	s := read(t, sh)
-	for _, want := range []string{"52.219.170.0/23 aws-s3", "120.52.22.96/27 aws-cloudfront", "3.2.58.0/24 aws-globalaccelerator", "151.101.0.0/16 fastly", "2606:4700::/32 cloudflare"} {
+	for _, want := range []string{"52.219.170.0/23 aws-s3", "120.52.22.96/27 aws-cloudfront", "3.2.58.0/24 aws-globalaccelerator", "151.101.0.0/16 fastly", "2606:4700::/32 cloudflare", "216.239.32.0/19 google", "2001:4860:4802::/48 google"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("shared snapshot lacks %q", want)
 		}

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/netip"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/chainseer-xyz/deckard/internal/check"
 	"github.com/chainseer-xyz/deckard/internal/check/exposed"
+	netcheck "github.com/chainseer-xyz/deckard/internal/check/net"
 	"github.com/chainseer-xyz/deckard/internal/check/tlsconfig"
 	"github.com/chainseer-xyz/deckard/internal/config"
 	"github.com/chainseer-xyz/deckard/internal/finding"
@@ -274,6 +276,53 @@ func TestDestinationSkipLeavesOpenFindingsOpen(t *testing.T) {
 		if !strings.HasPrefix(run.Error, store.UnownedDestinationSkip) {
 			t.Errorf("run %s on %d: error %q, want an unowned-destination skip", run.Check, run.AssetID, run.Error)
 		}
+	}
+}
+
+// The stored scope can lag while a refreshed shared-range list is being
+// applied. The runner must classify the actual IP again before selecting any
+// active check, including checks that operate on service assets backed by that
+// IP.
+func TestSharedIPAndServiceNeverReachActiveChecks(t *testing.T) {
+	st, _ := migratedDB(t)
+	ctx := context.Background()
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	dialer := &countingDialer{}
+	g, err := scope.NewGuard(config.ScopeConfig{}, scope.WithLogger(quiet), scope.WithDialer(dialer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.SetSharedRanges([]netip.Prefix{
+		netip.MustParsePrefix("216.239.32.0/19"),
+		netip.MustParsePrefix("2001:4860:4802::/48"),
+	})
+	runner := &countingNuclei{}
+	nc := config.NucleiConfig{Enabled: true, Binary: "nuclei", ScanMode: "tech", SeverityMin: "low", TemplatesDir: t.TempDir()}
+	checks := append(netcheck.Checks(nil), tlsconfig.Checks(nil)...)
+	checks = append(checks,
+		nuclei.New(nc, g.VerifyOwnedTarget, runner, false, nil),
+		nuclei.New(nc, g.VerifyOwnedTarget, runner, true, nil),
+	)
+	proc := finding.NewProcessor(st, finding.ProcessorConfig{ResolveAfter: 1, StableAfter: 1}, quiet)
+	r := newRunner(Deps{Config: baseCfg(), Store: st, Guard: g, Inventory: &dbInventory{st, g}, Findings: proc,
+		Recorder: newFakeRec(), Checks: checks, Logger: quiet})
+	diff, err := st.ApplySnapshot(ctx, "cf", []store.AssetUpsert{
+		{AssetInput: model.AssetInput{Kind: model.KindIP, Key: "216.239.32.21", Source: "cf"}, Scope: model.ScopeOwned},
+		{AssetInput: model.AssetInput{Kind: model.KindService, Key: "216.239.32.21:443/tcp", Source: "cf", Attrs: map[string]any{"ip": "216.239.32.21", "port": 443, "tls": true}}, Scope: model.ScopeOwned},
+	}, nil, time.Now())
+	if err != nil || len(diff.Added) != 2 {
+		t.Fatalf("seed assets: %v %+v", err, diff)
+	}
+	for _, a := range diff.Added {
+		if err := r.runScan(ctx, scanJob{AssetID: a.ID, Tier: model.TierActive}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(dialer.calls) != 0 || runner.n.Load() != 0 {
+		t.Fatalf("shared addresses reached active clients: dials=%v nuclei=%d", dialer.calls, runner.n.Load())
+	}
+	if got := g.Classify(model.KindService, "216.239.32.21:443/tcp"); got != model.ScopeShared {
+		t.Fatalf("service scope = %s, want shared", got)
 	}
 }
 
