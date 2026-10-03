@@ -85,6 +85,19 @@ groups:
           summary: "deckard cannot download {{ $labels.dataset }}"
           description: "Every refresh in the last day failed. Check egress/proxy rules."
 
+      # Only exists when notify.heartbeat.url is set (the series is absent
+      # otherwise). The external monitor is the real dead-man's switch; this is
+      # the in-cluster view of the same signal: no successful ping in 30m.
+      - alert: DeckardHeartbeatFailing
+        expr: |
+          sum(increase(deckard_heartbeat_total{result=~"error|unhealthy"}[30m])) > 0
+            unless on() sum(increase(deckard_heartbeat_total{result="ok"}[30m])) > 0
+        labels:
+          severity: high
+        annotations:
+          summary: "deckard has not sent a successful heartbeat for 30 minutes"
+          description: "Results are error (the ping failed: check egress to the heartbeat URL) or unhealthy (withheld: the database is unreachable or no check completed within two heartbeat intervals). See the deckard logs for the reason."
+
       - alert: DeckardDown
         expr: absent(up{job="deckard"} == 1)
         for: 5m

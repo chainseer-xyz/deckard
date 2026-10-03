@@ -27,6 +27,7 @@ import (
 	"github.com/chainseer-xyz/deckard/internal/metrics"
 	"github.com/chainseer-xyz/deckard/internal/notify"
 	"github.com/chainseer-xyz/deckard/internal/notify/alertmanager"
+	"github.com/chainseer-xyz/deckard/internal/notify/heartbeat"
 	"github.com/chainseer-xyz/deckard/internal/nuclei"
 	"github.com/chainseer-xyz/deckard/internal/plugin"
 	"github.com/chainseer-xyz/deckard/internal/scope"
@@ -63,6 +64,7 @@ type App struct {
 	inv     *inventory.Service
 	proc    *finding.Processor
 	disp    *finding.Dispatcher
+	hb      *heartbeat.Pinger // nil unless notify.heartbeat.url is set
 	eng     *engine.Engine
 	api     *api.Server
 	sources []source.Source
@@ -134,6 +136,16 @@ func (a *App) build() error {
 	// notifying (defence in depth against the reconcile-then-suppress window).
 	a.disp = finding.NewDispatcher(a.st, notifiers, cfg.Notify.Alertmanager.Resend, a.log,
 		finding.WithSuppressions(cfg.Suppressions))
+
+	if hc := cfg.Notify.Heartbeat; hc.Enabled() {
+		a.hb, err = heartbeat.New(hc, a.st, a.log,
+			heartbeat.WithRecorder(a.metrics.HeartbeatResult),
+			heartbeat.WithUserAgent("deckard/"+a.opts.Version))
+		if err != nil {
+			return err
+		}
+		a.metrics.InitHeartbeat(heartbeat.ResultOK, heartbeat.ResultError, heartbeat.ResultUnhealthy)
+	}
 
 	expander, err := a.expander()
 	if err != nil {

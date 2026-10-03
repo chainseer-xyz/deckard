@@ -58,6 +58,34 @@ func TestLoadDefaults(t *testing.T) {
 	}
 }
 
+func TestHeartbeatConfig(t *testing.T) {
+	cfg, err := Load("", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h := cfg.Notify.Heartbeat; h.Enabled() || h.Interval != 5*time.Minute || h.Method != "GET" || h.Timeout != 10*time.Second {
+		t.Fatalf("heartbeat defaults = %+v (want disabled, 5m, GET, 10s)", h)
+	}
+	// Invalid method/interval only matter once a URL turns the heartbeat on.
+	if _, err := Load(writeCfg(t, "notify: {heartbeat: {method: PUT, interval: 0s}}"), nil); err != nil {
+		t.Fatalf("disabled heartbeat must not be validated: %v", err)
+	}
+	secret := "https://user:pw@hc-ping.example/0b1c2d3e-uuid?token=SECRET"
+	cfg, err = Load("", []string{"DECKARD_NOTIFY__HEARTBEAT__URL=" + secret, "DECKARD_NOTIFY__HEARTBEAT__METHOD=post"})
+	if err != nil || !cfg.Notify.Heartbeat.Enabled() {
+		t.Fatalf("env: %v", err)
+	}
+	_, err = Load("", []string{"DECKARD_NOTIFY__HEARTBEAT__URL=ftp://user:pw@hc-ping.example/0b1c2d3e-uuid?token=SECRET"})
+	if err == nil {
+		t.Fatal("ftp heartbeat url accepted")
+	}
+	for _, leak := range []string{"SECRET", "pw@", "0b1c2d3e", "hc-ping"} {
+		if strings.Contains(err.Error(), leak) {
+			t.Errorf("validation error leaks %q: %v", leak, err)
+		}
+	}
+}
+
 func TestNotifyMinSeverityFromFileAndEnv(t *testing.T) {
 	cfg, err := Load(writeCfg(t, "notify: {alertmanager: {min_severity: medium}}"), nil)
 	if err != nil || cfg.Notify.Alertmanager.MinSeverity != "medium" {
@@ -154,6 +182,11 @@ func TestValidateErrors(t *testing.T) {
 		{"vulnintel epss order", "vulnintel: {epss_high: 0.2, epss_medium: 0.5}", "vulnintel.epss_medium"},
 		{"bad on_new_asset", "checks: {x: {on_new_asset: maybe}}", "on_new_asset"},
 		{"bad notify floor", "notify: {alertmanager: {min_severity: urgent}}", "notify.alertmanager.min_severity \"urgent\": must be info|low|medium|high|critical"},
+		{"heartbeat not http", "notify: {heartbeat: {url: \"ftp://hc.example/abc\"}}", "notify.heartbeat.url must be an absolute http(s) URL"},
+		{"heartbeat relative", "notify: {heartbeat: {url: /ping}}", "notify.heartbeat.url"},
+		{"heartbeat bad method", "notify: {heartbeat: {url: \"https://hc.example/x\", method: PUT}}", "notify.heartbeat.method \"PUT\": must be GET or POST"},
+		{"heartbeat zero interval", "notify: {heartbeat: {url: \"https://hc.example/x\", interval: 0s}}", "notify.heartbeat.interval"},
+		{"heartbeat zero timeout", "notify: {heartbeat: {url: \"https://hc.example/x\", timeout: 0s}}", "notify.heartbeat.timeout"},
 		{"empty notify floor", "notify: {alertmanager: {min_severity: \"\"}}", "notify.alertmanager.min_severity"},
 	}
 	for _, tc := range tests {

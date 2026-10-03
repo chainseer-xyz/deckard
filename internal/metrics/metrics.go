@@ -51,6 +51,7 @@ type Metrics struct {
 	checksRun     *prometheus.CounterVec
 	checksSkipped *prometheus.CounterVec
 	scopeRefusals *prometheus.CounterVec
+	heartbeats    *prometheus.CounterVec
 	syncDuration  *prometheus.HistogramVec
 	queueDepth    *prometheus.GaugeVec
 	invChanges    *prometheus.CounterVec
@@ -85,6 +86,9 @@ func New(version, commit string) *Metrics {
 	m.scopeRefusals = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "deckard_scope_refusals_total", Help: "Operations the scope guard refused, by tier, target class and reason (logged at WARN at most hourly per target unless anomalous).",
 	}, []string{"tier", "class", "reason"})
+	m.heartbeats = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "deckard_heartbeat_total", Help: "External heartbeat attempts by result: ok, error (ping failed), unhealthy (withheld because deckard is not healthy).",
+	}, []string{"result"})
 	m.syncDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "deckard_source_sync_duration_seconds", Help: "Duration of source syncs.", Buckets: buckets,
 	}, []string{"source"})
@@ -105,7 +109,7 @@ func New(version, commit string) *Metrics {
 	m.reg.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
-		m.scanDuration, m.scanErrors, m.checksRun, m.checksSkipped, m.scopeRefusals, m.syncDuration,
+		m.scanDuration, m.scanErrors, m.checksRun, m.checksSkipped, m.scopeRefusals, m.heartbeats, m.syncDuration,
 		m.queueDepth, m.invChanges, m.collectErrors, build,
 		m.ref.entries, m.ref.total, m.ref,
 		m.vi.refresh, m.vi.kevOpen, m.vi,
@@ -139,6 +143,20 @@ func (m *Metrics) ObserveSkip(check, tier, reason string) {
 // ScopeRefusal counts one scope-guard refusal (scope.WithRefusalObserver).
 func (m *Metrics) ScopeRefusal(tier, class, reason string) {
 	m.scopeRefusals.WithLabelValues(tier, class, reason).Inc()
+}
+
+// InitHeartbeat creates the heartbeat series at zero, so rate and increase
+// work from the first failure. Call it only when a heartbeat is configured:
+// without one the series stays absent.
+func (m *Metrics) InitHeartbeat(results ...string) {
+	for _, r := range results {
+		m.heartbeats.WithLabelValues(r)
+	}
+}
+
+// HeartbeatResult counts one heartbeat attempt.
+func (m *Metrics) HeartbeatResult(result string) {
+	m.heartbeats.WithLabelValues(result).Inc()
 }
 
 // ObserveSync records a sync duration. Success freshness comes from the store

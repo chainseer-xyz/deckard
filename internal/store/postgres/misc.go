@@ -2,7 +2,10 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/chainseer-xyz/deckard/internal/model"
 	"github.com/chainseer-xyz/deckard/internal/store"
@@ -143,6 +146,25 @@ func (s *Store) LastScans(ctx context.Context) ([]store.ScanLast, error) {
 		out = append(out, l)
 	}
 	return out, rows.Err()
+}
+
+// LastCleanScan returns when the most recent check run that completed
+// without error finished (start plus duration), or the zero time if there is
+// none. It reads one row from the newest end of scans_started_idx, so it is
+// cheap however long the scan history is. The heartbeat uses it to tell a
+// working scheduler from a wedged one.
+func (s *Store) LastCleanScan(ctx context.Context) (time.Time, error) {
+	var started time.Time
+	var ms int64
+	err := s.pool.QueryRow(ctx, `SELECT started_at, duration_ms FROM scans WHERE error = ''
+		ORDER BY started_at DESC, id DESC LIMIT 1`).Scan(&started, &ms)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	return started.Add(time.Duration(ms) * time.Millisecond), nil
 }
 
 // PruneScans: see store.Store.

@@ -7,6 +7,7 @@ package config
 import (
 	"fmt"
 	"net/netip"
+	"net/url"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -270,7 +271,22 @@ type FindingsConfig struct {
 
 type NotifyConfig struct {
 	Alertmanager AlertmanagerConfig `koanf:"alertmanager"`
+	Heartbeat    HeartbeatConfig    `koanf:"heartbeat"`
 }
+
+// HeartbeatConfig is an external dead-man's switch: while deckard is healthy
+// the scheduler requests URL every Interval. An empty URL disables it. The
+// URL usually embeds a token, so it is treated as a secret: logs and errors
+// show only its scheme and host.
+type HeartbeatConfig struct {
+	URL      string        `koanf:"url"`
+	Interval time.Duration `koanf:"interval"`
+	Method   string        `koanf:"method"` // GET or POST
+	Timeout  time.Duration `koanf:"timeout"`
+}
+
+// Enabled reports whether a heartbeat URL is configured.
+func (h HeartbeatConfig) Enabled() bool { return strings.TrimSpace(h.URL) != "" }
 
 type AlertmanagerConfig struct {
 	URLs    []string      `koanf:"urls"`
@@ -390,6 +406,9 @@ func Defaults() map[string]any {
 		"notify.alertmanager.resend":              "4m",
 		"notify.alertmanager.timeout":             "10s",
 		"notify.alertmanager.min_severity":        "info",
+		"notify.heartbeat.interval":               "5m",
+		"notify.heartbeat.method":                 "GET",
+		"notify.heartbeat.timeout":                "10s",
 		"vulnintel.enabled":                       true,
 		"vulnintel.interval":                      "6h",
 		"vulnintel.dir":                           "/var/lib/deckard/vulnintel",
@@ -602,6 +621,7 @@ func (c *Config) Validate() error {
 	if !validSeverities[c.Notify.Alertmanager.MinSeverity] {
 		add("notify.alertmanager.min_severity %q: must be info|low|medium|high|critical", c.Notify.Alertmanager.MinSeverity)
 	}
+	c.validateHeartbeat(add)
 	c.validateNuclei(add)
 	c.validateSources(add)
 	c.validatePlugins(add)
@@ -652,6 +672,29 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid config:\n  - %s", strings.Join(errs, "\n  - "))
 	}
 	return nil
+}
+
+// validateHeartbeat never echoes the URL: it usually carries a token.
+func (c *Config) validateHeartbeat(add func(string, ...any)) {
+	h := c.Notify.Heartbeat
+	if !h.Enabled() {
+		return
+	}
+	u, err := url.Parse(strings.TrimSpace(h.URL))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		add("notify.heartbeat.url must be an absolute http(s) URL (value not shown: it is treated as a secret)")
+	}
+	switch strings.ToUpper(strings.TrimSpace(h.Method)) {
+	case "GET", "POST":
+	default:
+		add("notify.heartbeat.method %q: must be GET or POST", h.Method)
+	}
+	if h.Interval <= 0 {
+		add("notify.heartbeat.interval must be > 0")
+	}
+	if h.Timeout <= 0 {
+		add("notify.heartbeat.timeout must be > 0")
+	}
 }
 
 func (c *Config) validateNuclei(add func(string, ...any)) {

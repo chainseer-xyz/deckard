@@ -240,3 +240,34 @@ func TestConcurrentReconcileSameAssetDoesNotDuplicate(t *testing.T) {
 		t.Errorf("total = %d, err = %v; want 1", total, err)
 	}
 }
+
+func TestLastCleanScan(t *testing.T) {
+	ctx := context.Background()
+	s, err := postgres.New(ctx, freshDB(t, true), 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if last, err := s.LastCleanScan(ctx); err != nil || !last.IsZero() {
+		t.Fatalf("empty history: %v %v, want zero time", last, err)
+	}
+	diff, err := s.ApplySnapshot(ctx, "cf", []store.AssetUpsert{{AssetInput: model.AssetInput{Kind: model.KindHostname, Key: "a.example.com", Source: "cf"}, Scope: model.ScopeOwned}}, nil, time.Now())
+	if err != nil || len(diff.Added) != 1 {
+		t.Fatalf("seed: %v", err)
+	}
+	id := diff.Added[0].ID
+	t0 := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	for _, r := range []store.ScanRun{
+		{AssetID: id, Check: "c", Tier: "passive", StartedAt: t0, DurationMS: 1500},
+		{AssetID: id, Check: "c", Tier: "passive", StartedAt: t0.Add(time.Minute), Error: "boom"},
+		{AssetID: id, Check: "c", Tier: "active", StartedAt: t0.Add(2 * time.Minute), Error: store.UnownedDestinationSkip + "x"},
+	} {
+		if err := s.RecordScan(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	last, err := s.LastCleanScan(ctx)
+	if err != nil || !last.Equal(t0.Add(1500*time.Millisecond)) {
+		t.Fatalf("LastCleanScan = %v, %v; want the clean run's end %v (failures and skips are not completions)", last, err, t0.Add(1500*time.Millisecond))
+	}
+}

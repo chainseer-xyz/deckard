@@ -488,6 +488,67 @@ findings visible in deckard without routing them to Slack. A finding whose
 severity is later raised above the floor (for example by KEV enrichment) is
 sent from the next notification cycle on.
 
+### External heartbeat (dead-man's switch)
+
+Prometheus and Alertmanager usually run in the same cluster as deckard, so an
+outage of the whole cluster (or of deckard) silences every alert, including
+the ones about deckard itself. A heartbeat to a monitor **outside** the cluster
+closes that gap: deckard requests a URL every `interval` while it is healthy,
+and the external service alerts when the requests stop.
+
+```yaml
+notify:
+  heartbeat:
+    url: ""          # empty = disabled (default). Prefer DECKARD_NOTIFY__HEARTBEAT__URL from a Secret
+    interval: 5m
+    method: GET      # GET or POST
+    timeout: 10s
+```
+
+| Key | Default | Description |
+|---|---|---|
+| `notify.heartbeat.url` | | `http(s)` URL to request. Empty disables the heartbeat. It is treated as a secret: logs and validation errors show only its scheme and host, never the path, query string or credentials |
+| `notify.heartbeat.interval` | `5m` | Time between pings. Must be > 0 |
+| `notify.heartbeat.method` | `GET` | `GET` or `POST` (empty body) |
+| `notify.heartbeat.timeout` | `10s` | Bound for the health check and for the request |
+
+deckard pings **only while healthy**: the database answers, and at least one
+check run completed without error within the last two intervals (skipped and
+failed runs do not count). A wedged scheduler or worker therefore stops the
+pings, which is the point. Each beat is counted in
+`deckard_heartbeat_total{result}` with `result` = `ok`, `error` (the ping
+failed; logged at WARN) or `unhealthy` (withheld; logged at WARN with the
+reason). Only the `scheduler` role pings; worker and API replicas never do.
+
+Pick the external monitor's grace period above the interval plus your
+shortest check cadence (the passive tier runs every 5m by default). If every
+check you run has a long interval, raise `notify.heartbeat.interval` to at
+least half of it, or the heartbeat will report a healthy but idle deckard as
+unhealthy.
+
+**healthchecks.io style** (a GET to a URL whose path is the token; set the
+check's period to the interval and its grace to two intervals):
+
+```yaml
+notify:
+  heartbeat: { interval: 5m, method: GET }
+# DECKARD_NOTIFY__HEARTBEAT__URL=https://hc-ping.com/<uuid>
+```
+
+**PagerDuty style** (an integration heartbeat URL that expects a request every
+period, here a POST; configure the expected interval in PagerDuty as 10m):
+
+```yaml
+notify:
+  heartbeat: { interval: 5m, method: POST, timeout: 10s }
+# DECKARD_NOTIFY__HEARTBEAT__URL=https://<your PagerDuty heartbeat ping URL>
+```
+
+The same works with Cronitor, Better Stack, Uptime Kuma push monitors or any
+endpoint that alerts on silence. `deploy/examples/prometheus-rules.yml` also
+has `DeckardHeartbeatFailing` for the in-cluster view (pings failing or
+withheld for 30m).
+
 ## Auth
 
 `auth.mode` is `token` (default), `oidc` or `none` (only behind a trusted proxy).

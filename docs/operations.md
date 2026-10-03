@@ -214,6 +214,12 @@ route:
       continue: false   # first match wins; put this above the severity routes
 ```
 
+**Watch deckard from outside the cluster.** In-cluster rules cannot fire when
+the cluster itself is down. Configure `notify.heartbeat` (see
+[configuration.md](configuration.md#external-heartbeat-dead-mans-switch)) so an
+external service alerts when deckard stops vouching for itself: it pings only
+while the database answers and checks keep completing.
+
 **Alert on stale data and failing updaters.** `deploy/examples/prometheus-rules.yml`
 ships ready-made rules (all metrics below exist in the binary):
 
@@ -227,6 +233,7 @@ ships ready-made rules (all metrics below exist in the binary):
 | `DeckardVulnintelFeedStale` | `deckard_vulnintel_age_seconds` > 18h | 3x default `vulnintel.interval` (6h): tune if you changed it |
 | `DeckardVulnintelRefreshFailing` / `DeckardVulnintelNeverLoaded` | 3+ failed refreshes in 6h / empty KEV catalog | tunable |
 | `DeckardKnownExploitedOpen` | `deckard_findings_kev_open` > 0 | informational |
+| `DeckardHeartbeatFailing` | heartbeat attempts in the last 30m were all `error` or `unhealthy` | only exists when `notify.heartbeat.url` is set |
 
 Air-gapped installs (`*.enabled: false`) never produce the refdata, vulnintel or
 template-age series, so those rules stay silent; drop them or alert on your own
