@@ -31,6 +31,9 @@ func WithToken(token string) Option { return func(o *serveOpts) { o.token = toke
 // RequireToken wraps h so only requests bearing token are served. The compare
 // is constant-time over fixed-size digests, so neither content nor length leaks.
 func RequireToken(h http.Handler, token string) http.Handler {
+	// Trimmed like the presented token, so a file-backed secret's trailing
+	// newline does not make the token unmatchable.
+	token = strings.TrimSpace(token)
 	if token == "" {
 		return h
 	}

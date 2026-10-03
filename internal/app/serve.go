@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,7 +32,7 @@ func (a *App) Serve(ctx context.Context) error {
 
 	var mopts []metrics.Option
 	if env := a.cfg.Server.MetricsTokenEnv; env != "" {
-		tok := a.opts.Getenv(env)
+		tok := strings.TrimSpace(a.opts.Getenv(env))
 		if tok == "" {
 			return fmt.Errorf("server.metrics_token_env %q is set but the environment variable is empty", env)
 		}

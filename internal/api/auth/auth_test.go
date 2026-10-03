@@ -54,6 +54,18 @@ func TestTokenAuth(t *testing.T) {
 	}
 }
 
+// A token read from a file-backed secret usually ends in a newline. The
+// presented token is trimmed, so the configured one must be too, or the
+// token can never match and every caller is locked out.
+func TestTokenAuthTrimsConfiguredToken(t *testing.T) {
+	a := auth.NewToken("s3cret-token\n")
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/", nil)
+	req.Header.Set("Authorization", "Bearer s3cret-token")
+	if _, err := a.Authenticate(req); err != nil {
+		t.Fatalf("token with trailing newline never matches: %v", err)
+	}
+}
+
 func TestNoneAndDeny(t *testing.T) {
 	id, err := auth.None{}.Authenticate(httptest.NewRequestWithContext(context.Background(), "GET", "/", nil))
 	if err != nil || id.Actor() != "anonymous" || (auth.None{}).Mode() != "none" {
@@ -107,6 +119,14 @@ func TestNewFromConfig(t *testing.T) {
 	a, err = auth.New(config.AuthConfig{Mode: "token", TokenEnv: "T"}, auth.Options{Getenv: env(map[string]string{"T": strings.Repeat("a", 32)})})
 	if err != nil || a.Mode() != "token" {
 		t.Fatal(err)
+	}
+	// Whitespace does not count towards the length: the token is trimmed, and
+	// an all-blank one would otherwise match an empty bearer value.
+	if _, err = auth.New(config.AuthConfig{Mode: "token", TokenEnv: "T"}, auth.Options{Getenv: env(map[string]string{"T": strings.Repeat(" ", 40)})}); err == nil {
+		t.Fatal("whitespace-only token must be refused")
+	}
+	if _, err = auth.New(config.AuthConfig{Mode: "token", TokenEnv: "T"}, auth.Options{Getenv: env(map[string]string{"T": strings.Repeat("a", 31) + "\n"})}); err == nil {
+		t.Fatal("31-byte token plus newline must be refused")
 	}
 	for name, cfg := range map[string]config.AuthConfig{
 		"token no env name": {Mode: "token"},
