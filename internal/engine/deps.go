@@ -134,7 +134,10 @@ type Deps struct {
 	Delta DeltaScanner
 	// Intel is the third-party metadata client handed to checks as
 	// Target.Intel. Nil means not available (checks that need it skip).
-	Intel  check.Intel
+	Intel check.Intel
+	// Lookup is the DNS client for names the operator does not own, handed to
+	// checks as Target.Lookup (domain.lookalike). Nil means not available.
+	Lookup check.Lookup
 	Logger *slog.Logger
 	// Now overrides time.Now in tests.
 	Now func() time.Time

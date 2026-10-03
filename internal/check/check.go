@@ -73,6 +73,17 @@ type Intel interface {
 	RDAPBase(ctx context.Context, domain string) (string, error)
 }
 
+// Lookup is a DNS client for names the operator does NOT own (domain.lookalike
+// asks whether a typosquat exists). It is deliberately not the scope guard's
+// DNSQuerier, which rightly refuses such names: it is built from the configured
+// recursive resolvers (scope.resolvers when set) behind one process-wide rate
+// limit, it only ever sends DNS queries to those resolvers, and it is the only
+// way a check may ask about a third party's name. Like DNSQuerier it is
+// rcode-aware: SERVFAIL and timeouts are unknown, never "does not exist".
+type Lookup interface {
+	Query(ctx context.Context, name string, qtype uint16) (*dnsx.Response, error)
+}
+
 // Neighbour is an asset connected to the target by a relation.
 type Neighbour struct {
 	Asset    model.Asset
@@ -93,8 +104,15 @@ type Target struct {
 	// Intel is the third-party metadata client. Nil means not available:
 	// checks that need it treat the run as skipped (an observation, a partial
 	// result, never an error or a finding).
-	Intel  Intel
+	Intel Intel
+	// Lookup is the client for third-party names (see Lookup). Nil means not
+	// available: checks that need it record an observation and skip.
+	Lookup Lookup
 	Config map[string]any
+	// OwnedZones are the names of every owned zone in the inventory, not only
+	// the asset's own. The engine fills it only for checks that implement
+	// WantsOwnedZones; it is nil for every other check.
+	OwnedZones []string
 	// OpenFindings are this asset's unresolved findings (open, acknowledged,
 	// suppressed, false_positive) of the running check, newest severity first,
 	// capped at MaxOpenFindings. The engine fills it only for checks that
@@ -122,6 +140,22 @@ type OpenFinding struct {
 // scan for it and skips the query for every other check.
 type WantsOpenFindings interface {
 	WantsOpenFindings() bool
+}
+
+// WantsOwnedZones is an optional Check interface. A check returning true
+// receives Target.OwnedZones; the engine lists the owned zone assets once per
+// run for it and skips the query for every other check.
+type WantsOwnedZones interface {
+	WantsOwnedZones() bool
+}
+
+// DefaultTimeouter is an optional Check interface for checks whose runs
+// legitimately take longer than the engine's 2m default (a rate-limited sweep
+// of DNS names, for example). checks.<name>.timeout still overrides it. The
+// engine's deadline also covers storing the result, so a check should finish
+// its own work before it.
+type DefaultTimeouter interface {
+	DefaultTimeout() time.Duration
 }
 
 // DefaultIntervaler is an optional Check interface for checks whose natural

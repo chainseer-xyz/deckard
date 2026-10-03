@@ -192,6 +192,7 @@ func (a *App) build() error {
 		Templates: templates,
 		Delta:     delta,
 		Intel:     ic,
+		Lookup:    a.buildLookup(),
 	}, append([]engine.Option{engine.WithRoles(cfg.Server.Roles...), engine.WithQueueWorkers(queueWorkers(cfg))}, engIntel...)...)
 	if err != nil {
 		return fmt.Errorf("engine: %w", err)

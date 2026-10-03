@@ -68,6 +68,9 @@ func (s *fakeStore) ListAssets(_ context.Context, f store.AssetFilter) ([]model.
 		if a.RemovedAt != nil && !f.IncludeRemoved {
 			continue
 		}
+		if (f.Kind != "" && a.Kind != f.Kind) || (f.Scope != "" && a.Scope != f.Scope) {
+			continue
+		}
 		out = append(out, a)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
