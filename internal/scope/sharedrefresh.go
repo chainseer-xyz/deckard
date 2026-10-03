@@ -22,10 +22,12 @@ const (
 	URLAWS          = "https://ip-ranges.amazonaws.com/ip-ranges.json"
 	URLFastly       = "https://api.fastly.com/public-ip-list"
 	URLGitHub       = "https://api.github.com/meta"
+	URLGoogle       = "https://www.gstatic.com/ipranges/goog.json"
+	URLGoogleCloud  = "https://www.gstatic.com/ipranges/cloud.json"
 )
 
 // SharedSourceURLs lists every URL ParseSharedSources understands.
-var SharedSourceURLs = []string{URLCloudflareV4, URLCloudflareV6, URLAWS, URLFastly, URLGitHub}
+var SharedSourceURLs = []string{URLCloudflareV4, URLCloudflareV6, URLAWS, URLFastly, URLGitHub, URLGoogle, URLGoogleCloud}
 
 // awsSharedServices are the ONLY AWS service tags treated as shared edge
 // infrastructure. EC2 and AMAZON are deliberately absent: those ranges contain
@@ -159,7 +161,8 @@ func MergeShared(base, extra []netip.Prefix) []netip.Prefix {
 // map are skipped; a source that is present but unusable (not parseable, or
 // more than 10% bad entries, or no valid entry) fails the whole call so a
 // poisoned or truncated document never half-applies. Only AWS CLOUDFRONT,
-// GLOBALACCELERATOR and S3 prefixes are taken; EC2/AMAZON never are.
+// GLOBALACCELERATOR and S3 prefixes are taken; EC2/AMAZON never are. Google
+// publishes both IPv4 and IPv6 prefixes in the goog.json and cloud.json feeds.
 func ParseSharedSources(bodies map[string][]byte) ([]LabeledPrefix, error) {
 	var out []LabeledPrefix
 	add := func(url string, f func([]byte) ([]LabeledPrefix, error)) error {
@@ -183,12 +186,38 @@ func ParseSharedSources(bodies map[string][]byte) ([]LabeledPrefix, error) {
 		{URLAWS, parseAWS},
 		{URLFastly, parseFastly},
 		{URLGitHub, parseGitHubPages},
+		{URLGoogle, parseGoogle("google")},
+		{URLGoogleCloud, parseGoogle("google-cloud")},
 	} {
 		if err := add(s.url, s.f); err != nil {
 			return nil, err
 		}
 	}
 	return dedupeLabeled(out), nil
+}
+
+func parseGoogle(label string) func([]byte) ([]LabeledPrefix, error) {
+	return func(b []byte) ([]LabeledPrefix, error) {
+		var doc struct {
+			Prefixes []struct {
+				IPv4 string `json:"ipv4Prefix"`
+				IPv6 string `json:"ipv6Prefix"`
+			} `json:"prefixes"`
+		}
+		if err := json.Unmarshal(b, &doc); err != nil {
+			return nil, fmt.Errorf("%s ip ranges: %w", label, err)
+		}
+		raw := make([]string, 0, len(doc.Prefixes)*2)
+		for _, p := range doc.Prefixes {
+			if p.IPv4 != "" {
+				raw = append(raw, p.IPv4)
+			}
+			if p.IPv6 != "" {
+				raw = append(raw, p.IPv6)
+			}
+		}
+		return collect(label, raw)
+	}
 }
 
 // collect validates raw CIDR strings from one source.

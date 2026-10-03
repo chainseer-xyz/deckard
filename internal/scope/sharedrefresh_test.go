@@ -26,6 +26,8 @@ func fixtureBodies(t *testing.T) map[string][]byte {
 		URLAWS:          read("aws-ip-ranges.json"),
 		URLFastly:       read("fastly-public-ip-list.json"),
 		URLGitHub:       read("github-meta.json"),
+		URLGoogle:       read("google-ip-ranges.json"),
+		URLGoogleCloud:  read("google-cloud-ip-ranges.json"),
 	}
 }
 
@@ -43,7 +45,7 @@ func TestParseSharedSourcesFixtures(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := labels(ls)
-	for _, label := range []string{"cloudflare", "aws-cloudfront", "aws-globalaccelerator", "aws-s3", "fastly", "github-pages"} {
+	for _, label := range []string{"cloudflare", "aws-cloudfront", "aws-globalaccelerator", "aws-s3", "fastly", "github-pages", "google", "google-cloud"} {
 		if len(m[label]) == 0 {
 			t.Errorf("no %s ranges: %v", label, m)
 		}
@@ -59,7 +61,9 @@ func TestParseSharedSourcesFixtures(t *testing.T) {
 	if !has("aws-cloudfront", "120.52.22.96/27") || !has("aws-globalaccelerator", "3.2.58.0/24") ||
 		!has("aws-s3", "52.219.170.0/23") || !has("aws-s3", "2a05:d07a:a000::/40") ||
 		!has("fastly", "151.101.0.0/16") || !has("cloudflare", "2606:4700::/32") ||
-		!has("github-pages", "185.199.108.153/32") {
+		!has("github-pages", "185.199.108.153/32") || !has("google", "216.239.32.0/19") ||
+		!has("google", "2001:4860:4802::/48") || !has("google-cloud", "34.64.0.0/10") ||
+		!has("google-cloud", "2600:1900::/35") {
 		t.Errorf("missing expected ranges: %v", m)
 	}
 	// Never taken: EC2/AMAZON/ROUTE53 and CLOUDFRONT_ORIGIN_FACING.
@@ -90,19 +94,22 @@ func TestParseSharedSourcesRejectsBadSources(t *testing.T) {
 		url  string
 		body string
 	}{
-		"cf html error page": {URLCloudflareV4, "<html>rate limited</html>"},
-		"cf empty":           {URLCloudflareV4, ""},
-		"cf half garbage":    {URLCloudflareV4, "173.245.48.0/20\nnot-a-cidr\n103.21.244.0/22\nzzz\n"},
-		"aws invalid json":   {URLAWS, `{"prefixes": [`},
-		"aws empty":          {URLAWS, `{}`},
-		"aws only EC2":       {URLAWS, `{"prefixes":[{"ip_prefix":"35.180.0.0/16","service":"EC2"}]}`},
-		"aws all garbage":    {URLAWS, `{"prefixes":[{"ip_prefix":"nope","service":"S3"},{"ip_prefix":"also","service":"S3"}]}`},
-		"fastly wrong shape": {URLFastly, `[1,2,3]`},
-		"fastly empty":       {URLFastly, `{"addresses":[],"ipv6_addresses":[]}`},
-		"github no pages":    {URLGitHub, `{"hooks":["192.30.252.0/22"]}`},
-		"github null":        {URLGitHub, `null`},
-		"binary":             {URLGitHub, "\x00\xff\xfe"},
-		"only absurd":        {URLCloudflareV4, "0.0.0.0/0\n1.0.0.0/4\n"},
+		"cf html error page":   {URLCloudflareV4, "<html>rate limited</html>"},
+		"cf empty":             {URLCloudflareV4, ""},
+		"cf half garbage":      {URLCloudflareV4, "173.245.48.0/20\nnot-a-cidr\n103.21.244.0/22\nzzz\n"},
+		"aws invalid json":     {URLAWS, `{"prefixes": [`},
+		"aws empty":            {URLAWS, `{}`},
+		"aws only EC2":         {URLAWS, `{"prefixes":[{"ip_prefix":"35.180.0.0/16","service":"EC2"}]}`},
+		"aws all garbage":      {URLAWS, `{"prefixes":[{"ip_prefix":"nope","service":"S3"},{"ip_prefix":"also","service":"S3"}]}`},
+		"fastly wrong shape":   {URLFastly, `[1,2,3]`},
+		"fastly empty":         {URLFastly, `{"addresses":[],"ipv6_addresses":[]}`},
+		"github no pages":      {URLGitHub, `{"hooks":["192.30.252.0/22"]}`},
+		"github null":          {URLGitHub, `null`},
+		"google invalid json":  {URLGoogle, `{"prefixes":[`},
+		"google empty":         {URLGoogle, `{"prefixes":[]}`},
+		"google cloud invalid": {URLGoogleCloud, `{"prefixes":[{"ipv6Prefix":"bad"}]}`},
+		"binary":               {URLGitHub, "\x00\xff\xfe"},
+		"only absurd":          {URLCloudflareV4, "0.0.0.0/0\n1.0.0.0/4\n"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

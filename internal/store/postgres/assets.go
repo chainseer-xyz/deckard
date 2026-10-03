@@ -156,33 +156,8 @@ func removeAssets(ctx context.Context, tx pgx.Tx, in []model.Asset, now time.Tim
 			return nil, err
 		}
 	}
-	fr, err := tx.Query(ctx, `UPDATE findings SET status = 'resolved', resolved_at = $2, suppressed_until = NULL, suppression_note = ''
-		WHERE asset_id = ANY($1::bigint[]) AND status IN ('open', 'acknowledged') RETURNING id`, ids, now)
-	if err != nil {
+	if err := resolveFindings(ctx, tx, ids, now); err != nil {
 		return nil, err
-	}
-	var fids []int64
-	for fr.Next() {
-		var id int64
-		if err := fr.Scan(&id); err != nil {
-			fr.Close()
-			return nil, err
-		}
-		fids = append(fids, id)
-	}
-	fr.Close()
-	if err := fr.Err(); err != nil {
-		return nil, err
-	}
-	sort.Slice(fids, func(i, j int) bool { return fids[i] < fids[j] })
-	for _, id := range fids {
-		nf, err := getFinding(ctx, tx, id)
-		if err != nil {
-			return nil, err
-		}
-		if err := addEvent(ctx, tx, "finding_resolved", nf.AssetKey, findingEventData(nf), now); err != nil {
-			return nil, err
-		}
 	}
 
 	// Derivation registrations die with the asset: a removed asset is never
@@ -245,6 +220,45 @@ func removeAssets(ctx context.Context, tx pgx.Tx, in []model.Asset, now time.Tim
 		return nil, err
 	}
 	return append(removed, cascade...), nil
+}
+
+// resolveFindings resolves open findings when an asset is no longer in the
+// operator's owned scope. A partial source sync cannot cause this transition,
+// because it retains the previous ownership registrations and never calls this
+// with an incomplete asset classification.
+func resolveFindings(ctx context.Context, tx pgx.Tx, ids []int64, now time.Time) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	fr, err := tx.Query(ctx, `UPDATE findings SET status = 'resolved', resolved_at = $2, suppressed_until = NULL, suppression_note = ''
+		WHERE asset_id = ANY($1::bigint[]) AND status IN ('open', 'acknowledged') RETURNING id`, ids, now)
+	if err != nil {
+		return err
+	}
+	var fids []int64
+	for fr.Next() {
+		var id int64
+		if err := fr.Scan(&id); err != nil {
+			fr.Close()
+			return err
+		}
+		fids = append(fids, id)
+	}
+	fr.Close()
+	if err := fr.Err(); err != nil {
+		return err
+	}
+	sort.Slice(fids, func(i, j int) bool { return fids[i] < fids[j] })
+	for _, id := range fids {
+		nf, err := getFinding(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if err := addEvent(ctx, tx, "finding_resolved", nf.AssetKey, findingEventData(nf), now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ReplaceDerived: see store.Store.
@@ -541,6 +555,11 @@ func upsertAssets(ctx context.Context, tx pgx.Tx, mode upsertMode, snap string, 
 		}
 		if err != nil {
 			return diff, nil, err
+		}
+		if old.Scope == model.ScopeOwned && it.Scope != model.ScopeOwned {
+			if err := resolveFindings(ctx, tx, []int64{upd.ID}, now); err != nil {
+				return diff, nil, fmt.Errorf("resolve out-of-scope findings for %s: %w", it.Key, err)
+			}
 		}
 	}
 	return diff, seen, nil

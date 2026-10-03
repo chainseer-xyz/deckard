@@ -48,6 +48,8 @@ func newUpstream(t *testing.T) *upstream {
 	u.bodies["ip-ranges.amazonaws.com/ip-ranges.json"] = read(t, sc+"aws-ip-ranges.json")
 	u.bodies["api.fastly.com/public-ip-list"] = read(t, sc+"fastly-public-ip-list.json")
 	u.bodies["api.github.com/meta"] = read(t, sc+"github-meta.json")
+	u.bodies["www.gstatic.com/ipranges/goog.json"] = read(t, sc+"google-ip-ranges.json")
+	u.bodies["www.gstatic.com/ipranges/cloud.json"] = read(t, sc+"google-cloud-ip-ranges.json")
 	u.bodies["raw.githubusercontent.com/EdOverflow/can-i-take-over-xyz/master/fingerprints.json"] =
 		read(t, "../../check/dns/takeover/testdata/community_fingerprints.json")
 	for k := range u.bodies {

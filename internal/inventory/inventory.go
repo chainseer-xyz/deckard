@@ -343,7 +343,7 @@ func (s *Service) scopeFilter(origin string, in []model.AssetInput) []store.Asse
 // Rehydrate rebuilds the classifier's owned zones and owned IP prefixes from
 // the database without calling any source: zones are the non-removed zone
 // assets per source, prefixes the non-removed IP assets whose source claims
-// them (owned/origin attrs, or any IP of a kubernetes source), minus IPs the
+// them (owned attrs, or any IP of a kubernetes source), minus IPs the
 // classifier calls shared or excluded. It seeds the per-source bookkeeping so
 // later Syncs shrink it correctly. Call it at startup and periodically
 // (RunRefresh) so replicas that did not sync still follow dropped zones.
@@ -450,12 +450,13 @@ func (s *Service) upserts(source string, in []model.AssetInput) []store.AssetUps
 }
 
 // acceptPrefixes returns the owned-IP registrations implied by one source's
-// assets: IPs flagged owned/origin (static, origin and LB-pool IPs) and every
-// IP a kubernetes source reports (its LoadBalancer and node external IPs).
-// IPs the classifier already calls shared or excluded are never registered:
-// a shared-edge IP is not owned just because a record points at it. The
-// verdict ignores earlier registrations, which would otherwise keep an IP
-// owned after its range became shared.
+// assets: IPs explicitly flagged owned by an inventory source or static config,
+// and every IP a kubernetes source reports (its LoadBalancer and node external
+// IPs). DNS and origin records are relationships, not ownership evidence.
+// A shared-edge IP is not owned just because a record points at it. Explicit
+// inventory evidence still wins over a provider range; only excluded space is
+// refused here. ClassifyUnregistered ignores earlier registrations, which
+// keeps origin-only records out of the owned set.
 func (s *Service) acceptPrefixes(srcType string, assets []model.AssetInput) []netip.Prefix {
 	seen := map[netip.Prefix]bool{}
 	var out []netip.Prefix
@@ -468,8 +469,8 @@ func (s *Service) acceptPrefixes(srcType string, assets []model.AssetInput) []ne
 			continue
 		}
 		switch s.cls.ClassifyUnregistered(p.Masked().Addr().String()) {
-		case model.ScopeShared, model.ScopeExcluded:
-			s.log.Info("inventory: not registering shared/excluded IP as owned", "ip", a.Key)
+		case model.ScopeExcluded:
+			s.log.Info("inventory: not registering excluded IP as owned", "ip", a.Key)
 			continue
 		}
 		if !seen[p] {
@@ -484,7 +485,7 @@ func ownedClaim(srcType string, attrs map[string]any) bool {
 	if srcType == "kubernetes" {
 		return true
 	}
-	return attrs["owned"] == true || attrs["origin"] == true
+	return attrs["owned"] == true
 }
 
 func parsePrefix(s string) (netip.Prefix, bool) {

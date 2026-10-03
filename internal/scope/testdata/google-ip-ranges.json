@@ -1,0 +1,8 @@
+{
+  "syncToken": "test",
+  "creationTime": "2026-01-01T00:00:00.000000",
+  "prefixes": [
+    {"ipv4Prefix": "216.239.32.0/19"},
+    {"ipv6Prefix": "2001:4860:4802::/48"}
+  ]
+}
