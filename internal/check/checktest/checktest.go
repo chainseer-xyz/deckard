@@ -156,6 +156,12 @@ func WithHTTP(c *http.Client) Option { return func(t *check.Target) { t.HTTP = c
 // WithIntel sets the third-party metadata client.
 func WithIntel(i check.Intel) Option { return func(t *check.Target) { t.Intel = i } }
 
+// WithLookup sets the client for third-party names.
+func WithLookup(l check.Lookup) Option { return func(t *check.Target) { t.Lookup = l } }
+
+// WithOwnedZones sets the estate's owned zone names.
+func WithOwnedZones(z ...string) Option { return func(t *check.Target) { t.OwnedZones = z } }
+
 // WithConfig sets per-check config.
 func WithConfig(c map[string]any) Option { return func(t *check.Target) { t.Config = c } }
 

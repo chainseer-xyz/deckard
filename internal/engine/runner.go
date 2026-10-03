@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -271,7 +272,7 @@ func (r *runner) runCheck(ctx context.Context, c check.Check, asset model.Asset,
 	class model.ScopeClass, limiter scope.RateLimiter) error {
 
 	tier := c.Tier()
-	timeout := r.checkTimeout(c.Name())
+	timeout := r.timeoutFor(c)
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -284,6 +285,7 @@ func (r *runner) runCheck(ctx context.Context, c check.Check, asset model.Asset,
 		Resolver:   r.Guard.Resolver(tier, class, limiter),
 		HTTP:       r.Guard.HTTPClient(tier, class, limiter, scope.WithHTTPTimeout(timeout)),
 		Intel:      r.Intel,
+		Lookup:     r.Lookup,
 		Config:     r.Config.Checks[c.Name()],
 	}
 	// The scope-guarded rcode-aware DNS client is optional: guards that do not
@@ -296,7 +298,16 @@ func (r *runner) runCheck(ctx context.Context, c check.Check, asset model.Asset,
 	start := r.now()
 	var res *check.Result
 	var runErr error
-	if w, ok := c.(check.WantsOpenFindings); ok && w.WantsOpenFindings() {
+	if w, ok := c.(check.WantsOwnedZones); ok && w.WantsOwnedZones() {
+		// A check that excludes the estate's own names must not run without
+		// the list, or it would report them as somebody else's.
+		if zones, err := r.ownedZoneNames(cctx); err != nil {
+			runErr = fmt.Errorf("list owned zones: %w", err)
+		} else {
+			target.OwnedZones = zones
+		}
+	}
+	if w, ok := c.(check.WantsOpenFindings); ok && w.WantsOpenFindings() && runErr == nil {
 		// A failed lookup fails the run: a check that re-verifies findings must
 		// never run blind, or it could let them resolve unverified.
 		if of, err := r.openFindings(cctx, asset.ID, c.Name()); err != nil {
@@ -346,6 +357,20 @@ func (r *runner) runCheck(ctx context.Context, c check.Check, asset model.Asset,
 	}
 	r.recordScan(ctx, run)
 	return nil
+}
+
+// ownedZoneNames lists every live owned zone asset, one query.
+func (r *runner) ownedZoneNames(ctx context.Context) ([]string, error) {
+	assets, _, err := r.Store.ListAssets(ctx, store.AssetFilter{Kind: model.KindZone, Scope: model.ScopeOwned})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(assets))
+	for _, a := range assets {
+		out = append(out, strings.ToLower(strings.TrimSuffix(a.Key, ".")))
+	}
+	slices.Sort(out)
+	return slices.Compact(out), nil
 }
 
 // unresolvedStatuses are the finding states a re-verifying check must keep
@@ -412,31 +437,52 @@ func (r *runner) recordScan(ctx context.Context, run store.ScanRun) {
 // checkTimeout reads checks.<name>.timeout (duration string, time.Duration or
 // seconds), default 2m.
 func (r *runner) checkTimeout(name string) time.Duration {
+	if d, ok := r.configuredTimeout(name); ok {
+		return d
+	}
+	return defaultCheckTimeout
+}
+
+// timeoutFor is the deadline of one run of c: checks.<name>.timeout, else the
+// check's own default (check.DefaultTimeouter), else 2m.
+func (r *runner) timeoutFor(c check.Check) time.Duration {
+	if d, ok := r.configuredTimeout(c.Name()); ok {
+		return d
+	}
+	if dt, ok := c.(check.DefaultTimeouter); ok {
+		if d := dt.DefaultTimeout(); d > 0 {
+			return d
+		}
+	}
+	return defaultCheckTimeout
+}
+
+func (r *runner) configuredTimeout(name string) (time.Duration, bool) {
 	if v, ok := r.Config.Checks[name]["timeout"]; ok {
 		switch t := v.(type) {
 		case time.Duration:
 			if t > 0 {
-				return t
+				return t, true
 			}
 		case string:
 			if d, err := time.ParseDuration(strings.TrimSpace(t)); err == nil && d > 0 {
-				return d
+				return d, true
 			}
 		case int:
 			if t > 0 {
-				return time.Duration(t) * time.Second
+				return time.Duration(t) * time.Second, true
 			}
 		case int64:
 			if t > 0 {
-				return time.Duration(t) * time.Second
+				return time.Duration(t) * time.Second, true
 			}
 		case float64:
 			if t > 0 {
-				return time.Duration(t * float64(time.Second))
+				return time.Duration(t * float64(time.Second)), true
 			}
 		}
 	}
-	return defaultCheckTimeout
+	return 0, false
 }
 
 // replaceDerived tells the inventory what a SUCCESSFUL run of check origin

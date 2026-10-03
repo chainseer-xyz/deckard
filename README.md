@@ -97,6 +97,7 @@ stale syncs so you never trust an incomplete inventory by accident.
 | passive | `dns.takeover` | provider takeover fingerprints (S3, GitHub Pages, Heroku, Azure, CloudFront, …) |
 | passive | `dns.hygiene` | SPF/DMARC/CAA/DNSSEC gaps, wildcard records, open AXFR |
 | passive | `domain.expiry` | registrations near or past expiry, missing transfer/delete locks, registrar or nameserver changes (RDAP) |
+| passive | `domain.lookalike` | registered typosquats and lookalikes of your domains, with mail-capable ones flagged (DNS only, never contacts them) |
 | passive | `tls.cert` | expiry, hostname mismatch, weak keys, self-signed |
 | passive | `http.probe`, `http.headers` | liveness, tech fingerprint, missing security headers |
 | passive | `origin.exposed`, `origin.correlation` | CDN origin reachable directly; origin IP published by an unproxied record |

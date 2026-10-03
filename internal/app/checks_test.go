@@ -43,6 +43,7 @@ func TestAllDocumentedChecksAreRegistered(t *testing.T) {
 		"http.headers":       model.TierPassive,
 		"origin.exposed":     model.TierPassive,
 		"origin.correlation": model.TierPassive,
+		"domain.lookalike":   model.TierPassive,
 		"net.ports":          model.TierActive,
 		"net.services":       model.TierActive,
 		"tls.config":         model.TierActive,
