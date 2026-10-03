@@ -100,6 +100,31 @@ dashf=$(helm template t deckard --set database.cnpg.enabled=true --set metrics.d
   --set metrics.dashboard.annotations.grafana_folder=Security)
 check "dashboard folder annotation" "grafana_folder: Security" "$dashf"
 
+# Gateway API route: off by default, needs a parentRef, wires the Service and the NetworkPolicy.
+absent "no HTTPRoute by default" "kind: HTTPRoute" "$cnpg"
+expect_error "httpRoute without parentRefs rejected" "httpRoute.enabled needs httpRoute.parentRefs" \
+  --set database.cnpg.enabled=true --set httpRoute.enabled=true
+gwargs=(--set database.cnpg.enabled=true --set httpRoute.enabled=true
+  --set 'httpRoute.parentRefs[0].name=gw' --set 'httpRoute.parentRefs[0].namespace=gateway-system'
+  --set 'httpRoute.parentRefs[0].sectionName=https' --set 'httpRoute.hostnames[0]=deckard.example.com'
+  --set 'httpRoute.annotations.external-dns\.alpha\.kubernetes\.io/hostname=deckard.example.com')
+gw=$(helm template t deckard "${gwargs[@]}")
+check "httproute rendered"            "kind: HTTPRoute" "$gw"
+check "httproute parent gateway"      "sectionName: https" "$gw"
+check "httproute hostname"            "- deckard.example.com" "$gw"
+check "httproute backend is service"  "name: t-deckard" "$gw"
+check "httproute backend port"        "port: 80" "$gw"
+check "httproute annotations"         "external-dns.alpha.kubernetes.io/hostname: deckard.example.com" "$gw"
+check "netpol admits the gateway ns"  'kubernetes.io/metadata.name: "gateway-system"' "$gw"
+absent "no redirect route by default" "-redirect" "$gw"
+expect_error "redirect without parentRefs rejected" "httpRedirect.enabled needs httpRoute.httpRedirect.parentRefs" \
+  "${gwargs[@]}" --set httpRoute.httpRedirect.enabled=true
+gwr=$(helm template t deckard "${gwargs[@]}" --set httpRoute.httpRedirect.enabled=true \
+  --set 'httpRoute.httpRedirect.parentRefs[0].name=gw' --set 'httpRoute.httpRedirect.parentRefs[0].sectionName=http')
+check "redirect route rendered"       "name: t-deckard-redirect" "$gwr"
+check "redirect is to https"          "scheme: https" "$gwr"
+check "redirect status"               "statusCode: 301" "$gwr"
+
 # Refreshed reference data lives under /var/lib/deckard: a volume is always mounted
 # (emptyDir without persistence, the PVC with it) so the root FS can stay read-only.
 check "data dir mounted by default"  "mountPath: /var/lib/deckard" "$cnpg"

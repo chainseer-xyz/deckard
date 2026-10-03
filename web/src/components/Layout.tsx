@@ -42,7 +42,7 @@ export function Layout() {
       <header className="sticky top-0 z-40 border-b border-line bg-surface">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2">
           <span className="text-base font-bold tracking-tight">
-            <span className="text-accent">b</span>lart
+            <span className="text-accent">d</span>eckard
           </span>
           <nav aria-label="Main" className="flex flex-1 flex-wrap items-center gap-1">
             {nav.map((n) => (

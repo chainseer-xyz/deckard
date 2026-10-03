@@ -19,7 +19,7 @@ All planned tasks are complete and verified. See `review-findings.md` for the in
 - [x] Review round 1 (core + API/auth): all findings fixed
 - [x] Security gates: gosec 0 issues, Trivy clean (slim image 13 MB; nuclei built from pinned source with patched deps)
 - [x] Live validation on a real 71-zone estate, with precision fixes re-verified
-- [x] Project renamed blart -> deckard
+- [x] Project named deckard
 - [x] Continuous CVE currency: nuclei template updater (6h, atomic swap), new-template and KEV-triggered targeted scans, partial-run semantics, open findings re-verified by their own template
 - [x] Reference data refresh (takeover fingerprints, CDN/SaaS ranges) with embedded fallback
 - [x] Exploit intelligence: CISA KEV + FIRST EPSS enrichment, KEV badge in the UI, kev alert label
