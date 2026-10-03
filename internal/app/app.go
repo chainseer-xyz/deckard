@@ -32,7 +32,7 @@ import (
 	"github.com/chainseer-xyz/deckard/internal/plugin"
 	"github.com/chainseer-xyz/deckard/internal/scope"
 	"github.com/chainseer-xyz/deckard/internal/source"
-	_ "github.com/chainseer-xyz/deckard/internal/source/all" // registers route53 and kubernetes
+	_ "github.com/chainseer-xyz/deckard/internal/source/all" // registers route53, gcpdns, aws and kubernetes
 	"github.com/chainseer-xyz/deckard/internal/source/registry"
 	"github.com/chainseer-xyz/deckard/internal/store"
 	"github.com/chainseer-xyz/deckard/internal/store/postgres"

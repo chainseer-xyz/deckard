@@ -1,5 +1,5 @@
 // Package source defines the asset-discovery contract. Implementations live in
-// subpackages (cloudflare, route53, kubernetes, static).
+// subpackages (cloudflare, route53, gcpdns, kubernetes, static).
 package source
 
 import (

@@ -55,7 +55,7 @@ port opened for a test, a CVE published last night.
 deckard is built for the long haul:
 
 - **Inventory first.** It builds a graph from your real sources (Cloudflare, Route 53,
-  AWS, Kubernetes, static lists), so it knows what you own instead of guessing.
+  Google Cloud DNS, AWS, Kubernetes, static lists), so it knows what you own instead of guessing.
 - **Continuous, not periodic.** New assets are scanned immediately; everything else is
   re-checked on a cadence you set, per tier and per check. CVE templates, CISA KEV and
   EPSS data refresh on their own, and a newly exploited CVE triggers a targeted scan.
