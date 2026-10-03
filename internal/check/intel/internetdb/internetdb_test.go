@@ -492,19 +492,15 @@ func TestSharedGoogleAddressesAreSkippedButOwnedAddressIsReported(t *testing.T) 
 	}
 }
 
-func TestInternetDBSharedHostnameEvidenceSuppressesFindings(t *testing.T) {
+func TestInternetDBDoesNotTreatProviderHostnamesAsSharedOwnershipEvidence(t *testing.T) {
 	f := newFakeIntel()
-	f.bodies[url(testIP)] = fmt.Sprintf(`{"ip":%q,"ports":[80],"hostnames":["www.example.com","*.1e100.net","bizopsportal.com"],"vulns":["CVE-2021-41773"],"tags":["malware"]}`, testIP)
+	f.bodies[url(testIP)] = fmt.Sprintf(`{"ip":%q,"ports":[80],"hostnames":["www.example.com","ec2-1-2-3-4.compute-1.amazonaws.com"],"vulns":["CVE-2021-41773"],"tags":["malware"]}`, testIP)
 	tg := checktest.NewTarget(ipAsset(testIP), checktest.WithOwnedZones("example.com"))
 	tg.Intel = f
 	tg.Baseline = map[string]map[string]any{portsCheck: {"ports": []any{80}, "scanned_ports": []any{80}, "address_families": []any{"ipv4", "ipv6"}}}
 	res, err := New(nil).Run(context.Background(), tg)
-	if err != nil || !res.Partial || len(res.Findings) != 0 {
-		t.Fatalf("shared-host result: err=%v partial=%v findings=%v", err, res.Partial, keys(res))
-	}
-	o := obsOf(t, res)
-	if o["shared_host"] != true || o["internetdb_note"] != "shared_host" {
-		t.Fatalf("shared-host observation = %v", o)
+	if err != nil || res.Partial || !slices.Contains(keys(res), "tag:malware") || !slices.Contains(keys(res), "cve:CVE-2021-41773") {
+		t.Fatalf("provider-hostname result: err=%v partial=%v findings=%v", err, res.Partial, keys(res))
 	}
 }
 

@@ -59,7 +59,6 @@ import (
 
 	"github.com/chainseer-xyz/deckard/internal/check"
 	"github.com/chainseer-xyz/deckard/internal/check/checkutil"
-	"github.com/chainseer-xyz/deckard/internal/check/domain/expiry"
 	"github.com/chainseer-xyz/deckard/internal/intel"
 	"github.com/chainseer-xyz/deckard/internal/model"
 	"github.com/chainseer-xyz/deckard/internal/vulnintel"
@@ -111,10 +110,6 @@ func (*Check) SlowLookups() bool { return true }
 
 // BaselineChecks asks the engine for net.ports' learned observation.
 func (*Check) BaselineChecks() []string { return []string{portsCheck} }
-
-// WantsOwnedZones supplies the zones needed to reject reverse names that show
-// this address is a shared host rather than one of the operator's addresses.
-func (*Check) WantsOwnedZones() bool { return true }
 
 // Applies matches owned IPs that are public addresses.
 func (*Check) Applies(a model.Asset) bool {
@@ -190,12 +185,6 @@ func (c *Check) Run(ctx context.Context, t check.Target) (*check.Result, error) 
 		}
 	}
 	obs["internetdb"] = StateOK
-	if shared := sharedHostnames(a.Hostnames, t.OwnedZones); len(shared) > 0 {
-		obs["shared_host"] = true
-		obs["shared_hostnames"] = shared
-		return skip(StateSkipped, "shared_host")
-	}
-
 	ev := newEvidence(ip, &a)
 	cves, truncated := cveIDs(a.Vulns, checkutil.Int(cfg, "max_cves", DefaultMaxCVEs))
 	for _, id := range cves {
@@ -227,19 +216,6 @@ func (c *Check) Run(ctx context.Context, t check.Target) (*check.Result, error) 
 	}
 	res.Observations = []model.ObservationInput{{Check: Name, Data: obs}}
 	return res, nil
-}
-
-func sharedHostnames(hostnames, zones []string) []string {
-	var out []string
-	for _, raw := range hostnames {
-		h := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(raw)), "*.")
-		reg, ok := expiry.Registrable(h)
-		if ok && checkutil.ZoneOf(reg, zones) == "" {
-			out = append(out, h)
-		}
-	}
-	slices.Sort(out)
-	return slices.Compact(out)
 }
 
 // classify maps an intel error onto an observation state and note. None of
