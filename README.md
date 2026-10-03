@@ -96,6 +96,7 @@ stale syncs so you never trust an incomplete inventory by accident.
 | passive | `dns.dangling` | CNAME chains ending in NXDOMAIN, dangling NS delegations |
 | passive | `dns.takeover` | provider takeover fingerprints (S3, GitHub Pages, Heroku, Azure, CloudFront, …) |
 | passive | `dns.hygiene` | SPF/DMARC/CAA/DNSSEC gaps, wildcard records, open AXFR |
+| passive | `domain.expiry` | registrations near or past expiry, missing transfer/delete locks, registrar or nameserver changes (RDAP) |
 | passive | `tls.cert` | expiry, hostname mismatch, weak keys, self-signed |
 | passive | `http.probe`, `http.headers` | liveness, tech fingerprint, missing security headers |
 | passive | `origin.exposed`, `origin.correlation` | CDN origin reachable directly; origin IP published by an unproxied record |

@@ -353,7 +353,7 @@ checks:
 
 | Key | Default | Effect |
 |---|---|---|
-| `interval` | the tier's (or asset group's) interval | Replaces the tier interval for this check. May shorten or lengthen it. Must be a duration `> 0`. |
+| `interval` | the tier's (or asset group's) interval; `12h` for `domain.expiry` | Replaces the tier interval for this check. May shorten or lengthen it. Must be a duration `> 0`. A check with its own default cadence (`domain.expiry`: registry data moves slowly) uses it instead of the tier's; this key still overrides it. |
 | `on_new_asset` | `true` | Scan this check as soon as an asset is added, changed or revived. Can only switch the tier's `on_inventory_change` off for this check, never on. |
 
 ### Check-specific options
@@ -366,12 +366,31 @@ ignored):
 | `http.headers` | `min_severity` | `info` | Drop findings below this severity (`info`, `low`, `medium`, ...). Set `low` to silence the info-level noise such as a missing `Referrer-Policy`. Dropped findings are never stored; to keep them visible but not alerted on, use `notify.alertmanager.min_severity` instead. The security-header set is evaluated on `https://` URLs only; `http://` URLs are checked only for "does not redirect to HTTPS". |
 | `http.headers` | `required_headers`, `hsts_min_age`, `timeout_seconds` | see check docs | Which header classes to require and the minimum HSTS max-age. |
 | `dns.hygiene` | `expects_mail` | `false` | Force mail treatment of a zone. Without it, a zone with MX records gets medium for a missing DMARC/SPF record and a zone without MX (parked) gets low, with a null-sender recommendation (`v=spf1 -all`, `v=DMARC1; p=reject;`). |
+| `domain.expiry` | `high_days`, `medium_days`, `low_days` | `14`, `30`, `60` | Days before expiry at which `expiring` is high, medium and low. Must satisfy `1 <= high_days <= medium_days <= low_days <= 3650`; invalid values fall back to the defaults and are noted in the observation. |
+| `domain.expiry` | `lock_exempt_tlds` | `[]` | TLDs (for example `[de]`) whose registrars cannot set transfer or delete locks: `transfer-unlocked` and `no-delete-protection` are not raised for them. |
 | `dns.takeover` | `timeout_seconds` | `10` | Per-request timeout. Before reporting, the check handshakes with the owned hostname over HTTPS: a certificate valid for the host that is not the provider's default certificate suppresses the finding. |
 
 `tls.cert` reports hostname-mismatch, self-signed and untrusted-chain findings
 at `low` (and `expired` at `high` instead of `critical`) when the host has an
 outbound `cname_to` neighbour that is external, since the operator cannot fix
 a third party's certificate; the evidence carries `served_by`.
+
+`domain.expiry` runs on owned zones that are registrable domains (the label in
+front of the ICANN public suffix: `example.com`, `example.co.uk`); subzones such
+as `corp.example.com` share the apex's registration and are skipped. It asks
+the registry's RDAP service (through [`intel`](#third-party-metadata-intel))
+and raises `expired` (critical; also for the `redemption period` and
+`pending delete` statuses), `expiring` (high/medium/low by the thresholds
+above), `transfer-unlocked` (medium: neither `clientTransferProhibited` nor
+`serverTransferProhibited`), `no-delete-protection` (info), and, against the
+learned baseline, `drift/registrar` and `drift/nameservers` (high: a registrar
+or delegation change nobody planned is how domains are hijacked; a mere
+reordering of the nameservers is not a change). Evidence carries the expiry
+date, days remaining, registrar, statuses and nameservers. A TLD without RDAP,
+a domain the registry does not know, a lookup failure or `intel.enabled:
+false` raise nothing: the observation says `rdap: unsupported`, `not_found`,
+`unavailable` or `skipped` and the run is partial, so no finding resolves on
+missing data.
 
 Order of evaluation: the scope guard, then the tier's `enabled` (global, then
 asset-group overrides), then the per-check values. A per-check override can
@@ -538,6 +557,64 @@ are in `deploy/examples/prometheus-rules.yml`, and a route that pages on
 
 **Air-gapped or offline deployments**: set `vulnintel.enabled: false`. deckard
 then makes no request to cisa.gov or api.first.org and never enriches.
+
+## Third-party metadata (`intel`)
+
+Some checks ask public metadata services about *your own* domains and IPs:
+`domain.expiry` asks the registry's RDAP service when a zone apex expires and
+who its registrar is. That is not a probe of your assets, so it does not go
+through the scope guard; it goes through a separate, narrower client instead:
+
+```yaml
+intel:
+  enabled: true                          # false = air-gapped: consumers record "skipped", never a finding
+  user_agent_contact: security@example.com   # optional, appended to the User-Agent
+  services:
+    rdap:       { rate_per_second: 2, timeout: 20s, cache_ttl: 6h, negative_cache_ttl: 15m, max_bytes: 2097152 }
+    internetdb: { enabled: true, rate_per_second: 1 }
+    wayback:    { enabled: true, rate_per_second: 1 }
+```
+
+| Key | Default | Description |
+|---|---|---|
+| `intel.enabled` | `true` | `false` turns every lookup into "skipped": the consuming check records an observation (`rdap: skipped`), marks the run partial and raises nothing. |
+| `intel.user_agent_contact` | | An e-mail address or URL appended to `User-Agent: deckard/<version> (+https://github.com/chainseer-xyz/deckard; <contact>)`. Printable ASCII, at most 128 characters, no `(`, `)`, `;`, `\` or quotes. |
+| `intel.services.<name>.enabled` | `true` | Switch one service off (`rdap`, `internetdb`, `wayback`). |
+| `intel.services.<name>.rate_per_second` | rdap `2`, internetdb `1`, wayback `1` | Token-bucket rate per service (shared by the whole process). `(0, 50]`. |
+| `intel.services.<name>.timeout` | `20s` | Per attempt, connection to last body byte. `1s` to `2m`. |
+| `intel.services.<name>.cache_ttl` | `6h` | How long a successful answer is reused. `1m` to `168h`. |
+| `intel.services.<name>.negative_cache_ttl` | `15m` | How long a 404 is reused. `1m` to `24h`. |
+| `intel.services.<name>.max_bytes` | `2097152` (2 MiB) | Response cap, applied to the compressed and the decompressed body. `4096` to `33554432`. |
+
+The block is closed: unknown keys fail validation. In particular there is no
+`extra_allowed_hosts` and no way to add a host from configuration; the hosts
+are fixed in code (listed in [operations.md](operations.md#network-egress)).
+
+What the client enforces, whatever the configuration:
+
+- every request names a service, and the URL's host must be on that service's
+  allow-list. RDAP servers are allowed only if they appear in IANA's bootstrap
+  file (`https://data.iana.org/rdap/dns.json`, fetched on first use, cached for
+  24h, kept on a failed refresh; only `https` URLs on a hostname and port 443
+  are accepted from it);
+- `https` on port 443 only, TLS 1.2 or later with certificate verification, at
+  most three redirects, each re-checked against the allow-list, and no proxy
+  from `HTTPS_PROXY`/`HTTP_PROXY`;
+- the client resolves the host itself and refuses it if any address is
+  loopback, private, link-local, CGNAT, multicast, unspecified, reserved,
+  documentation or a cloud metadata endpoint; it then connects to the address
+  it checked, so a DNS answer cannot change between the check and the
+  connection;
+- 429 and 5xx answers and timeouts are retried twice with jittered backoff,
+  honouring `Retry-After` up to 30s (a longer one ends the attempt);
+  concurrent identical requests share one upstream call.
+
+Metrics: `deckard_intel_requests_total{service,result}` (`ok`, `cached`,
+`not_found`, `rate_limited`, `error`, `blocked`) and
+`deckard_intel_request_duration_seconds{service}`. Each request is logged at
+DEBUG (service, host, path, result; never the query string or the body). A
+`blocked` request is logged at WARN: it means a bug or an upstream redirecting
+somewhere it should not.
 
 ## Findings and learning
 

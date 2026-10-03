@@ -120,11 +120,35 @@ Cloud DNS at `dns.googleapis.com` with tokens from `oauth2.googleapis.com` or th
 GKE metadata server, your Kubernetes API). If you restrict egress with a NetworkPolicy or proxy, allow
 exactly the rows that match the features you left on.
 
+### Metadata services (`intel.*`)
+
+Checks that ask third-party services about your own domains and IPs use one
+restricted client ([configuration](configuration.md#third-party-metadata-intel)).
+It can reach exactly these hosts, over HTTPS on port 443, and nothing else;
+there is no setting that adds one:
+
+| Host | Service | Used by |
+| --- | --- | --- |
+| `data.iana.org` | `rdap`: the RDAP bootstrap file (`/rdap/dns.json`, once per 24h) | `domain.expiry` |
+| the RDAP server of each TLD you own (from the bootstrap file, for example `rdap.verisign.com` for `.com` and `.net`, `rdap.publicinterestregistry.org` for `.org`) | `rdap`: one `GET /domain/<apex>` per owned zone apex, at most every 6h (cache) | `domain.expiry` |
+| `internetdb.shodan.io` | `internetdb` | reserved for upcoming checks; no traffic yet |
+| `web.archive.org` | `wayback` | reserved for upcoming checks; no traffic yet |
+
+To find the RDAP host for a TLD, look it up in
+`https://data.iana.org/rdap/dns.json`. The client ignores `HTTPS_PROXY`, so
+allow these hosts directly. It uses the system resolver (not
+`scope.resolvers`) and refuses any host that resolves to a private, loopback,
+link-local, CGNAT or metadata address. `deckard_intel_requests_total{result="blocked"}`
+should stay at zero (example alert `DeckardIntelRequestBlocked` in
+`deploy/examples/prometheus-rules.yml`).
+
 ## Running air-gapped
 
 1. Disable the updaters: `nuclei.update.enabled: false`, `refdata.enabled: false`,
    `vulnintel.enabled: false` (check configuration.md for the exact keys), and
-   turn discovery expansion off (no `crt.sh`).
+   turn discovery expansion off (no `crt.sh`). Set `intel.enabled: false` to stop
+   RDAP and other metadata lookups: `domain.expiry` then records `rdap: skipped`
+   and raises nothing.
 2. Provide the data yourself: mount a templates directory at
    `nuclei.templates_dir`, and mount reference-data / vulnintel snapshots at the
    configured paths. Refresh them on your own schedule (for example a CronJob in

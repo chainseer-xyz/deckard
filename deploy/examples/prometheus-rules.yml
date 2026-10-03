@@ -158,6 +158,19 @@ groups:
           summary: "deckard has never installed nuclei templates"
           description: "cve.nuclei cannot run until the first template update succeeds."
 
+  - name: deckard-intel
+    rules:
+      # The metadata client refused a request before connecting: a host off the
+      # allow-list, a redirect to one, or a name resolving to a private or
+      # metadata address. Never expected in normal operation.
+      - alert: DeckardIntelRequestBlocked
+        expr: sum by (service) (increase(deckard_intel_requests_total{result="blocked"}[1h])) > 0
+        labels:
+          severity: medium
+        annotations:
+          summary: "deckard refused {{ $value }} {{ $labels.service }} metadata request(s)"
+          description: "The intel client blocked requests it should never have been asked to make. Check the WARN log lines \"intel: request blocked\" for the host and reason."
+
   - name: deckard-vulnintel
     rules:
       # Ages are relative to the last successful fetch. The threshold (18h) is 3x
