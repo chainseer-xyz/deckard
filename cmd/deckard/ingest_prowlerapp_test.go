@@ -5,14 +5,23 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/chainseer-xyz/deckard/internal/api"
+	"github.com/chainseer-xyz/deckard/internal/api/auth"
+	"github.com/chainseer-xyz/deckard/internal/api/fakestore"
+	"github.com/chainseer-xyz/deckard/internal/config"
+	"github.com/chainseer-xyz/deckard/internal/finding"
 	"github.com/chainseer-xyz/deckard/internal/ingest"
 	pt "github.com/chainseer-xyz/deckard/internal/ingest/prowlerapp/prowlerapptest"
+	"github.com/chainseer-xyz/deckard/internal/model"
+	"github.com/chainseer-xyz/deckard/internal/store"
 )
 
 const (
@@ -440,5 +449,196 @@ func TestScrubWriterHidesEverySecret(t *testing.T) {
 	n, err := w.Write([]byte("a alpha-secret b beta-secret c"))
 	if err != nil || n != len("a alpha-secret b beta-secret c") || b.String() != "a [REDACTED] b [REDACTED] c" {
 		t.Fatalf("%d %v %q", n, err, b.String())
+	}
+}
+
+// rollScan completes a new scan of the AWS account at `at`: the findings now
+// belong to it, as they do in Prowler after a rescan.
+func rollScan(srv *pt.Server, id string, at time.Time) {
+	srv.Mutate(func(s *pt.Server) {
+		s.Scans = append(s.Scans, pt.Scan{ID: id, ProviderID: "p-aws", State: "completed", StartedAt: at.Add(-time.Hour), CompletedAt: at})
+		for i := range s.Findings {
+			if s.Findings[i].ProviderID == "p-aws" {
+				s.Findings[i].ScanID = id
+			}
+		}
+	})
+}
+
+// dropFinding removes one AWS finding (it was fixed or muted in Prowler).
+func dropFinding(srv *pt.Server, id string) {
+	srv.Mutate(func(s *pt.Server) {
+		kept := s.Findings[:0]
+		for _, f := range s.Findings {
+			if f.ID != id {
+				kept = append(kept, f)
+			}
+		}
+		s.Findings = kept
+	})
+}
+
+// The Prowler App connector against the real ingest handler: findings open as
+// ext.prowler, a complete run without one resolves it after the usual misses,
+// and a run that is incomplete for any reason never resolves anything.
+func TestProwlerAppAgainstTheRealAPI(t *testing.T) {
+	paEnv(t)
+	prowlerAppNow = time.Now // the server validates observed_at against the real clock
+	st := fakestore.New()
+	handler := api.New(api.Deps{
+		Store: st, Authenticator: auth.NewToken(testIngestToken), BaseURL: "https://deckard.example.com",
+		Ingester: finding.NewProcessor(st, finding.ProcessorConfig{ResolveAfter: 2}, nil),
+		Ingest:   config.IngestConfig{Enabled: true, RateLimit: "100/s", Burst: 100},
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	var posted [][]byte
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		posted = append(posted, b)
+		r.Body = io.NopCloser(bytes.NewReader(b))
+		handler.Handler().ServeHTTP(w, r)
+	}))
+	defer hs.Close()
+
+	now := time.Now().UTC()
+	prowler := pt.Sample(t, paKey, now.Add(-9*time.Hour))
+	prowler.PlantSecrets = true
+	pa := func(extra ...string) (int, string, string) {
+		t.Helper()
+		return runPA(t, posted, append([]string{"--api-url", prowler.URL, "--api-key-env", "PROWLER_TEST_KEY", "--url", hs.URL, "--token-env", "DECKARD_TEST_TOKEN"}, extra...)...)
+	}
+	status := func() map[string]model.FindingStatus { // by bucket, AWS only
+		t.Helper()
+		fs, _, err := st.ListFindings(context.Background(), store.FindingFilter{Check: "ext.prowler"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]model.FindingStatus{}
+		for _, f := range fs {
+			if f.Source != "ingest:prowler" {
+				t.Fatalf("finding %+v", f)
+			}
+			if f.IngestScope == "aws:123456789012" {
+				out[f.AssetKey] = f.Status
+			}
+		}
+		return out
+	}
+	open := func(m map[string]model.FindingStatus) (n int) {
+		for _, s := range m {
+			if s == model.StatusOpen {
+				n++
+			}
+		}
+		return n
+	}
+	bucket := func(i int) string { return fmt.Sprintf("arn:aws:s3:::bucket-%d", i) }
+	missed := func(i int) int {
+		t.Helper()
+		fs, _, _ := st.ListFindings(context.Background(), store.FindingFilter{Check: "ext.prowler"})
+		for _, f := range fs {
+			if f.AssetKey == bucket(i) {
+				return f.MissedRuns
+			}
+		}
+		return -1
+	}
+
+	// Run 1: everything opens, for both providers.
+	if code, out, errs := pa(); code != 0 {
+		t.Fatalf("run 1: exit %d\n%s%s", code, out, errs)
+	}
+	fs, _, _ := st.ListFindings(context.Background(), store.FindingFilter{Check: "ext.prowler"})
+	scopes := map[string]int{}
+	for _, f := range fs {
+		scopes[f.IngestScope]++
+		if f.Check != "ext.prowler" || f.Status != model.StatusOpen {
+			t.Fatalf("%+v", f)
+		}
+	}
+	if scopes["aws:123456789012"] != 5 || scopes["gcp:my-project"] != 1 {
+		t.Fatalf("scopes %v", scopes)
+	}
+
+	// The same scan again is a harmless replay.
+	if code, out, errs := pa(); code != 0 || !strings.Contains(out, "replay=true") {
+		t.Fatalf("replay: exit %d\n%s%s", code, out, errs)
+	}
+
+	// bucket-3 is fixed. Run 2 (a new scan, complete): one miss, still open.
+	dropFinding(prowler, "f3")
+	rollScan(prowler, "s-aws-2", now.Add(-8*time.Hour))
+	if code, out, errs := pa(); code != 0 {
+		t.Fatalf("run 2: exit %d\n%s%s", code, out, errs)
+	}
+	if got := status(); got[bucket(3)] != model.StatusOpen || open(got) != 5 || missed(3) != 1 {
+		t.Fatalf("after one complete miss: %v, missed %d", got, missed(3))
+	}
+
+	// Run 3: Prowler's API fails on page 2. Incomplete: no miss, nothing resolves.
+	prowler.Intercept = func(r *http.Request, n int) *pt.Reply {
+		if r.URL.Path == "/api/v1/findings/latest" && r.URL.Query().Get("filter[provider]") == "p-aws" && r.URL.Query().Get("page[number]") == "2" {
+			return &pt.Reply{Status: 500, Body: `{}`}
+		}
+		return nil
+	}
+	rollScan(prowler, "s-aws-3", now.Add(-7*time.Hour))
+	if code, _, errs := pa(); code != ingestExitIncomplete || !strings.Contains(errs, "fetching findings failed") {
+		t.Fatalf("run 3: exit %d: %s", code, errs)
+	}
+	prowler.Intercept = nil
+	if got := status(); got[bucket(3)] != model.StatusOpen || open(got) != 5 || missed(3) != 1 || missed(4) != 0 {
+		t.Fatalf("an incomplete run (API failure) changed the lifecycle: %v, missed %d/%d", got, missed(3), missed(4))
+	}
+
+	// Run 4: a stale scan is incomplete too, even though bucket-3 is still absent.
+	rollScan(prowler, "s-aws-4", now.Add(-6*time.Hour))
+	if code, _, errs := pa("--max-scan-age", "1h"); code != ingestExitIncomplete || !strings.Contains(errs, "is stale") {
+		t.Fatalf("run 4: exit %d: %s", code, errs)
+	}
+	if got := status(); got[bucket(3)] != model.StatusOpen {
+		t.Fatalf("a stale scan resolved a finding: %v", got)
+	}
+
+	// Run 5: a disconnected provider, likewise.
+	rollScan(prowler, "s-aws-5", now.Add(-5*time.Hour))
+	prowler.Mutate(func(s *pt.Server) { s.Providers[1].Connected = false })
+	if code, _, errs := pa(); code != ingestExitIncomplete || !strings.Contains(errs, "not connected") {
+		t.Fatalf("run 5: exit %d: %s", code, errs)
+	}
+	prowler.Mutate(func(s *pt.Server) { s.Providers[1].Connected = true })
+	if got := status(); got[bucket(3)] != model.StatusOpen {
+		t.Fatalf("a disconnected provider resolved a finding: %v", got)
+	}
+
+	// Run 6: a failed scan newer than the completed one: incomplete.
+	prowler.Mutate(func(s *pt.Server) {
+		s.Scans = append(s.Scans, pt.Scan{ID: "s-failed", ProviderID: "p-aws", State: "failed", StartedAt: now.Add(-4 * time.Hour)})
+	})
+	if code, _, errs := pa(); code != ingestExitIncomplete || !strings.Contains(errs, "latest scan s-failed is failed") {
+		t.Fatalf("run 6: exit %d: %s", code, errs)
+	}
+	if got := status(); got[bucket(3)] != model.StatusOpen {
+		t.Fatalf("a failed scan resolved a finding: %v", got)
+	}
+
+	// Run 7: a healthy complete scan without bucket-3: the second complete miss resolves it.
+	prowler.Mutate(func(s *pt.Server) { s.Scans = s.Scans[:len(s.Scans)-1] })
+	rollScan(prowler, "s-aws-7", now.Add(-3*time.Hour))
+	if code, out, errs := pa(); code != 0 {
+		t.Fatalf("run 7: exit %d\n%s%s", code, out, errs)
+	}
+	got := status()
+	if got[bucket(3)] != model.StatusResolved || open(got) != 4 {
+		t.Fatalf("after the second complete miss: %v", got)
+	}
+	// The other provider was never touched by any of this.
+	for _, f := range func() []model.Finding {
+		fs, _, _ := st.ListFindings(context.Background(), store.FindingFilter{Check: "ext.prowler"})
+		return fs
+	}() {
+		if f.IngestScope == "gcp:my-project" && f.Status != model.StatusOpen {
+			t.Fatalf("gcp finding %+v", f)
+		}
 	}
 }
