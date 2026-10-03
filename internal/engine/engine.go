@@ -76,8 +76,12 @@ type Engine struct {
 	// clientID is the River client id, recorded by River in
 	// river_job.attempted_by and registered in deckard_instances.
 	clientID string
-	// kinds are the job kinds this engine's client works.
-	kinds []string
+	// timeouts maps each job kind this engine's client works to its
+	// worker's timeout.
+	timeouts map[string]time.Duration
+	// rescueAfter is River's RescueStuckJobsAfter, derived from the workers'
+	// timeouts (see rescueMargin).
+	rescueAfter time.Duration
 
 	vulnOnce sync.Once
 	vuln     *vulnintelJob
@@ -158,20 +162,48 @@ func New(d Deps, opts ...Option) (*Engine, error) {
 	return e, nil
 }
 
+// rescueMargin is how far River's RescueStuckJobsAfter sits above the longest
+// worker timeout. River rescues a job that has been running that long even if
+// its client is alive, so the value must exceed every worker's Timeout:
+// otherwise a slow but healthy job (a 30m scan) is re-run while it is still
+// running. Jobs of instances that died are reclaimed within about a minute by
+// the instance heartbeat (instances.go); this rescue is the backstop for
+// clients that never registered, such as an older deckard mid-rollout.
+const rescueMargin = 5 * time.Minute
+
 // workerSet registers River workers and remembers what it registered.
 type workerSet struct {
-	workers *river.Workers
-	kinds   []string
+	workers  *river.Workers
+	timeouts map[string]time.Duration
+	err      error
 }
 
 func addWorker[T river.JobArgs](s *workerSet, w river.Worker[T]) {
 	river.AddWorker(s.workers, w)
 	var args T
-	s.kinds = append(s.kinds, args.Kind())
+	kind := args.Kind()
+	d := w.Timeout(&river.Job[T]{})
+	switch {
+	case d < 0:
+		// No timeout: River would rescue (and so re-run) it while it runs.
+		s.err = errors.Join(s.err, fmt.Errorf("engine: worker %s has no timeout; the stuck-job rescue needs one", kind))
+	case d == 0:
+		d = river.JobTimeoutDefault
+	}
+	s.timeouts[kind] = d
+}
+
+// rescueAfter is the longest worker timeout plus rescueMargin.
+func (s *workerSet) rescueAfter() time.Duration {
+	var longest time.Duration
+	for _, d := range s.timeouts {
+		longest = max(longest, d)
+	}
+	return longest + rescueMargin
 }
 
 func (e *Engine) newClient() (*river.Client[pgx.Tx], error) {
-	ws := &workerSet{workers: river.NewWorkers()}
+	ws := &workerSet{workers: river.NewWorkers(), timeouts: map[string]time.Duration{}}
 	addWorker(ws, &syncWorker{r: e.r})
 	addWorker(ws, &scanWorker{r: e.r})
 	addWorker(ws, &scheduleWorker{r: e.r})
@@ -183,7 +215,11 @@ func (e *Engine) newClient() (*river.Client[pgx.Tx], error) {
 	addWorker(ws, &scanNewTemplatesWorker{r: e.r})
 	addWorker(ws, &scanCVEsWorker{r: e.r})
 	addWorker(ws, &vulnintelWorker{e: e})
-	e.kinds = ws.kinds
+	if ws.err != nil {
+		return nil, ws.err
+	}
+	e.timeouts = ws.timeouts
+	e.rescueAfter = ws.rescueAfter()
 	e.clientID = newClientID(time.Now())
 
 	cfg := &river.Config{
@@ -192,6 +228,9 @@ func (e *Engine) newClient() (*river.Client[pgx.Tx], error) {
 		ID:      e.clientID,
 		Workers: ws.workers,
 		Logger:  e.r.log,
+		// River's default is an hour, so a job orphaned by an instance that
+		// never registered blocked its unique successors that long.
+		RescueStuckJobsAfter: e.rescueAfter,
 		// Default River retry policy: exponential backoff (attempt^4 seconds
 		// with jitter); per-kind MaxAttempts are set in jobs.go.
 	}
@@ -284,7 +323,7 @@ func (e *Engine) Start(ctx context.Context) error {
 		return fmt.Errorf("engine: start river: %w", err)
 	}
 	e.started = true
-	for _, k := range e.kinds {
+	for k := range e.timeouts {
 		e.r.rec.JobsReclaimed(k, 0) // series exist from the start, so increase() sees the first reclaim
 	}
 	ictx, icancel := context.WithCancel(context.WithoutCancel(ctx))

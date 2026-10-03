@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/riverqueue/river"
 
 	"github.com/chainseer-xyz/deckard/internal/check"
 	"github.com/chainseer-xyz/deckard/internal/model"
@@ -199,3 +203,52 @@ func TestRunOnceFollowsDiscovery(t *testing.T) {
 		t.Fatalf("discovered asset scanned %d times, want 1", other.calls.Load())
 	}
 }
+
+// TestRescueAfterExceedsEveryWorkerTimeout pins River's RescueStuckJobsAfter
+// to the longest worker timeout plus rescueMargin: River rescues (re-runs) a
+// job running longer than that even on a live client, so it must stay above
+// every Timeout(), and it is derived, not a constant someone forgets to raise.
+func TestRescueAfterExceedsEveryWorkerTimeout(t *testing.T) {
+	h := newHarness(nil, nil)
+	d := h.r.Deps
+	pool, err := pgxpool.New(context.Background(), "postgres://deckard@127.0.0.1:1/none") // never dialled
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	d.Pool = pool
+	e, err := New(d, WithRoles(RoleScheduler, RoleWorker))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var longest time.Duration
+	for kind, to := range e.timeouts {
+		if to >= e.rescueAfter {
+			t.Errorf("%s timeout %v >= rescue after %v", kind, to, e.rescueAfter)
+		}
+		longest = max(longest, to)
+	}
+	if len(e.timeouts) < 11 || e.timeouts[KindScanAsset] != 30*time.Minute {
+		t.Fatalf("worker timeouts not collected: %v", e.timeouts)
+	}
+	if e.rescueAfter != longest+rescueMargin || e.rescueAfter != 35*time.Minute {
+		t.Errorf("rescue after %v, want longest timeout %v + %v (35m today)", e.rescueAfter, longest, rescueMargin)
+	}
+
+	ws := &workerSet{workers: river.NewWorkers(), timeouts: map[string]time.Duration{}}
+	addWorker(ws, &untimedWorker{})
+	if ws.err == nil {
+		t.Error("a worker without a timeout was accepted")
+	}
+}
+
+type untimedArgs struct{}
+
+func (untimedArgs) Kind() string { return "untimed" }
+
+type untimedWorker struct {
+	river.WorkerDefaults[untimedArgs]
+}
+
+func (*untimedWorker) Work(context.Context, *river.Job[untimedArgs]) error { return nil }
+func (*untimedWorker) Timeout(*river.Job[untimedArgs]) time.Duration       { return -1 }
