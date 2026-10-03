@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -129,6 +130,13 @@ type SourceConfig struct {
 	// aws (also uses region/profile/role_arn/endpoint above): regions to
 	// inventory; when empty, region is used, else us-east-1.
 	Regions []string `koanf:"regions"`
+
+	// gcpdns (Application Default Credentials only): project ids to scan,
+	// whether private zones are included, and an optional allow-list of managed
+	// zone names or DNS names (empty = every eligible zone).
+	Projects       []string `koanf:"projects"`
+	IncludePrivate bool     `koanf:"include_private"`
+	Zones          []string `koanf:"zones"`
 
 	// kubernetes
 	Kubeconfig string   `koanf:"kubeconfig"`
@@ -531,7 +539,7 @@ func ParseRate(s string) (float64, error) {
 }
 
 var (
-	validSourceTypes = map[string]bool{"cloudflare": true, "route53": true, "aws": true, "kubernetes": true, "static": true}
+	validSourceTypes = map[string]bool{"cloudflare": true, "route53": true, "aws": true, "gcpdns": true, "kubernetes": true, "static": true}
 	validLevels      = map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
 	validTiers       = map[string]bool{"passive": true, "active": true, "intrusive": true}
 	validAuthModes   = map[string]bool{"none": true, "token": true, "oidc": true}
@@ -749,6 +757,9 @@ func (c *Config) validateSources(add func(string, ...any)) {
 				dup[r] = true
 			}
 		}
+		if s.Type == "gcpdns" {
+			validateGCPDNS(s, add)
+		}
 		if s.Type != "static" {
 			continue
 		}
@@ -767,6 +778,32 @@ func (c *Config) validateSources(add func(string, ...any)) {
 			if _, err := netip.ParseAddr(ip); err != nil {
 				add("sources[%s]: invalid ip %q", s.Name, ip)
 			}
+		}
+	}
+}
+
+// gcpProjectID matches a Google Cloud project id (6-30 characters, lowercase
+// letters, digits and hyphens, starting with a letter, not ending in a hyphen),
+// optionally domain-scoped ("example.com:my-project").
+var gcpProjectID = regexp.MustCompile(`^([a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}:)?[a-z][a-z0-9-]{4,28}[a-z0-9]$`)
+
+func validateGCPDNS(s SourceConfig, add func(string, ...any)) {
+	if len(s.Projects) == 0 {
+		add("sources[%s]: gcpdns needs projects (a list of Google Cloud project ids)", s.Name)
+	}
+	dup := map[string]bool{}
+	for _, p := range s.Projects {
+		switch {
+		case !gcpProjectID.MatchString(p):
+			add("sources[%s]: invalid gcp project id %q (6-30 lowercase letters, digits or hyphens, starting with a letter)", s.Name, p)
+		case dup[p]:
+			add("sources[%s]: duplicate project %q", s.Name, p)
+		}
+		dup[p] = true
+	}
+	for _, z := range s.Zones {
+		if strings.TrimSpace(z) == "" {
+			add("sources[%s]: zones must not contain empty entries", s.Name)
 		}
 	}
 }

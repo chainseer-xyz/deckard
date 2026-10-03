@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -187,6 +188,15 @@ func TestValidateErrors(t *testing.T) {
 		{"heartbeat bad method", "notify: {heartbeat: {url: \"https://hc.example/x\", method: PUT}}", "notify.heartbeat.method \"PUT\": must be GET or POST"},
 		{"heartbeat zero interval", "notify: {heartbeat: {url: \"https://hc.example/x\", interval: 0s}}", "notify.heartbeat.interval"},
 		{"heartbeat zero timeout", "notify: {heartbeat: {url: \"https://hc.example/x\", timeout: 0s}}", "notify.heartbeat.timeout"},
+		{"gcpdns without projects", "sources: [{name: g, type: gcpdns}]", "gcpdns needs projects"},
+		{"gcpdns empty projects", "sources: [{name: g, type: gcpdns, projects: []}]", "gcpdns needs projects"},
+		{"gcpdns bad project id", "sources: [{name: g, type: gcpdns, projects: [My_Project]}]", "invalid gcp project id \"My_Project\""},
+		{"gcpdns short project id", "sources: [{name: g, type: gcpdns, projects: [abc]}]", "invalid gcp project id"},
+		{"gcpdns project id with slash", "sources: [{name: g, type: gcpdns, projects: [\"projects/my-project-a\"]}]", "invalid gcp project id"},
+		{"gcpdns duplicate project", "sources: [{name: g, type: gcpdns, projects: [my-project-a, my-project-a]}]", "duplicate project"},
+		{"gcpdns empty zone entry", "sources: [{name: g, type: gcpdns, projects: [my-project-a], zones: [\"\"]}]", "zones must not contain empty"},
+		{"gcpdns projects wrong type", "sources: [{name: g, type: gcpdns, projects: {a: b}}]", "projects"},
+		{"gcpdns include_private wrong type", "sources: [{name: g, type: gcpdns, projects: [my-project-a], include_private: sometimes}]", "include_private"},
 		{"empty notify floor", "notify: {alertmanager: {min_severity: \"\"}}", "notify.alertmanager.min_severity"},
 	}
 	for _, tc := range tests {
@@ -199,6 +209,25 @@ func TestValidateErrors(t *testing.T) {
 				t.Fatalf("error %q does not contain %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestGCPDNSSourceConfig(t *testing.T) {
+	cfg, err := Load(writeCfg(t, `
+sources:
+  - name: gcp
+    type: gcpdns
+    projects: [my-project-a, "example.com:legacy-project"]
+    include_private: true
+    zones: [prod-zone, example.org.]
+`), nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	s := cfg.Sources[0]
+	if !slices.Equal(s.Projects, []string{"my-project-a", "example.com:legacy-project"}) || !s.IncludePrivate ||
+		!slices.Equal(s.Zones, []string{"prod-zone", "example.org."}) {
+		t.Fatalf("gcpdns settings not decoded: %+v", s)
 	}
 }
 
