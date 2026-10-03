@@ -127,7 +127,12 @@ func (c *exposedCheck) Run(ctx context.Context, t check.Target) (*check.Result, 
 		}
 		checked++
 		r, err := fetch(ctx, t.HTTP, base+p.path)
-		if err != nil || r.status != http.StatusOK || isSoft404(r, nf) {
+		if err != nil || r.status == http.StatusTooManyRequests || r.status == http.StatusServiceUnavailable {
+			// Nothing was seen: absence of a hit here proves nothing.
+			res.Partial = true
+			continue
+		}
+		if r.status != http.StatusOK || isSoft404(r, nf) {
 			continue
 		}
 		ev, ok := p.validate(r)

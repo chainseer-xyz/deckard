@@ -214,3 +214,24 @@ func TestAppliesAndErrors(t *testing.T) {
 		t.Error("Checks")
 	}
 }
+
+// A probe that failed or was throttled saw nothing: reading it as "not
+// exposed" would count a miss and, once a WAF starts rate-limiting the scan,
+// resolve an open exposure finding. Such runs must be partial.
+func TestThrottledProbesMakeRunPartial(t *testing.T) {
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable} {
+		res, _ := run(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/.env" {
+				w.WriteHeader(status)
+				return
+			}
+			http.NotFound(w, r)
+		}), nil)
+		if !res.Partial {
+			t.Errorf("status %d on a probe: run reported complete", status)
+		}
+	}
+	if res, _ := run(t, notFoundExcept(nil), nil); res.Partial {
+		t.Error("clean site reported partial")
+	}
+}
