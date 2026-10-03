@@ -136,6 +136,14 @@ func (c *CT) Names(ctx context.Context, zone string) ([]string, error) {
 	return out, nil
 }
 
+// UnavailableError is a transient failure of the CT source: a network error
+// or timeout, a 429 or a 5xx, after the client's own retries. Asking again
+// later may succeed; it says nothing about the zone.
+type UnavailableError struct{ Err error }
+
+func (e *UnavailableError) Error() string { return e.Err.Error() }
+func (e *UnavailableError) Unwrap() error { return e.Err }
+
 func (c *CT) fetch(ctx context.Context, u string) ([]byte, error) {
 	var lastErr error
 	delay := c.Backoff
@@ -169,12 +177,12 @@ func (c *CT) once(ctx context.Context, u string) (body []byte, retry bool, err e
 	req.Header.Set("Accept", "application/json")
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, true, fmt.Errorf("ct: request: %w", err)
+		return nil, true, &UnavailableError{fmt.Errorf("ct: request: %w", err)}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
-		return nil, true, fmt.Errorf("ct: status %d", resp.StatusCode)
+		return nil, true, &UnavailableError{fmt.Errorf("ct: status %d", resp.StatusCode)}
 	}
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
@@ -182,7 +190,7 @@ func (c *CT) once(ctx context.Context, u string) (body []byte, retry bool, err e
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, maxCTBody+1))
 	if err != nil {
-		return nil, true, fmt.Errorf("ct: read body: %w", err)
+		return nil, true, &UnavailableError{fmt.Errorf("ct: read body: %w", err)}
 	}
 	if len(b) > maxCTBody {
 		return nil, false, errors.New("ct: response too large")

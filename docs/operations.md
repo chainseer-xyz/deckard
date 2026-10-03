@@ -134,6 +134,67 @@ exactly the rows that match the features you left on.
 4. Expect the staleness metrics to grow; alert on your own thresholds (below)
    so a forgotten snapshot refresh is noticed.
 
+## Skipped checks
+
+The active and intrusive tiers only probe destinations whose IP addresses you
+own. An owned name proxied by a CDN (a Cloudflare orange-cloud record), hosted
+on a third-party platform, or seen through split-horizon DNS as a private
+address you have not declared owned resolves to addresses deckard may not
+probe, so
+`cve.nuclei`, `http.exposed`, `tls.config` and the like have nothing they are
+allowed to connect to. deckard notices this before it dials (one DNS lookup
+per scan job, then the scope guard still vets every connection) and records
+the check as **skipped** rather than failed:
+
+- no `check failed` warning (a `check skipped` line at debug level), no
+  increment of `deckard_scan_errors_total` or `deckard_checks_run_total`;
+- `deckard_checks_skipped_total{check,tier,reason}` counts them, with
+  `reason` = `shared_destination`, `external_destination` or
+  `private_destination`;
+- the scan history shows `skipped: unowned destination: <name> resolves to ...`;
+- the check is retried at its normal interval (not `scheduling.error_retry`),
+  so a name that moves onto owned addresses is picked up at the next run.
+
+A skip made no observation. It never refreshes, misses, resolves or ages out a
+finding and never removes a derived asset: an open finding from before the
+name moved behind the CDN stays open until a real run proves it fixed. The
+same holds when the guard refuses a connection during a run for any other
+reason: that run is treated as partial. Passive checks (DNS, certificates,
+headers by hostname) keep running against these names.
+
+Answers that point at something wrong (loopback, link-local or metadata
+addresses, an excluded IP, an unparseable answer) are never skipped: the check
+runs, the guard refuses the connection and logs it at WARN, and the run is
+treated as partial.
+
+A steady skip count is normal for a proxied estate. To scan the origin
+servers behind the CDN, declare their addresses owned (a static source or
+`scope.include`).
+
+### Scope refusals
+
+Every operation the scope guard refuses is logged as `scope refusal` and
+counted in `deckard_scope_refusals_total{tier,class,reason}` (`reason` is a
+fixed phrase such as `tier requires an owned destination IP`). Most refusals
+are expected by design (a third-party CNAME target, an SSO redirect, a shared
+destination reached during a run), so each distinct target and reason is
+logged at WARN at most once an hour and at DEBUG in between; the counter keeps
+the full volume visible. Refusals that point at something genuinely wrong are
+logged at WARN every time:
+
+- an excluded name or address (`excluded=true` in the log line);
+- a loopback, link-local (cloud metadata), multicast or reserved destination
+  that is not owned, whether reached by IP or through an owned name's DNS
+  answer;
+- an unparseable resolver answer, a forbidden DNS query type or network.
+
+Private destinations (RFC1918, ULA, CGNAT) that are not declared owned are
+throttled like routine refusals: split-horizon DNS returns them all the time
+when deckard runs inside a cluster or VPC (see `scope.resolvers`).
+
+A sudden rise of `deckard_scope_refusals_total` for one `reason` after a DNS
+or inventory change is worth a look; a flat rate is the guard doing its job.
+
 ## Alerting
 
 Findings reach Alertmanager as one alert per open finding (see
@@ -153,6 +214,12 @@ route:
       continue: false   # first match wins; put this above the severity routes
 ```
 
+**Watch deckard from outside the cluster.** In-cluster rules cannot fire when
+the cluster itself is down. Configure `notify.heartbeat` (see
+[configuration.md](configuration.md#external-heartbeat-dead-mans-switch)) so an
+external service alerts when deckard stops vouching for itself: it pings only
+while the database answers and checks keep completing.
+
 **Alert on stale data and failing updaters.** `deploy/examples/prometheus-rules.yml`
 ships ready-made rules (all metrics below exist in the binary):
 
@@ -166,6 +233,7 @@ ships ready-made rules (all metrics below exist in the binary):
 | `DeckardVulnintelFeedStale` | `deckard_vulnintel_age_seconds` > 18h | 3x default `vulnintel.interval` (6h): tune if you changed it |
 | `DeckardVulnintelRefreshFailing` / `DeckardVulnintelNeverLoaded` | 3+ failed refreshes in 6h / empty KEV catalog | tunable |
 | `DeckardKnownExploitedOpen` | `deckard_findings_kev_open` > 0 | informational |
+| `DeckardHeartbeatFailing` | heartbeat attempts in the last 30m were all `error` or `unhealthy` | only exists when `notify.heartbeat.url` is set |
 
 Air-gapped installs (`*.enabled: false`) never produce the refdata, vulnintel or
 template-age series, so those rules stay silent; drop them or alert on your own
@@ -188,6 +256,18 @@ snapshot refresh.
 | `deckard_vulnintel_kev_entries` | | entries in the loaded KEV catalog |
 | `deckard_vulnintel_refresh_total` | `feed`, `result` = ok, not_modified, error | refresh attempts |
 | `deckard_findings_kev_open` | | open findings tagged `kev` (as of the last refresh job) |
+
+**Scan and notification health metrics**
+
+| Metric | Labels | Meaning |
+| --- | --- | --- |
+| `deckard_checks_skipped_total` | `check`, `tier`, `reason` = shared_destination, external_destination, private_destination | checks skipped before touching the network (see [Skipped checks](#skipped-checks)); neither runs nor errors |
+| `deckard_scope_refusals_total` | `tier`, `class`, `reason` | every scope-guard refusal, including those logged at DEBUG (see [Scope refusals](#scope-refusals)) |
+| `deckard_heartbeat_total` | `result` = ok, error, unhealthy | external heartbeat attempts; absent unless `notify.heartbeat.url` is set |
+
+Only the heartbeat gets an example alert (`DeckardHeartbeatFailing`): skips
+and expected refusals are steady by design on a proxied estate, so alerting on
+their volume would be noise. Watch them on a dashboard instead.
 
 ## Runbooks
 

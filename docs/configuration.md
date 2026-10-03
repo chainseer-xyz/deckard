@@ -277,7 +277,7 @@ ignored):
 
 | Check | Key | Default | Effect |
 |---|---|---|---|
-| `http.headers` | `min_severity` | `info` | Drop findings below this severity (`info`, `low`, `medium`, ...). Set `low` to silence the info-level noise such as a missing `Referrer-Policy`. The security-header set is evaluated on `https://` URLs only; `http://` URLs are checked only for "does not redirect to HTTPS". |
+| `http.headers` | `min_severity` | `info` | Drop findings below this severity (`info`, `low`, `medium`, ...). Set `low` to silence the info-level noise such as a missing `Referrer-Policy`. Dropped findings are never stored; to keep them visible but not alerted on, use `notify.alertmanager.min_severity` instead. The security-header set is evaluated on `https://` URLs only; `http://` URLs are checked only for "does not redirect to HTTPS". |
 | `http.headers` | `required_headers`, `hsts_min_age`, `timeout_seconds` | see check docs | Which header classes to require and the minimum HSTS max-age. |
 | `dns.hygiene` | `expects_mail` | `false` | Force mail treatment of a zone. Without it, a zone with MX records gets medium for a missing DMARC/SPF record and a zone without MX (parked) gets low, with a null-sender recommendation (`v=spf1 -all`, `v=DMARC1; p=reject;`). |
 | `dns.takeover` | `timeout_seconds` | `10` | Per-request timeout. Before reporting, the check handshakes with the owned hostname over HTTPS: a certificate valid for the host that is not the provider's default certificate suppresses the finding. |
@@ -290,6 +290,11 @@ a third party's certificate; the evidence carries `served_by`.
 Order of evaluation: the scope guard, then the tier's `enabled` (global, then
 asset-group overrides), then the per-check values. A per-check override can
 therefore never enable a disabled tier and never reach a non-owned asset.
+
+An owned name that resolves to shared (CDN/SaaS), third-party or undeclared
+private addresses is probed by the passive tier only: active and intrusive checks for it are
+recorded as skipped, counted in `deckard_checks_skipped_total`, and never
+resolve a finding (see [Skipped checks](operations.md#skipped-checks)).
 
 `on_inventory_change` applies to the passive and active tiers (default `true`
 for both): a new asset gets an immediate scan, still rate limited and
@@ -316,8 +321,15 @@ through the scope-guarded resolver (passive tier, owned class, at the passive
 `rate_limit`), and hands the names to the inventory with origin
 `expansion:ct` / `expansion:dns`. The inventory keeps only names that classify
 as owned; new ones get their immediate scans through `on_inventory_change`.
-Expansion only ever adds assets. If crt.sh is down or a lookup fails the job
-is retried with backoff and everything else keeps running. It is skipped for a
+Expansion only ever adds assets. crt.sh is often briefly unavailable: a
+timeout, network error, 429 or 5xx (after the client's own two retries) is
+treated as transient. The zone's expansion stays incomplete (nothing is ever
+pruned because of it), whatever the DNS bruteforce found is still added, one
+WARN per zone per hour is logged (DEBUG otherwise), and the job is snoozed
+with backoff (5m, doubling to at most 1h or `interval`) instead of failing and
+logging "Job errored; retrying" on every attempt. Any other failure (an
+unparseable answer, a failed wildcard probe) is retried by the job queue as an
+error. Everything else keeps running either way. It is skipped for a
 zone whose passive tier is disabled.
 
 ## Reference data refresh
@@ -461,8 +473,88 @@ Discord, ntfy, email or PagerDuty there. See `deploy/examples/alertmanager.yml`.
 
 ```yaml
 notify:
-  alertmanager: { urls: ["http://alertmanager:9093"], resend: 4m, timeout: 10s }
+  alertmanager:
+    urls: ["http://alertmanager:9093"]
+    resend: 4m
+    timeout: 10s
+    min_severity: info   # info|low|medium|high|critical
 ```
+
+| Key | Default | Description |
+|---|---|---|
+| `notify.alertmanager.urls` | | Alertmanager base URLs (deckard posts to `/api/v2/alerts`). Credentials in the URL are redacted from logs |
+| `notify.alertmanager.resend` | `4m` | How often every open finding is re-asserted |
+| `notify.alertmanager.timeout` | `10s` | Per-request timeout |
+| `notify.alertmanager.min_severity` | `info` | Lowest severity sent to Alertmanager. Open findings below it are not sent, and neither are their resolution notices (a notice is sent exactly when the finding's severity is at or above the floor, so nothing that was never sent gets "resolved"). Everything below the floor is still stored, shown in the UI and API, and counted in `deckard_findings_open`. The default sends everything |
+
+`min_severity` only silences notification. It differs from the per-check
+`checks.http.headers.min_severity`, which drops the findings entirely, so they
+never reach the store, the UI or the metrics. Use the check option to stop
+recording noise you never want to see, and this one to keep low-severity
+findings visible in deckard without routing them to Slack. A finding whose
+severity is later raised above the floor (for example by KEV enrichment) is
+sent from the next notification cycle on.
+
+### External heartbeat (dead-man's switch)
+
+Prometheus and Alertmanager usually run in the same cluster as deckard, so an
+outage of the whole cluster (or of deckard) silences every alert, including
+the ones about deckard itself. A heartbeat to a monitor **outside** the cluster
+closes that gap: deckard requests a URL every `interval` while it is healthy,
+and the external service alerts when the requests stop.
+
+```yaml
+notify:
+  heartbeat:
+    url: ""          # empty = disabled (default). Prefer DECKARD_NOTIFY__HEARTBEAT__URL from a Secret
+    interval: 5m
+    method: GET      # GET or POST
+    timeout: 10s
+```
+
+| Key | Default | Description |
+|---|---|---|
+| `notify.heartbeat.url` | | `http(s)` URL to request. Empty disables the heartbeat. It is treated as a secret: logs and validation errors show only its scheme and host, never the path, query string or credentials |
+| `notify.heartbeat.interval` | `5m` | Time between pings. Must be > 0 |
+| `notify.heartbeat.method` | `GET` | `GET` or `POST` (empty body) |
+| `notify.heartbeat.timeout` | `10s` | Bound for the health check and for the request |
+
+deckard pings **only while healthy**: the database answers, and at least one
+check run completed without error within the last two intervals (skipped and
+failed runs do not count). A wedged scheduler or worker therefore stops the
+pings, which is the point. Each beat is counted in
+`deckard_heartbeat_total{result}` with `result` = `ok`, `error` (the ping
+failed; logged at WARN) or `unhealthy` (withheld; logged at WARN with the
+reason). Only the `scheduler` role pings; worker and API replicas never do.
+
+Pick the external monitor's grace period above the interval plus your
+shortest check cadence (the passive tier runs every 5m by default). If every
+check you run has a long interval, raise `notify.heartbeat.interval` to at
+least half of it, or the heartbeat will report a healthy but idle deckard as
+unhealthy.
+
+**healthchecks.io style** (a GET to a URL whose path is the token; set the
+check's period to the interval and its grace to two intervals):
+
+```yaml
+notify:
+  heartbeat: { interval: 5m, method: GET }
+# DECKARD_NOTIFY__HEARTBEAT__URL=https://hc-ping.com/<uuid>
+```
+
+**PagerDuty style** (an integration heartbeat URL that expects a request every
+period, here a POST; configure the expected interval in PagerDuty as 10m):
+
+```yaml
+notify:
+  heartbeat: { interval: 5m, method: POST, timeout: 10s }
+# DECKARD_NOTIFY__HEARTBEAT__URL=https://<your PagerDuty heartbeat ping URL>
+```
+
+The same works with Cronitor, Better Stack, Uptime Kuma push monitors or any
+endpoint that alerts on silence. `deploy/examples/prometheus-rules.yml` also
+has `DeckardHeartbeatFailing` for the in-cluster view (pings failing or
+withheld for 30m).
 
 ## Auth
 

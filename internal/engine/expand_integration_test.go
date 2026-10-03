@@ -102,3 +102,76 @@ func (i *ownedOnlyInventory) AddDiscovered(ctx context.Context, origin string, i
 	}
 	return i.dbInventory.AddDiscovered(ctx, origin, keep, rels)
 }
+
+// TestIntegrationExpandSnoozesWhileCTIsDown: on real River, a CT source that
+// keeps answering 502 leaves the zone's job snoozed (scheduled ~5m out, no
+// attempt used, no error recorded) instead of erroring and retrying; the
+// zone keeps exactly one expansion job meanwhile.
+func TestIntegrationExpandSnoozesWhileCTIsDown(t *testing.T) {
+	st, pool := migratedDB(t)
+	cfg := baseCfg()
+	cfg.Sync.Interval = time.Hour
+	cfg.Expansion = config.ExpansionConfig{CTLogs: true, Interval: 6 * time.Hour}
+	cfg.Scope = config.ScopeConfig{Include: []string{"example.com"}}
+	g, err := scope.NewGuard(cfg.Scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := &fakeSource{name: "fake", disc: &source.Discovery{Assets: []model.AssetInput{
+		{Kind: model.KindZone, Key: "example.com", Source: "fake", Zone: "example.com"},
+	}}}
+	fx := &fakeExpander{err: ct502("example.com")}
+	e, err := New(Deps{
+		Config: cfg, Store: st, Guard: g, Inventory: &ownedOnlyInventory{dbInventory{st, g}, g}, Findings: &fakeProc{},
+		Recorder: newFakeRec(), Sources: []source.Source{src}, Pool: pool, Expander: fx,
+	}, WithRoles(RoleScheduler, RoleWorker), WithTickInterval(time.Hour), WithGaugeInterval(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := e.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		sctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+		_ = e.Stop(sctx)
+	}()
+
+	type jobRow struct {
+		state       string
+		attempt     int
+		errs        int
+		snoozes     string
+		scheduledIn time.Duration
+	}
+	var jobs []jobRow
+	eventually(t, "expansion job snoozed", func() bool {
+		rows, err := pool.Query(ctx, `SELECT state, attempt, coalesce(array_length(errors, 1), 0),
+			coalesce(metadata->>'snoozes', ''), scheduled_at - now() FROM river_job WHERE kind = $1`, KindExpandZone)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		jobs = jobs[:0]
+		for rows.Next() {
+			var j jobRow
+			if err := rows.Scan(&j.state, &j.attempt, &j.errs, &j.snoozes, &j.scheduledIn); err != nil {
+				t.Fatal(err)
+			}
+			jobs = append(jobs, j)
+		}
+		return len(jobs) == 1 && jobs[0].snoozes == "1"
+	})
+	j := jobs[0]
+	if j.state != "scheduled" || j.attempt != 0 || j.errs != 0 {
+		t.Fatalf("job = %+v, want scheduled with no attempt used and no error recorded", j)
+	}
+	if j.scheduledIn < 4*time.Minute || j.scheduledIn > 6*time.Minute {
+		t.Fatalf("snoozed for %v, want about 5m", j.scheduledIn)
+	}
+	zones, _, _ := st.ListAssets(ctx, store.AssetFilter{Kind: model.KindZone})
+	if ok, err := e.r.q.enqueueExpand(ctx, zones[0].ID, 0); err != nil || ok {
+		t.Fatalf("a snoozed zone must keep its single job: inserted=%v err=%v", ok, err)
+	}
+}

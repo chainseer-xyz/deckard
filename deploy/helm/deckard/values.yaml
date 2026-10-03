@@ -78,6 +78,16 @@ config:
   notify:
     alertmanager:
       urls: []
+      # Lowest severity sent to Alertmanager (info|low|medium|high|critical).
+      # Findings below it stay in the store, UI, API and metrics; only the
+      # alert (and its resolution notice) is not sent. Unlike
+      # checks.http.headers.min_severity, which drops findings entirely.
+      min_severity: info
+    # External dead-man's switch (healthchecks.io, PagerDuty heartbeat, ...).
+    # Pinged every interval by the scheduler while healthy (database up and a
+    # check completed within two intervals). The URL is a secret: leave url
+    # empty here and set DECKARD_NOTIFY__HEARTBEAT__URL via extraEnvFrom.
+    # heartbeat: { interval: 5m, method: GET, timeout: 10s }
   auth:
     mode: token
     token_env: DECKARD_ADMIN_TOKEN

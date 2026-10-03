@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chainseer-xyz/deckard/internal/check"
@@ -242,9 +244,11 @@ func (r *runner) expandNewZones(ctx context.Context, groups ...[]model.Asset) {
 }
 
 // runExpand expands one owned zone and feeds the result to the inventory. It
-// only ever adds. Errors (crt.sh down, DNS failures, timeouts) are returned so
+// only ever adds. Errors (DNS failures, a broken CT response) are returned so
 // River retries with backoff, after whatever partial result was obtained has
-// been added; they never affect other jobs.
+// been added; they never affect other jobs. A CT source that is merely
+// unavailable (5xx, 429, timeouts) returns a transientExpandError instead,
+// which the worker turns into a quiet snooze.
 func (r *runner) runExpand(ctx context.Context, assetID int64) error {
 	if r.Expander == nil {
 		return nil
@@ -274,7 +278,18 @@ func (r *runner) runExpand(ctx context.Context, assetID int64) error {
 	res, xerr := r.Expander.Expand(ctx, req)
 
 	var errs []error
-	if xerr != nil {
+	transient := xerr != nil && ctx.Err() == nil && onlyCTUnavailable(xerr)
+	switch {
+	case transient:
+		// crt.sh is often briefly down (502/503, timeouts). That is routine:
+		// warn once per zone per hour and let the job back off quietly.
+		lvl := slog.LevelDebug
+		if r.ctWarn.warn(zone, r.now()) {
+			lvl = slog.LevelWarn
+		}
+		r.log.Log(ctx, lvl, "expansion incomplete: CT source unavailable, will retry with backoff", "zone", zone, "err", xerr)
+		errs = append(errs, &transientExpandError{fmt.Errorf("expand %s: %w", zone, xerr)})
+	case xerr != nil:
 		r.log.Warn("expansion incomplete", "zone", zone, "err", xerr)
 		errs = append(errs, fmt.Errorf("expand %s: %w", zone, xerr))
 	}
@@ -289,8 +304,82 @@ func (r *runner) runExpand(ctx context.Context, assetID int64) error {
 			errs = append(errs, fmt.Errorf("expand %s: add discovered: %w", zone, err))
 		}
 	}
-	r.log.Info("expansion complete", "zone", zone, "ct", len(res.CT), "dns", len(res.DNS), "failed", xerr != nil)
+	lvl := slog.LevelInfo
+	if transient {
+		lvl = slog.LevelDebug
+	}
+	r.log.Log(ctx, lvl, "expansion complete", "zone", zone, "ct", len(res.CT), "dns", len(res.DNS), "failed", xerr != nil)
+	if len(errs) == 1 && transient {
+		return errs[0] // keep the transient type visible to the worker
+	}
 	return errors.Join(errs...)
+}
+
+// transientExpandError marks an expansion that failed only because the CT
+// source was unavailable. The River worker snoozes the job with backoff
+// instead of recording an error (see ctRetryDelay). The zone's expansion
+// stays incomplete; expansion only ever adds, so nothing is pruned for it.
+type transientExpandError struct{ err error }
+
+func (e *transientExpandError) Error() string { return e.err.Error() }
+func (e *transientExpandError) Unwrap() error { return e.err }
+
+// onlyCTUnavailable reports whether every error joined in err is a transient
+// CT source failure.
+func onlyCTUnavailable(err error) bool {
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		errs := j.Unwrap()
+		for _, e := range errs {
+			if !onlyCTUnavailable(e) {
+				return false
+			}
+		}
+		return len(errs) > 0
+	}
+	var ue *expand.UnavailableError
+	return errors.As(err, &ue)
+}
+
+// CT retry backoff: ctRetryBase doubled per snooze, capped at ctRetryMax and
+// at the expansion interval (the periodic tick would re-run it then anyway).
+const (
+	ctRetryBase = 5 * time.Minute
+	ctRetryMax  = time.Hour
+)
+
+func ctRetryDelay(snoozes int, interval time.Duration) time.Duration {
+	d := ctRetryBase
+	for i := 0; i < snoozes && d < ctRetryMax; i++ {
+		d *= 2
+	}
+	d = min(d, ctRetryMax)
+	if interval > 0 && d > interval {
+		d = interval
+	}
+	return d
+}
+
+// ctWarnEvery bounds the transient CT warning to one per zone per period.
+const ctWarnEvery = time.Hour
+
+// zoneWarnThrottle remembers when each zone last logged a transient CT
+// warning. Its memory is bounded by the number of owned zones.
+type zoneWarnThrottle struct {
+	mu   sync.Mutex
+	last map[string]time.Time
+}
+
+func (t *zoneWarnThrottle) warn(zone string, now time.Time) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if at, ok := t.last[zone]; ok && now.Sub(at) < ctWarnEvery {
+		return false
+	}
+	if t.last == nil {
+		t.last = map[string]time.Time{}
+	}
+	t.last[zone] = now
+	return true
 }
 
 // addInputs adds discovered assets and queues immediate scans for new ones.

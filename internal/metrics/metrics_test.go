@@ -39,10 +39,21 @@ func TestRecorderMetrics(t *testing.T) {
 	m.InventoryChange("removed", 0) // ignored
 	m.SetQueueDepth("active", 7)
 	m.SetQueueDepth("active", 4)
+	m.ObserveSkip("cve.nuclei", "active", "shared_destination")
+	m.ObserveSkip("cve.nuclei", "active", "shared_destination")
+	m.ScopeRefusal("active", "shared", "tier requires an owned destination IP")
+	m.InitHeartbeat("ok", "error", "unhealthy")
+	m.HeartbeatResult("ok")
+	m.HeartbeatResult("ok")
 
 	out := scrape(t, m)
 	for _, want := range []string{
 		`deckard_checks_run_total{check="tls.cert",tier="passive"} 2`,
+		`deckard_checks_skipped_total{check="cve.nuclei",reason="shared_destination",tier="active"} 2`,
+		`deckard_scope_refusals_total{class="shared",reason="tier requires an owned destination IP",tier="active"} 1`,
+		`deckard_heartbeat_total{result="ok"} 2`,
+		`deckard_heartbeat_total{result="error"} 0`,
+		`deckard_heartbeat_total{result="unhealthy"} 0`,
 		`deckard_scan_errors_total{check="tls.cert"} 1`,
 		`deckard_scan_duration_seconds_count{check="tls.cert",tier="passive"} 2`,
 		`deckard_scan_duration_seconds_sum{check="tls.cert",tier="passive"} 2.5`,
@@ -60,6 +71,9 @@ func TestRecorderMetrics(t *testing.T) {
 	}
 	if strings.Contains(out, `deckard_inventory_changes_total{type="removed"}`) {
 		t.Error("zero-count change should not create a series")
+	}
+	if strings.Contains(out, `deckard_checks_run_total{check="cve.nuclei"`) || strings.Contains(out, `deckard_scan_errors_total{check="cve.nuclei"`) {
+		t.Error("a skip must count neither as a run nor as an error")
 	}
 }
 
@@ -134,6 +148,7 @@ func TestCollectorFirstLoadFailureEmitsNothing(t *testing.T) {
 func TestNopRecorder(t *testing.T) {
 	var r metrics.Recorder = metrics.Nop{}
 	r.ObserveScan("a", "b", 0, nil)
+	r.ObserveSkip("a", "b", "c")
 	r.ObserveSync("a", 0, true)
 	r.InventoryChange("a", 1)
 	r.SetQueueDepth("a", 1)

@@ -47,6 +47,7 @@ type Notifier struct {
 	attempts  int
 	backoff   time.Duration
 	log       *slog.Logger
+	floor     model.Severity // notify.alertmanager.min_severity
 }
 
 // Option customises a Notifier.
@@ -93,6 +94,13 @@ func New(cfg config.AlertmanagerConfig, getenv func(string) string, log *slog.Lo
 	if n.timeout <= 0 {
 		n.timeout = defaultTimeout
 	}
+	n.floor = model.SeverityInfo
+	if cfg.MinSeverity != "" {
+		n.floor = model.Severity(cfg.MinSeverity)
+		if !n.floor.Valid() {
+			return nil, fmt.Errorf("alertmanager: invalid min_severity %q", cfg.MinSeverity)
+		}
+	}
 	for _, raw := range cfg.URLs {
 		u, err := url.Parse(strings.TrimSpace(raw))
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
@@ -128,10 +136,11 @@ func (n *Notifier) Name() string { return "alertmanager" }
 
 // Notify re-asserts every open finding and reports the resolved ones. It is
 // idempotent: each call is a full re-assert. Findings not in StatusOpen are
-// never sent as open. It succeeds if every batch was accepted by at least
+// never sent as open, and findings below the severity floor are not sent at
+// all (see aboveFloor). It succeeds if every batch was accepted by at least
 // one Alertmanager.
 func (n *Notifier) Notify(ctx context.Context, open []model.Finding, resolved []model.Finding) error {
-	alerts := buildPayload(open, resolved, n.now(), n.resend, n.baseURL)
+	alerts := buildPayload(n.aboveFloor(open), n.aboveFloor(resolved), n.now(), n.resend, n.baseURL)
 	var errs []error
 	for start := 0; start < len(alerts); start += batchSize {
 		end := min(start+batchSize, len(alerts))
@@ -143,6 +152,28 @@ func (n *Notifier) Notify(ctx context.Context, open []model.Finding, resolved []
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// aboveFloor drops findings below notify.alertmanager.min_severity. The same
+// rule applies to resolution notices, by the finding's current severity:
+// severity is an alert label, so a notice only ever closes the alert series
+// asserted with that same severity, which was sent exactly when that severity
+// was at or above the floor. A notice for a finding that was never sent is
+// therefore never sent either, and one for a finding at or above the floor
+// always is. An open finding whose severity drops below the floor stops being
+// re-asserted and Alertmanager expires it at endsAt. The default floor (info)
+// filters nothing, not even unknown severities.
+func (n *Notifier) aboveFloor(fs []model.Finding) []model.Finding {
+	if n.floor.Rank() <= model.SeverityInfo.Rank() {
+		return fs
+	}
+	out := fs[:0:0]
+	for _, f := range fs {
+		if f.Severity.AtLeast(n.floor) {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // sendBatch posts to all Alertmanagers concurrently.

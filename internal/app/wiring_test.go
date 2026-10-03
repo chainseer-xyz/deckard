@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"testing"
@@ -10,6 +11,8 @@ import (
 	"github.com/chainseer-xyz/deckard/internal/config"
 	"github.com/chainseer-xyz/deckard/internal/engine"
 	"github.com/chainseer-xyz/deckard/internal/inventory/pgtest"
+	"github.com/chainseer-xyz/deckard/internal/model"
+	"github.com/chainseer-xyz/deckard/internal/scope"
 )
 
 func wiringApp(t *testing.T) (*App, context.Context) {
@@ -101,4 +104,31 @@ func inventoryChanges(t *testing.T, a *App, kind string) float64 {
 		}
 	}
 	return 0
+}
+
+// Every scope refusal is counted in deckard_scope_refusals_total, whatever
+// level it was logged at.
+func TestScopeRefusalsAreCounted(t *testing.T) {
+	a, ctx := wiringApp(t)
+	d := a.guard.Dialer(model.TierActive, model.ScopeOwned, nil)
+	for i := 0; i < 3; i++ {
+		if _, err := d.DialContext(ctx, "tcp", "169.254.169.254:80"); !errors.Is(err, scope.ErrOutOfScope) {
+			t.Fatalf("metadata dial not refused: %v", err)
+		}
+	}
+	mfs, err := a.metrics.Registry().Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var total float64
+	for _, mf := range mfs {
+		if mf.GetName() == "deckard_scope_refusals_total" {
+			for _, m := range mf.GetMetric() {
+				total += m.GetCounter().GetValue()
+			}
+		}
+	}
+	if total != 3 {
+		t.Fatalf("deckard_scope_refusals_total = %v, want 3", total)
+	}
 }

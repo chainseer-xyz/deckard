@@ -112,8 +112,8 @@ func (s *fakeStore) ListFindings(_ context.Context, f store.FindingFilter) ([]mo
 	return out, len(out), nil
 }
 
-// LastScans derives one row per (asset, check) from the recorded runs: a run
-// with an empty Error counts as a success.
+// LastScans derives one row per (asset, check) from the recorded runs: a
+// settled run (store.ScanRun.Settled) counts as a success.
 func (s *fakeStore) LastScans(context.Context) ([]store.ScanLast, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -128,7 +128,7 @@ func (s *fakeStore) LastScans(context.Context) ([]store.ScanLast, error) {
 		if r.StartedAt.After(l.LastAttempt) {
 			l.LastAttempt = r.StartedAt
 		}
-		if r.Error == "" && r.StartedAt.After(l.LastSuccess) {
+		if r.Settled() && r.StartedAt.After(l.LastSuccess) {
 			l.LastSuccess = r.StartedAt
 		}
 	}
@@ -349,6 +349,7 @@ type scanObs struct {
 type fakeRec struct {
 	mu      sync.Mutex
 	scans   []scanObs
+	skips   []string // check|tier|reason
 	syncs   map[string][]bool
 	changes map[string]int
 	depth   map[string]int
@@ -362,6 +363,11 @@ func (r *fakeRec) ObserveScan(c, t string, _ time.Duration, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.scans = append(r.scans, scanObs{c, t, err})
+}
+func (r *fakeRec) ObserveSkip(c, t, reason string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.skips = append(r.skips, c+"|"+t+"|"+reason)
 }
 func (r *fakeRec) ObserveSync(s string, _ time.Duration, ok bool) {
 	r.mu.Lock()

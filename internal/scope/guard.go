@@ -39,6 +39,8 @@ type Guard struct {
 	dnsOnce sync.Once
 
 	verified verifyCache // VerifyOwnedTarget results (see verify.go)
+	throttle refusalThrottle
+	observe  func(tier, class, reason string) // refusal counter, may be nil
 
 	// immutable after NewGuard
 	maxOwnedHosts uint64
@@ -61,6 +63,7 @@ type options struct {
 	resolver   check.Resolver
 	dnsq       dnsx.Querier
 	sharedFile string
+	observe    func(tier, class, reason string)
 }
 
 // Option customises NewGuard.
@@ -68,6 +71,13 @@ type Option func(*options)
 
 // WithLogger sets the logger used for refusals (default slog.Default()).
 func WithLogger(l *slog.Logger) Option { return func(o *options) { o.log = l } }
+
+// WithRefusalObserver is called for every refusal with its tier, class and
+// reason (a fixed string per refusal site, so it is safe as a metric label),
+// whatever the log level. It must be safe for concurrent use.
+func WithRefusalObserver(f func(tier, class, reason string)) Option {
+	return func(o *options) { o.observe = f }
+}
 
 // WithDialer replaces the underlying dialer (tests, custom egress). The guard
 // only ever hands it vetted IP-literal addresses.
@@ -93,7 +103,7 @@ func NewGuard(cfg config.ScopeConfig, opts ...Option) (*Guard, error) {
 	for _, f := range opts {
 		f(&o)
 	}
-	g := &Guard{log: o.log, base: o.base, resolver: o.resolver, dnsq: o.dnsq, maxOwnedHosts: 1024}
+	g := &Guard{log: o.log, base: o.base, resolver: o.resolver, dnsq: o.dnsq, observe: o.observe, maxOwnedHosts: 1024}
 	if cfg.MaxCIDRHosts > 0 {
 		g.maxOwnedHosts = uint64(cfg.MaxCIDRHosts)
 	}

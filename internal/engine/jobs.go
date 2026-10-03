@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"math/rand/v2"
 	"time"
 
@@ -168,7 +169,28 @@ type expandWorker struct {
 }
 
 func (w *expandWorker) Work(ctx context.Context, j *river.Job[ExpandZoneArgs]) error {
-	return w.r.runExpand(ctx, j.Args.AssetID)
+	err := w.r.runExpand(ctx, j.Args.AssetID)
+	// Exactly a transient CT failure, not one joined with a real error (a
+	// failed inventory write must still be retried and reported).
+	if _, ok := err.(*transientExpandError); ok { //nolint:errorlint // deliberate: a joined error is not transient
+		// The CT source is down: snooze (logged by River at debug, no attempt
+		// used) instead of erroring, so a long crt.sh outage does not log
+		// "Job errored; retrying" on every attempt. Uniqueness keeps it the
+		// zone's only expansion job meanwhile.
+		return river.JobSnooze(ctRetryDelay(snoozes(j.Metadata), w.r.Config.Expansion.Interval))
+	}
+	return err
+}
+
+// snoozes reads River's snooze counter from a job's metadata.
+func snoozes(metadata []byte) int {
+	var m struct {
+		Snoozes int `json:"snoozes"`
+	}
+	if json.Unmarshal(metadata, &m) != nil {
+		return 0
+	}
+	return m.Snoozes
 }
 func (w *expandWorker) Timeout(*river.Job[ExpandZoneArgs]) time.Duration { return 20 * time.Minute }
 

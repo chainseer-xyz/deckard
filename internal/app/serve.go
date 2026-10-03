@@ -40,7 +40,7 @@ func (a *App) Serve(ctx context.Context) error {
 	}
 
 	var wg sync.WaitGroup
-	errc := make(chan error, 4)
+	errc := make(chan error, 8) // one slot per component run below
 	run := func(name string, fn func(context.Context) error) {
 		wg.Add(1)
 		go func() {
@@ -88,6 +88,14 @@ func (a *App) Serve(ctx context.Context) error {
 	if a.hasRole("scheduler") {
 		run("dispatcher", func(c context.Context) error {
 			a.disp.Run(c)
+			return nil
+		})
+	}
+	if a.hasRole("scheduler") && a.hb != nil {
+		// Only the scheduler role pings; worker and API replicas never do, so
+		// the external monitor follows the component that keeps scans going.
+		run("heartbeat", func(c context.Context) error {
+			a.hb.Run(c)
 			return nil
 		})
 	}

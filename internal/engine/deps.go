@@ -42,6 +42,10 @@ type FindingProcessor interface {
 // Recorder receives engine metrics. All methods must be safe for concurrent use.
 type Recorder interface {
 	ObserveScan(check, tier string, d time.Duration, err error)
+	// ObserveSkip counts a check that was skipped before it touched the
+	// network (reason is a short, bounded code). A skip is neither a run nor
+	// an error.
+	ObserveSkip(check, tier, reason string)
 	ObserveSync(source string, d time.Duration, ok bool)
 	InventoryChange(kind string, n int)
 	SetQueueDepth(queue string, n int)
@@ -50,6 +54,7 @@ type Recorder interface {
 type noopRecorder struct{}
 
 func (noopRecorder) ObserveScan(string, string, time.Duration, error) {}
+func (noopRecorder) ObserveSkip(string, string, string)               {}
 func (noopRecorder) ObserveSync(string, time.Duration, bool)          {}
 func (noopRecorder) InventoryChange(string, int)                      {}
 func (noopRecorder) SetQueueDepth(string, int)                        {}

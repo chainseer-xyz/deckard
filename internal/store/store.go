@@ -169,8 +169,28 @@ type ScanRun struct {
 	Findings   int       `json:"findings"`
 }
 
+// SkippedPrefix starts the Error of a ScanRun that was skipped before it
+// touched the network (scope, profile or destination refusal).
+const SkippedPrefix = "skipped: "
+
+// UnownedDestinationSkip starts the Error of a ScanRun skipped because the
+// asset's owned name resolves to shared or third-party addresses that the
+// check's tier may not reach. That state is expected to persist, so for
+// scheduling it settles the run like a completed one (LastSuccess): the check
+// is next attempted after its normal interval, not after
+// scheduling.error_retry. It made no observation, so it never counts as a
+// clean run for findings: nothing is refreshed, missed or resolved by it.
+const UnownedDestinationSkip = SkippedPrefix + "unowned destination: "
+
+// Settled reports whether the run settles scheduling (see ScanLast): it
+// completed without error or was skipped with UnownedDestinationSkip.
+func (r ScanRun) Settled() bool {
+	return r.Error == "" || strings.HasPrefix(r.Error, UnownedDestinationSkip)
+}
+
 // ScanLast is the scheduling state of one (asset, check): when it was last
-// attempted and when it last completed without error (zero if never).
+// attempted and when it last settled (completed without error, or was skipped
+// with UnownedDestinationSkip; zero if never).
 type ScanLast struct {
 	AssetID     int64
 	Check       string

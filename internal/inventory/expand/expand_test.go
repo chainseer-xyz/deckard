@@ -75,11 +75,14 @@ func TestCTFailures(t *testing.T) {
 		h        http.HandlerFunc
 		attempts int32
 		errSub   string
+		// transient: the source is down (5xx, 429), not the answer wrong.
+		transient bool
 	}{
-		{"always 503 exhausts retries", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(503) }, 3, "status 503"},
-		{"429 retried", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(429) }, 3, "status 429"},
-		{"404 not retried", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(404) }, 1, "unexpected status 404"},
-		{"html body not retried", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("<html>busy</html>")) }, 1, "decode"},
+		{"always 503 exhausts retries", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(503) }, 3, "status 503", true},
+		{"502 from crt.sh", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(502) }, 3, "ct: status 502", true},
+		{"429 retried", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(429) }, 3, "status 429", true},
+		{"404 not retried", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(404) }, 1, "unexpected status 404", false},
+		{"html body not retried", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("<html>busy</html>")) }, 1, "decode", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -88,6 +91,10 @@ func TestCTFailures(t *testing.T) {
 			_, err := c.Names(context.Background(), "example.com")
 			if err == nil || !strings.Contains(err.Error(), tc.errSub) || n.Load() != tc.attempts {
 				t.Fatalf("err=%v attempts=%d", err, n.Load())
+			}
+			var ue *UnavailableError
+			if errors.As(err, &ue) != tc.transient {
+				t.Fatalf("transient = %v, want %v (err %v)", !tc.transient, tc.transient, err)
 			}
 		})
 	}
@@ -126,8 +133,10 @@ func TestCTNetworkErrorRetriedThenFails(t *testing.T) {
 	srv.Close() // connection refused
 	c := NewCT(WithCTBaseURL(url), WithCTRetries(1, time.Millisecond))
 	c.sleep = func(context.Context, time.Duration) error { return nil }
-	if _, err := c.Names(context.Background(), "example.com"); err == nil || !strings.Contains(err.Error(), "request") {
-		t.Fatal(err)
+	_, err := c.Names(context.Background(), "example.com")
+	var ue *UnavailableError
+	if err == nil || !strings.Contains(err.Error(), "request") || !errors.As(err, &ue) {
+		t.Fatalf("a network error must be a transient UnavailableError: %v", err)
 	}
 	// sleepCtx honours cancellation
 	ctx, cancel := context.WithCancel(context.Background())

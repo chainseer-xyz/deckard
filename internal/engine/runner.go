@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -22,7 +23,7 @@ const defaultCheckTimeout = 2 * time.Minute
 
 // SkippedPrefix starts the Error of a ScanRun that was refused (scope or
 // profile) and never touched the network.
-const SkippedPrefix = "skipped: "
+const SkippedPrefix = store.SkippedPrefix
 
 // runner holds the job handlers. It is queue-agnostic so River workers and
 // RunOnce share one code path.
@@ -36,6 +37,8 @@ type runner struct {
 	sources  map[string]source.Source
 	limiters *limiterSet
 	sems     *keyedSem
+
+	ctWarn *zoneWarnThrottle // transient CT warnings, shared by copies
 
 	mu *sync.Mutex
 	// last is a small in-process overlay of the attempts this process made, so
@@ -56,6 +59,7 @@ func newRunner(d Deps) *runner {
 		q:        noQueue{},
 		last:     map[ScanKey]store.ScanLast{},
 		mu:       &sync.Mutex{},
+		ctWarn:   &zoneWarnThrottle{},
 	}
 	if r.log == nil {
 		r.log = slog.Default()
@@ -132,6 +136,12 @@ func (r *runner) scannable(a model.Asset, tier model.Tier) (model.ScopeClass, Re
 // resolved profile is enabled. Otherwise a skipped ScanRun is recorded and no
 // check, dialer, resolver or HTTP client is ever created. Even once running,
 // every network handle given to the check is guard-wrapped with the fresh class.
+//
+// An owned name whose addresses the tier may not reach (a CDN edge, a
+// third-party host) is skipped the same way before anything is dialled (see
+// destinationSkip). A skip made no observation: its result never reaches the
+// finding processor or the inventory, so it can never refresh, miss, resolve
+// or garbage-collect anything.
 func (r *runner) runScan(ctx context.Context, j scanJob) error {
 	asset, err := r.Store.GetAsset(ctx, j.AssetID)
 	if err != nil {
@@ -157,6 +167,12 @@ func (r *runner) runScan(ctx context.Context, j scanJob) error {
 				AssetID: asset.ID, Check: c.Name(), Tier: string(j.Tier),
 				StartedAt: r.now(), Error: SkippedPrefix + why,
 			})
+		}
+		return nil
+	}
+	if reason, detail := r.destinationSkip(ctx, *asset, j.Tier); reason != "" {
+		for _, c := range checks {
+			r.skipCheck(ctx, c, *asset, reason, detail)
 		}
 		return nil
 	}
@@ -187,6 +203,60 @@ func (r *runner) runScan(ctx context.Context, j scanJob) error {
 	return firstErr
 }
 
+// destinationVetter is implemented by *scope.Guard (see
+// scope.Guard.DestinationSkip). Guards without it (test fakes) never skip.
+type destinationVetter interface {
+	DestinationSkip(ctx context.Context, tier model.Tier, host string) (reason, detail string)
+}
+
+// destinationLookupTimeout bounds the one DNS lookup behind destinationSkip.
+const destinationLookupTimeout = 10 * time.Second
+
+// destinationSkip reports whether the checks of tier would only be refused by
+// the scope guard for an expected reason (an owned name on shared or external
+// addresses, which only the passive tier may reach), so they are skipped
+// before anything is dialled. It decides cheaply and early; the guard stays
+// the final authority on every connection a check does make.
+func (r *runner) destinationSkip(ctx context.Context, a model.Asset, tier model.Tier) (reason, detail string) {
+	v, ok := r.Guard.(destinationVetter)
+	if !ok || tier == model.TierPassive {
+		return "", ""
+	}
+	host := destHost(a)
+	if host == "" {
+		return "", ""
+	}
+	lctx, cancel := context.WithTimeout(ctx, destinationLookupTimeout)
+	defer cancel()
+	return v.DestinationSkip(lctx, tier, host)
+}
+
+// destHost is the name or address a check's connections for a will resolve.
+func destHost(a model.Asset) string {
+	h := hostOf(a)
+	if a.Kind == model.KindService {
+		k, _, _ := strings.Cut(h, "/")
+		if host, _, err := net.SplitHostPort(k); err == nil {
+			return host
+		}
+	}
+	return h
+}
+
+// skipCheck records a check skipped before it touched the network: a scan
+// run marked store.UnownedDestinationSkip (scheduling treats it as settled,
+// findings never see it), the skip counter, and a debug log. It is not a
+// failure, so neither the error counter nor the "check failed" warning moves.
+func (r *runner) skipCheck(ctx context.Context, c check.Check, a model.Asset, reason, detail string) {
+	tier := string(c.Tier())
+	r.rec.ObserveSkip(c.Name(), tier, reason)
+	r.log.Debug("check skipped", "check", c.Name(), "asset", a.Key, "tier", tier, "reason", reason, "detail", detail)
+	r.recordScan(ctx, store.ScanRun{
+		AssetID: a.ID, Check: c.Name(), Tier: tier, StartedAt: r.now(),
+		Error: store.UnownedDestinationSkip + detail,
+	})
+}
+
 // runCheck runs one check and records the outcome. Check failures (including
 // panics and timeouts) are recorded, not returned: only infrastructure errors
 // the job should retry are returned.
@@ -198,11 +268,12 @@ func (r *runner) runCheck(ctx context.Context, c check.Check, asset model.Asset,
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	dialer, refusals := trackRefusals(r.Guard.Dialer(tier, class, limiter))
 	target := check.Target{
 		Asset:      asset,
 		Neighbours: neigh,
 		Baseline:   map[string]map[string]any{},
-		Dialer:     r.Guard.Dialer(tier, class, limiter),
+		Dialer:     dialer,
 		Resolver:   r.Guard.Resolver(tier, class, limiter),
 		HTTP:       r.Guard.HTTPClient(tier, class, limiter, scope.WithHTTPTimeout(timeout)),
 		Config:     r.Config.Checks[c.Name()],
@@ -240,6 +311,12 @@ func (r *runner) runCheck(ctx context.Context, c check.Check, asset model.Asset,
 			res = &check.Result{}
 		}
 		findings = len(res.Findings)
+		if refusals.refused.Load() && !res.Partial {
+			// The guard refused at least one connection: what the check did not
+			// reach proves nothing, so nothing may be missed or resolved.
+			res.Partial = true
+			r.log.Debug("check run had scope refusals, treated as partial", "check", c.Name(), "asset", asset.Key)
+		}
 		if _, err := r.Findings.Process(cctx, asset, c.Name(), res); err != nil {
 			runErr = fmt.Errorf("process findings: %w", err)
 		} else if res.Partial {
@@ -317,7 +394,7 @@ func (r *runner) recordScan(ctx context.Context, run store.ScanRun) {
 	if run.StartedAt.After(l.LastAttempt) {
 		l.LastAttempt = run.StartedAt
 	}
-	if run.Error == "" && run.StartedAt.After(l.LastSuccess) {
+	if run.Settled() && run.StartedAt.After(l.LastSuccess) {
 		l.LastSuccess = run.StartedAt
 	}
 	r.last[k] = l
