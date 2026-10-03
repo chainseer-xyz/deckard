@@ -35,11 +35,15 @@ func (j scanJob) key() string { return fmt.Sprintf("%d|%s|%s", j.AssetID, j.Tier
 // riverQueue inserts jobs through a River client. River's unique-job options
 // (see jobs.go) make a second insert for the same (asset, tier, check) a no-op
 // while one is queued, scheduled, retrying or running.
-type riverQueue struct{ c *river.Client[pgx.Tx] }
+type riverQueue struct {
+	c *river.Client[pgx.Tx]
+	// route picks the queue of a scan job (runner.scanQueue).
+	route func(scanJob) string
+}
 
 func (q riverQueue) enqueueScan(ctx context.Context, j scanJob) (bool, error) {
 	res, err := q.c.Insert(ctx, ScanAssetArgs(j),
-		&river.InsertOpts{Queue: queueForTier(j.Tier)})
+		&river.InsertOpts{Queue: q.route(j)})
 	if err != nil {
 		return false, err
 	}

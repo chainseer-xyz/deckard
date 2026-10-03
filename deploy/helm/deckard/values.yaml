@@ -35,7 +35,7 @@ config:
   # pool (database.max_conns) should comfortably exceed the busiest replica's sum.
   scheduling:
     error_retry: 10m
-    queue_workers: { sync: 2, passive: 10, active: 4, intrusive: 1, default: 2, expand: 1, maintenance: 1 }
+    queue_workers: { sync: 2, passive: 10, active: 4, intrusive: 1, default: 2, expand: 1, intel: 8, maintenance: 1 }
   # How long scan history and relations of removed assets are kept.
   retention: { scans: 168h, relations: 720h }
   # nuclei CVE templates are kept fresh automatically: the updater downloads the

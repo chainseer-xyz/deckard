@@ -39,8 +39,18 @@ type Option func(*options)
 // WithRoles overrides the roles (default: config server.roles, else all).
 func WithRoles(roles ...string) Option { return func(o *options) { o.roles = roles } }
 
-// WithQueueWorkers sets max concurrent jobs per queue (sync, passive, active,
-// intrusive, default); unspecified queues keep their defaults.
+// DefaultQueueWorkers is the max concurrent jobs per queue when none is
+// configured. Every queue the engine runs has an entry: it is the engine's
+// list of queues. A fresh map each call.
+func DefaultQueueWorkers() map[string]int {
+	return map[string]int{
+		QueueSync: 2, QueuePassive: 10, QueueActive: 4, QueueIntrusive: 1,
+		QueueIntel: 8, QueueExpand: 1, QueueMaintenance: 1, QueueDefault: 2,
+	}
+}
+
+// WithQueueWorkers sets max concurrent jobs per queue (see DefaultQueueWorkers);
+// unspecified queues keep their defaults.
 func WithQueueWorkers(m map[string]int) Option {
 	return func(o *options) {
 		for k, v := range m {
@@ -119,7 +129,7 @@ func New(d Deps, opts ...Option) (*Engine, error) {
 		return nil, errors.New("engine: Findings is required")
 	}
 	o := options{
-		queueWorkers: map[string]int{QueueSync: 2, QueuePassive: 10, QueueActive: 4, QueueIntrusive: 1, QueueExpand: 1, QueueMaintenance: 1, QueueDefault: 2},
+		queueWorkers: DefaultQueueWorkers(),
 		tick:         30 * time.Second,
 		gaugeEvery:   15 * time.Second,
 		syncJitter:   0.1,
@@ -170,7 +180,7 @@ func New(d Deps, opts ...Option) (*Engine, error) {
 			return nil, err
 		}
 		e.client = c
-		e.r.q = riverQueue{c}
+		e.r.q = riverQueue{c: c, route: e.r.scanQueue}
 	}
 	return e, nil
 }

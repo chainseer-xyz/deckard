@@ -19,6 +19,7 @@ const (
 	QueueActive    = "active"
 	QueueIntrusive = "intrusive"
 	QueueExpand    = "expand"           // slow third-party lookups (crt.sh), isolated from scans
+	QueueIntel     = "intel"            // scan jobs of checks that wait on remote lookups (check.SlowLookups)
 	QueueDefault   = river.QueueDefault // schedule ticks and housekeeping
 )
 
@@ -41,6 +42,17 @@ func queueForTier(t model.Tier) string {
 	default:
 		return QueuePassive
 	}
+}
+
+// queueForScan is the queue a scan job of a check of tier t runs in. A check
+// that waits on slow remote lookups (check.SlowLookups) goes to the intel
+// queue whatever its tier, so it can never hold a worker a fast local check of
+// the same tier is waiting for.
+func queueForScan(t model.Tier, slow bool) string {
+	if slow {
+		return QueueIntel
+	}
+	return queueForTier(t)
 }
 
 // uniqueOpts dedupes by args across every live state. Completed is
