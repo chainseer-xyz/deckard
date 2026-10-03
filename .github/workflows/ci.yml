@@ -37,6 +37,10 @@ jobs:
       # Postgres-backed tests use testcontainers (Docker is available on the runner).
       - name: go test
         shell: bash
+        env:
+          # The runner is ephemeral, so the testcontainers reaper adds nothing but a
+          # startup wait that has timed out and failed an otherwise green run.
+          TESTCONTAINERS_RYUK_DISABLED: "true"
         run: |
           set +e
           go test -race -count=1 ./... 2>&1 | tee test.log
