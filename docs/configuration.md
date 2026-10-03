@@ -42,6 +42,12 @@ inserted and stays with the job through retries and crash recovery. Raise
 `intel` if `deckard_queue_depth{queue="intel"}` stays high; it never competes
 with `passive` for workers, only for the database pool.
 
+After an upgrade from a version without this queue, each instance moves the
+still-pending (`available`, `scheduled`, `retryable`) scan jobs of these checks
+from the old queue to `intel` when it starts, and again every 30 seconds while
+older instances of a rolling update are still inserting into `passive`. Running
+jobs are never touched.
+
 ## nuclei and CVE templates
 
 `cve.nuclei` runs [nuclei](https://github.com/projectdiscovery/nuclei) templates against owned web assets

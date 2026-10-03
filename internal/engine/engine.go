@@ -31,6 +31,8 @@ type options struct {
 	vi           vulnintelOpts
 	// reclaimSpread staggers reclaimed jobs (see WithReclaimSpread).
 	reclaimSpread time.Duration
+	// moveBatch bounds the rows one move of slow-lookup jobs touches.
+	moveBatch int
 }
 
 // Option customises an Engine.
@@ -136,6 +138,7 @@ func New(d Deps, opts ...Option) (*Engine, error) {
 		// A crashed instance's jobs come back together; retrying all of
 		// them in the same second is what OOMKilled the replacement pod.
 		reclaimSpread: 60 * time.Second,
+		moveBatch:     moveSlowBatch,
 	}
 	for _, f := range opts {
 		f(&o)
@@ -350,6 +353,12 @@ func (e *Engine) Start(ctx context.Context) error {
 	// belongs to a registered, heartbeating instance.
 	if err := e.heartbeat(ctx); err != nil {
 		return fmt.Errorf("engine: start: %w", err)
+	}
+	// Before River fetches anything, so this instance does not start the
+	// pending slow-lookup jobs of an older version in the wrong queue. The
+	// instance loop repeats the move; a failure here is not fatal.
+	if _, err := e.moveSlowJobs(ctx); err != nil {
+		e.r.log.Warn("move slow-lookup scan jobs", "err", err)
 	}
 	if err := e.client.Start(ctx); err != nil {
 		e.deregisterQuietly()
