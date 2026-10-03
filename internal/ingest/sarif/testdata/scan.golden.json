@@ -1,0 +1,124 @@
+{
+  "tool": "sarif",
+  "scope": "test:scope",
+  "complete": true,
+  "observed_at": "2026-10-03T07:00:00Z",
+  "findings": [
+    {
+      "key": "CVE-2024-24790:usr/local/bin/app:1",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "test:scope"
+      },
+      "title": "golang: net/netip: Unexpected behavior from Is methods for IPv4-mapped IPv6 addresses (usr/local/bin/app:1)",
+      "description": "Package: stdlib\nInstalled Version: 1.22.1\nFixed Version: 1.22.4",
+      "severity": "critical",
+      "remediation": "Upgrade the Go toolchain to 1.22.4 or later.",
+      "tags": [
+        "sarif",
+        "trivy",
+        "CVE-2024-24790",
+        "vulnerability",
+        "CRITICAL"
+      ],
+      "evidence": {
+        "column": 0,
+        "file": "usr/local/bin/app",
+        "fingerprint": "1",
+        "level": "error",
+        "line": 1,
+        "rule_id": "CVE-2024-24790",
+        "security_severity": 9.8,
+        "tool": "Trivy",
+        "tool_version": "0.56.0"
+      }
+    },
+    {
+      "key": "no-rule-defined::0",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "test:scope"
+      },
+      "title": "Informational result without a rule",
+      "description": "Informational result without a rule",
+      "severity": "low",
+      "tags": [
+        "sarif",
+        "trivy",
+        "no-rule-defined"
+      ],
+      "evidence": {
+        "column": 0,
+        "fingerprint": "0",
+        "level": "note",
+        "line": 0,
+        "rule_id": "no-rule-defined",
+        "tool": "Trivy",
+        "tool_version": "0.56.0"
+      }
+    },
+    {
+      "key": "python.lang.security.audit.eval-detected.eval-detected:src/api/handlers.py:primaryLocationLineHash=3f2a1b0c9d8e7f60:1",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "https://github.com/example/app"
+      },
+      "title": "Detected the use of eval(). eval() can be dangerous if used to evaluate dynamic content. (src/api/handlers.py:42)",
+      "description": "Detected the use of eval(). eval() can be dangerous if used to evaluate dynamic content.",
+      "severity": "high",
+      "remediation": "Avoid eval(); parse the input with ast.literal_eval or a real parser instead.\n\nSee https://semgrep.dev/r/python.lang.security.audit.eval-detected.eval-detected",
+      "tags": [
+        "sarif",
+        "semgrep oss",
+        "python.lang.security.audit.eval-detected.eval-detected",
+        "CWE-95: Eval Injection",
+        "OWASP-A03:2021 - Injection",
+        "security"
+      ],
+      "evidence": {
+        "column": 12,
+        "file": "src/api/handlers.py",
+        "fingerprint": "primaryLocationLineHash=3f2a1b0c9d8e7f60:1",
+        "help_uri": "https://semgrep.dev/r/python.lang.security.audit.eval-detected.eval-detected",
+        "level": "warning",
+        "line": 42,
+        "repository": "https://github.com/example/app",
+        "revision": "4e5f60718293a4b5c6d7e8f9012345670a1b2c3d",
+        "rule_id": "python.lang.security.audit.eval-detected.eval-detected",
+        "security_severity": 8.1,
+        "tool": "Semgrep OSS",
+        "tool_version": "1.90.0"
+      }
+    },
+    {
+      "key": "yaml.github-actions.security.run-shell-injection.run-shell-injection:.github/workflows/triage.yml:matchBasedId/v1=a1b2c3d4",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "https://github.com/example/app"
+      },
+      "title": "Possible shell injection in a GitHub Actions run step (.github/workflows/triage.yml:18)",
+      "description": "Using ${{ github.event.pull_request.title }} directly in a run step allows shell injection; pass it through an environment variable.",
+      "severity": "high",
+      "remediation": "See https://semgrep.dev/r/yaml.github-actions.security.run-shell-injection.run-shell-injection",
+      "tags": [
+        "sarif",
+        "semgrep oss",
+        "yaml.github-actions.security.run-shell-injectio#2402d3485feed46b",
+        "CWE-78"
+      ],
+      "evidence": {
+        "column": 0,
+        "file": ".github/workflows/triage.yml",
+        "fingerprint": "matchBasedId/v1=a1b2c3d4",
+        "help_uri": "https://semgrep.dev/r/yaml.github-actions.security.run-shell-injection.run-shell-injection",
+        "level": "error",
+        "line": 18,
+        "repository": "https://github.com/example/app",
+        "revision": "4e5f60718293a4b5c6d7e8f9012345670a1b2c3d",
+        "rule_id": "yaml.github-actions.security.run-shell-injection.run-shell-injection",
+        "tool": "Semgrep OSS",
+        "tool_version": "1.90.0"
+      }
+    }
+  ]
+}
