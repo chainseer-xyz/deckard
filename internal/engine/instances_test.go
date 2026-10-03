@@ -79,6 +79,7 @@ func getJob(t *testing.T, pool *pgxpool.Pool, id int64) jobRow {
 func reclaimEngine(t *testing.T) (*Engine, *fakeRec) {
 	t.Helper()
 	e, _, rec, _, _ := integrationSetup(t, []string{RoleScheduler, RoleWorker}, &recordingCheck{name: "p.rec", tier: model.TierPassive}, nil)
+	e.o.reclaimSpread = 0 // due at once unless a test spreads them
 	return e, rec
 }
 
@@ -345,5 +346,32 @@ func TestStopPastDeadlineLeavesNothingRunning(t *testing.T) {
 	}
 	if running != 0 || registered != 0 {
 		t.Errorf("after Stop: %d jobs running, instance registered=%d; want 0 and 0", running, registered)
+	}
+}
+
+// TestReclaimSpreadsRetries: the jobs of a dead instance come back spread over
+// the window instead of all due in the same second.
+func TestReclaimSpreadsRetries(t *testing.T) {
+	e, _ := reclaimEngine(t)
+	e.o.reclaimSpread = time.Minute
+	registerInstance(t, e.d.Pool, "dead_host", 5*time.Minute)
+	const n = 20
+	ids := make([]int64, n)
+	for i := range ids {
+		ids[i] = insertJob(t, e, scanArgs(int64(i+1)), "running", 1, []string{"dead_host"}, "")
+	}
+	if got, err := e.reclaimOrphans(context.Background()); err != nil || got.total() != n {
+		t.Fatalf("reclaimed %v, %v", got, err)
+	}
+	distinct := map[time.Time]bool{}
+	for _, id := range ids {
+		j := getJob(t, e.d.Pool, id)
+		if j.state != "retryable" || j.dueIn < -5*time.Second || j.dueIn > time.Minute {
+			t.Errorf("job %d: %s due in %v, want retryable within the minute", id, j.state, j.dueIn)
+		}
+		distinct[j.scheduled] = true
+	}
+	if len(distinct) < n/2 {
+		t.Errorf("%d jobs share %d due times; not spread", n, len(distinct))
 	}
 }

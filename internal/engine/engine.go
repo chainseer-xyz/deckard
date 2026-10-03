@@ -29,6 +29,8 @@ type options struct {
 	guardInitial time.Duration
 	guardEvery   time.Duration
 	vi           vulnintelOpts
+	// reclaimSpread staggers reclaimed jobs (see WithReclaimSpread).
+	reclaimSpread time.Duration
 }
 
 // Option customises an Engine.
@@ -65,6 +67,11 @@ func WithRunOnceConcurrency(n int) Option { return func(o *options) { o.runOnceW
 func WithTemplateGuard(initial, every time.Duration) Option {
 	return func(o *options) { o.guardInitial, o.guardEvery = initial, every }
 }
+
+// WithReclaimSpread sets the window over which jobs reclaimed from a dead
+// instance are spread (each is due at a random point in it; default 60s, 0
+// makes them all due at once).
+func WithReclaimSpread(d time.Duration) Option { return func(o *options) { o.reclaimSpread = d } }
 
 // Engine owns the job system.
 type Engine struct {
@@ -116,9 +123,15 @@ func New(d Deps, opts ...Option) (*Engine, error) {
 		tick:         30 * time.Second,
 		gaugeEvery:   15 * time.Second,
 		syncJitter:   0.1,
+		// A crashed instance's jobs come back together; retrying all of
+		// them in the same second is what OOMKilled the replacement pod.
+		reclaimSpread: 60 * time.Second,
 	}
 	for _, f := range opts {
 		f(&o)
+	}
+	if o.reclaimSpread < 0 {
+		return nil, errors.New("engine: negative reclaim spread")
 	}
 	if o.runOnceWorkers < 1 {
 		o.runOnceWorkers = 8

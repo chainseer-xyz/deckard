@@ -47,6 +47,9 @@ func TestNewValidation(t *testing.T) {
 	if _, err := New(d, WithQueueWorkers(map[string]int{QueueActive: 0})); err == nil {
 		t.Error("zero-worker queue accepted")
 	}
+	if _, err := New(d, WithReclaimSpread(-time.Second)); err == nil {
+		t.Error("negative reclaim spread accepted")
+	}
 	e, err := New(d)
 	if err != nil || !e.roles[RoleWorker] || !e.roles[RoleScheduler] || !e.roles[RoleAPI] {
 		t.Fatalf("default roles: %v %v", e, err)

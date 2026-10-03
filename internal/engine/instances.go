@@ -83,7 +83,12 @@ func (e *Engine) pruneInstances(ctx context.Context) error {
 //     becomes cancelled, finalized now, scheduled_at kept;
 //   - a job with no attempts left (attempt >= max_attempts) is discarded,
 //     finalized now, scheduled_at kept;
-//   - otherwise it becomes retryable with finalized_at NULL and is due now.
+//   - otherwise it becomes retryable with finalized_at NULL, due at a random
+//     point in the next $2 seconds: the jobs of a dead instance all come back
+//     at once, and retrying them in the same second is a stampede (it is
+//     what OOMKilled a replacement pod). River's rescuer delays by its retry
+//     backoff instead; uniqueness still holds meanwhile, as retryable is a
+//     unique state.
 //
 // In every case one AttemptError is appended to errors (attempt is the
 // current attempt, not incremented: the next fetch counts the retry, exactly
@@ -112,7 +117,8 @@ reclaimed AS (
 	UPDATE river_job j SET
 		state = (` + reclaimState + `)::river_job_state,
 		finalized_at = CASE WHEN ` + reclaimState + ` = 'retryable' THEN NULL ELSE now() END,
-		scheduled_at = CASE WHEN ` + reclaimState + ` = 'retryable' THEN now() ELSE j.scheduled_at END,
+		scheduled_at = CASE WHEN ` + reclaimState + ` = 'retryable'
+			THEN now() + random() * make_interval(secs => $2) ELSE j.scheduled_at END,
 		errors = array_append(j.errors, jsonb_build_object(
 			'at', now(),
 			'attempt', greatest(j.attempt, 0),
@@ -155,7 +161,7 @@ func (r reclaimed) total() int {
 
 // reclaimOrphans runs one reclaim pass, then counts and logs what it moved.
 func (e *Engine) reclaimOrphans(ctx context.Context) (reclaimed, error) {
-	rows, err := e.d.Pool.Query(ctx, reclaimSQL, staleAfter.Seconds())
+	rows, err := e.d.Pool.Query(ctx, reclaimSQL, staleAfter.Seconds(), e.o.reclaimSpread.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("reclaim orphaned jobs: %w", err)
 	}
