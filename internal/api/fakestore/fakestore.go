@@ -36,6 +36,7 @@ type Store struct {
 
 	statsCalls  int
 	eventsCalls int
+	ingest      map[ingestKey]*ingestState
 }
 
 // Change is a recorded ChangeFindingStatus call.
@@ -194,50 +195,100 @@ func (s *Store) SaveBaseline(_ context.Context, b store.Baseline) error {
 func (s *Store) ReconcileFindings(_ context.Context, in store.ReconcileInput) (store.ReconcileResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var res store.ReconcileResult
 	a, ok := s.Assets[in.AssetID]
 	if !ok {
-		return res, store.ErrNotFound
+		return store.ReconcileResult{}, store.ErrNotFound
 	}
-	resolveAfter := in.ResolveAfter
-	if resolveAfter < 1 {
-		resolveAfter = 1
-	}
-	existing := map[string]int64{}
 	var ids []int64
 	for id, f := range s.Findings {
 		if f.AssetID == in.AssetID && f.Check == in.Check {
-			existing[f.Fingerprint] = id
 			ids = append(ids, id)
 		}
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	present := map[string]bool{}
+	items := make([]item, 0, len(in.Findings))
 	for _, fi := range in.Findings {
-		fp := model.Fingerprint(in.Check, a.Key, fi.Key)
+		items = append(items, item{fp: model.Fingerprint(in.Check, a.Key, fi.Key), asset: a, fi: fi})
+	}
+	res, _, _ := s.reconcileLocked(set{check: in.Check, ids: ids, items: items, partial: in.PartialRun, resolveAfter: in.ResolveAfter, now: in.Now})
+	return res, nil
+}
+
+type item struct {
+	fp    string
+	asset model.Asset
+	fi    model.FindingInput
+}
+
+type set struct {
+	check        string
+	ids          []int64 // the reconciliation set's existing findings
+	items        []item
+	partial      bool
+	resolveAfter int
+	now          time.Time
+	ingestScope  string
+	source       string // finding source override ("" = the asset's)
+}
+
+// reconcileLocked mirrors the postgres reconcileTx. It returns the result plus
+// the refreshed and pending counts. s.mu must be held.
+func (s *Store) reconcileLocked(in set) (store.ReconcileResult, int, int) {
+	var res store.ReconcileResult
+	refreshed, pending := 0, 0
+	resolveAfter := in.resolveAfter
+	if resolveAfter < 1 {
+		resolveAfter = 1
+	}
+	sort.Slice(in.ids, func(i, j int) bool { return in.ids[i] < in.ids[j] })
+	existing := map[string]int64{}
+	for _, id := range in.ids {
+		existing[s.Findings[id].Fingerprint] = id
+	}
+	var order []string
+	byFP := map[string]item{}
+	for _, it := range in.items {
+		if _, dup := byFP[it.fp]; !dup {
+			order = append(order, it.fp)
+		}
+		byFP[it.fp] = it // last duplicate wins
+	}
+	var next int64 = 1
+	for k := range s.Findings {
+		if k >= next {
+			next = k + 1
+		}
+	}
+	present := map[string]bool{}
+	for _, fp := range order {
+		it, fi, a := byFP[fp], byFP[fp].fi, byFP[fp].asset
 		present[fp] = true
+		source := a.Source
+		if in.source != "" {
+			source = in.source
+		}
 		id, found := existing[fp]
 		if !found {
-			var next int64 = 1
-			for k := range s.Findings {
-				if k >= next {
-					next = k + 1
-				}
-			}
 			f := model.Finding{
-				ID: next, Fingerprint: fp, Check: in.Check, AssetID: a.ID, AssetKey: a.Key, Zone: a.Zone, Source: a.Source,
+				ID: next, Fingerprint: fp, Check: in.check, AssetID: a.ID, AssetKey: a.Key, Zone: a.Zone, Source: source,
 				Severity: fi.Severity, Title: fi.Title, Description: fi.Description, Evidence: fi.Evidence,
-				Remediation: fi.Remediation, Tags: fi.Tags, Status: model.StatusOpen, FirstSeen: in.Now, LastSeen: in.Now,
+				Remediation: fi.Remediation, Tags: fi.Tags, Status: model.StatusOpen, FirstSeen: in.now, LastSeen: in.now,
+				IngestScope: in.ingestScope,
 			}
 			s.Findings[next] = f
-			existing[fp] = next
+			next++
 			res.Opened = append(res.Opened, f)
 			continue
 		}
+		refreshed++
 		f := s.Findings[id]
 		wasResolved := f.Status == model.StatusResolved
+		wasOpen := f.Status == model.StatusOpen
 		f.Severity, f.Title, f.Description, f.Evidence = fi.Severity, fi.Title, fi.Description, fi.Evidence
-		f.Remediation, f.Tags, f.LastSeen, f.MissedRuns = fi.Remediation, fi.Tags, in.Now, 0
+		f.Remediation, f.Tags, f.LastSeen, f.MissedRuns = fi.Remediation, fi.Tags, in.now, 0
+		f.AssetID, f.AssetKey, f.Zone = it.asset.ID, it.asset.Key, it.asset.Zone
+		if in.source == "" {
+			f.Source = a.Source
+		}
 		if wasResolved {
 			f.Status, f.ResolvedAt = model.StatusOpen, nil
 			f.ReopenedCount++
@@ -246,27 +297,29 @@ func (s *Store) ReconcileFindings(_ context.Context, in store.ReconcileInput) (s
 		switch {
 		case wasResolved:
 			res.Reopened = append(res.Reopened, f)
-		case f.Status == model.StatusOpen:
+		case wasOpen:
 			res.Updated = append(res.Updated, f)
 		}
 	}
-	if in.PartialRun {
-		return res, nil
+	if in.partial {
+		return res, refreshed, pending
 	}
-	for _, id := range ids {
+	for _, id := range in.ids {
 		f := s.Findings[id]
 		if present[f.Fingerprint] || f.Status == model.StatusResolved {
 			continue
 		}
 		f.MissedRuns++
 		if f.MissedRuns >= resolveAfter {
-			now := in.Now
+			now := in.now
 			f.Status, f.ResolvedAt, f.SuppressedUntil = model.StatusResolved, &now, nil
 			res.Resolved = append(res.Resolved, f)
+		} else {
+			pending++
 		}
 		s.Findings[id] = f
 	}
-	return res, nil
+	return res, refreshed, pending
 }
 
 func (s *Store) GetFinding(_ context.Context, id int64) (*model.Finding, error) {

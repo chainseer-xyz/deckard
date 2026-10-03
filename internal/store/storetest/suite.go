@@ -49,6 +49,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		{"ScanHistory", testScanHistory},
 		{"Stats", testStats},
 		{"NotFound", testNotFound},
+		{"Ingest", func(t *testing.T, f Factory) { testIngest(t, f, SnapshotSeeder) }},
 	}
 	for _, g := range groups {
 		t.Run(g.name, func(t *testing.T) { g.fn(t, newStore) })

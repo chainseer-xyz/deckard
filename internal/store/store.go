@@ -107,6 +107,91 @@ type ReconcileResult struct {
 	Resolved []model.Finding
 }
 
+// IngestItem is one externally reported finding of an IngestInput. The
+// finding attaches to the asset (AssetKind, AssetKey): with Ref set the asset
+// must already exist, be live and be owned, otherwise the item is rejected;
+// without Ref the asset is used if it exists (a removed one is revived and
+// claimed for IngestInput.Source) and created if it does not. Callers only
+// ever pass non-probable kinds without Ref (the API allows cloud_resource).
+type IngestItem struct {
+	Index     int // position in the request, echoed in rejections
+	AssetKind model.AssetKind
+	AssetKey  string
+	Ref       bool
+	// Finding.Key is the producer's stable id for the item, unique within
+	// one input; Finding.Check is ignored (IngestInput.Check applies).
+	Finding model.FindingInput
+}
+
+// IngestInput is one accepted ingest request for one (Tool, Scope).
+//
+// Reconciliation set: every finding previously stored under (Check, Scope),
+// whatever asset it is attached to. The fingerprint of an item is
+// model.Fingerprint(Check, Scope, Finding.Key), so the same producer key is
+// the same finding across runs even if its asset changes.
+//
+// Absence is applied (absent findings accrue a miss and resolve after
+// ResolveAfter consecutive misses, exactly like a built-in check) only when
+// all of these hold; otherwise the input can only open, reopen and refresh:
+//   - Complete is true,
+//   - no item was rejected,
+//   - ObservedAt is strictly after every ObservedAt previously accepted for
+//     (Tool, Scope) (an older or same-run delivery proves nothing new).
+//
+// An input whose Digest equals the last accepted Digest for (Tool, Scope) is
+// a replay (a retried delivery of the same run) and changes nothing.
+// Implementations serialise inputs per (Tool, Scope) and apply each one
+// atomically.
+type IngestInput struct {
+	Tool       string
+	Scope      string
+	Check      string           // model.IngestCheck(Tool)
+	Source     string           // model.IngestSource(Tool)
+	AssetScope model.ScopeClass // class of assets this input creates or claims
+	Complete   bool
+	ObservedAt time.Time
+	Digest     string
+	Items      []IngestItem
+	// ResolveAfter is findings.resolve_after (>= 1).
+	ResolveAfter int
+	Now          time.Time
+}
+
+// IngestRejection reports an item that was not applied.
+type IngestRejection struct {
+	Index  int    `json:"index"`
+	Reason string `json:"reason"`
+}
+
+// IngestResult reports what an IngestInput changed. ReconcileResult.Updated
+// lists still-open findings seen again; Refreshed counts every known finding
+// seen again whatever its status (acknowledged and suppressed included).
+type IngestResult struct {
+	ReconcileResult
+	Refreshed int
+	// Pending counts absent findings that accrued a miss but are not resolved
+	// yet (fewer than ResolveAfter consecutive misses).
+	Pending  int
+	Rejected []IngestRejection
+	// Complete reports whether absence was applied (see IngestInput).
+	Complete bool
+	// NotCompleteReason says why a Complete input was not applied as complete.
+	NotCompleteReason string
+	// Replay is set when the input repeated the last accepted one.
+	Replay bool
+}
+
+// IngestScope is the ingest state of one (Tool, Scope).
+type IngestScope struct {
+	Tool       string
+	Scope      string
+	CreatedAt  time.Time
+	LastAt     time.Time // last accepted request (any kind)
+	CompleteAt time.Time // last request applied as complete; zero if never
+	ObservedAt time.Time // newest ObservedAt accepted
+	Open       int       // open findings of (Tool, Scope) on live assets
+}
+
 // FindingFilter narrows ListFindings. Zero values mean "any".
 type FindingFilter struct {
 	Statuses    []model.FindingStatus
@@ -250,6 +335,12 @@ type Store interface {
 	SaveBaseline(ctx context.Context, b Baseline) error
 
 	ReconcileFindings(ctx context.Context, in ReconcileInput) (ReconcileResult, error)
+	// IngestFindings applies one externally reported run for (Tool, Scope)
+	// with the same lifecycle rules as ReconcileFindings; see IngestInput.
+	IngestFindings(ctx context.Context, in IngestInput) (IngestResult, error)
+	// ListIngestScopes returns the state of every (Tool, Scope) that has
+	// ever had an accepted ingest, ordered by Tool then CreatedAt.
+	ListIngestScopes(ctx context.Context) ([]IngestScope, error)
 	GetFinding(ctx context.Context, id int64) (*model.Finding, error)
 	ListFindings(ctx context.Context, f FindingFilter) ([]model.Finding, int, error)
 	// ChangeFindingStatus applies an operator action. Expired suppressions are

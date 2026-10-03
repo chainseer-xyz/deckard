@@ -194,10 +194,33 @@ type Finding struct {
 	ReopenedCount   int            `json:"reopened_count"`
 	SuppressedUntil *time.Time     `json:"suppressed_until,omitempty"`
 	SuppressionNote string         `json:"suppression_note,omitempty"`
+	// IngestScope is the scanned scope (account, cluster, org) an ingested
+	// finding was reported for; empty for findings of built-in checks.
+	IngestScope string `json:"ingest_scope,omitempty"`
 	// Context is derived, non-persisted enrichment (lineage, owner, previous/
 	// current state, change times) filled just before notification.
 	Context map[string]any `json:"context,omitempty"`
 }
+
+// Findings posted by external scanners (POST /api/v1/ingest) are stored under
+// the check IngestCheckPrefix+tool, and assets the ingest creates carry the
+// source IngestSourcePrefix+tool. No built-in check, plugin or inventory
+// source may use either prefix (config validation enforces it), so the
+// prefixes alone identify ingested data.
+const (
+	IngestCheckPrefix  = "ext."
+	IngestSourcePrefix = "ingest:"
+)
+
+// IngestCheck is the check name findings of tool are stored under.
+func IngestCheck(tool string) string { return IngestCheckPrefix + tool }
+
+// IngestSource is the source label of assets created by tool's ingest.
+func IngestSource(tool string) string { return IngestSourcePrefix + tool }
+
+// IsIngestSource reports whether an asset source label marks an asset created
+// by the ingest API. Such assets are never probed.
+func IsIngestSource(source string) bool { return strings.HasPrefix(source, IngestSourcePrefix) }
 
 // Fingerprint is the dedup key for a finding: stable across runs. It does
 // not include the asset KIND, so a zone asset and a hostname asset sharing

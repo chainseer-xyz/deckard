@@ -749,6 +749,9 @@ func (c *Config) validateSources(add func(string, ...any)) {
 		if seen[s.Name] {
 			add("sources[%d]: duplicate source name %q", i, s.Name)
 		}
+		if strings.HasPrefix(s.Name, "ingest:") {
+			add("sources[%s]: the name prefix \"ingest:\" is reserved for assets created by the ingest API", s.Name)
+		}
 		seen[s.Name] = true
 		if !validSourceTypes[s.Type] {
 			add("sources[%s]: unknown type %q", s.Name, s.Type)
@@ -820,6 +823,9 @@ func (c *Config) validatePlugins(add func(string, ...any)) {
 	for _, p := range c.Plugins {
 		if p.Name == "" {
 			add("plugins: name is required")
+		}
+		if strings.HasPrefix(p.Name, "ext.") {
+			add("plugins[%s]: the name prefix \"ext.\" is reserved for findings posted to the ingest API", p.Name)
 		}
 		if len(p.Exec) == 0 {
 			add("plugins[%s]: exec is required", p.Name)

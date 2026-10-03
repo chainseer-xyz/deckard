@@ -197,6 +197,8 @@ func TestValidateErrors(t *testing.T) {
 		{"gcpdns empty zone entry", "sources: [{name: g, type: gcpdns, projects: [my-project-a], zones: [\"\"]}]", "zones must not contain empty"},
 		{"gcpdns projects wrong type", "sources: [{name: g, type: gcpdns, projects: {a: b}}]", "projects"},
 		{"gcpdns include_private wrong type", "sources: [{name: g, type: gcpdns, projects: [my-project-a], include_private: sometimes}]", "include_private"},
+		{"reserved source prefix", "sources: [{name: \"ingest:prowler\", type: static}]", "reserved for assets created by the ingest API"},
+		{"reserved plugin prefix", "plugins: [{name: ext.prowler, exec: [/bin/true], tier: passive}]", "reserved for findings posted to the ingest API"},
 		{"empty notify floor", "notify: {alertmanager: {min_severity: \"\"}}", "notify.alertmanager.min_severity"},
 	}
 	for _, tc := range tests {
