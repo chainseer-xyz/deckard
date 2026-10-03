@@ -110,14 +110,21 @@ func (r *runner) checksFor(a model.Asset, tier model.Tier, name string) []check.
 }
 
 // scannable reports whether (asset, tier) may be probed right now: the asset
-// is live, its freshly computed class permits the tier, and the profile is on.
-// The returned string says why not.
+// is live, was not created by the ingest API, its freshly computed class
+// permits the tier, and the profile is on. The returned string says why not.
+//
+// Ingested assets are reported by scanners that run elsewhere; deckard stores
+// their findings but never reaches the targets, whatever class the asset is
+// labelled with (an operator may allow-list a tool's assets as owned) and
+// whatever the guard would say about the key.
 func (r *runner) scannable(a model.Asset, tier model.Tier) (model.ScopeClass, Resolved, string) {
 	class := r.Guard.Classify(a.Kind, a.Key)
 	prof := ResolveProfile(r.Config, a, tier)
 	switch {
 	case a.RemovedAt != nil:
 		return class, prof, "asset removed"
+	case model.IsIngestSource(a.Source):
+		return class, prof, "ingested asset: findings come from an external scanner, deckard never probes it"
 	case !r.allowed(a.Kind, tier, class):
 		return class, prof, fmt.Sprintf("scope: %s tier not allowed for %s %s asset", tier, class, a.Kind)
 	case !prof.Enabled:
