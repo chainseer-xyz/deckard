@@ -242,6 +242,9 @@ func (r *runner) runCheck(ctx context.Context, c check.Check, asset model.Asset,
 		findings = len(res.Findings)
 		if _, err := r.Findings.Process(cctx, asset, c.Name(), res); err != nil {
 			runErr = fmt.Errorf("process findings: %w", err)
+		} else if res.Partial {
+			// Absence proves nothing in a partial run: replacing would remove
+			// the derived children it did not see and resolve their findings.
 		} else if err := r.replaceDerived(cctx, asset.ID, c.Name(), res); err != nil {
 			runErr = fmt.Errorf("replace derived: %w", err)
 		}

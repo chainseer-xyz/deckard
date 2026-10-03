@@ -46,6 +46,29 @@ func TestRunScanPassesRelationsToReplaceDerived(t *testing.T) {
 	}
 }
 
+// A partial run proves nothing absent, so it must not garbage-collect the
+// derived children it did not see: removing them would also resolve their
+// findings, which a partial run must never do.
+func TestRunScanPartialNeverReplacesDerived(t *testing.T) {
+	a := hostAsset(1, "a.example.com")
+	c := &fakeCheck{name: "dns.dangling", tier: model.TierPassive,
+		run: func(context.Context, check.Target) (*check.Result, error) {
+			return &check.Result{Partial: true}, nil
+		}}
+	h := newHarness(nil, []model.Asset{a}, c)
+
+	if err := h.r.runScan(context.Background(), scanJob{AssetID: 1, Tier: model.TierPassive}); err != nil {
+		t.Fatal(err)
+	}
+
+	if rc := h.inv.replCalls(); len(rc) != 0 {
+		t.Fatalf("partial run called ReplaceDerived: %+v", rc)
+	}
+	if runs := h.st.runs(); len(runs) != 1 || runs[0].Error != "" {
+		t.Fatalf("expected one successful run: %+v", runs)
+	}
+}
+
 // A failed scan must never garbage-collect anything.
 func TestRunScanFailureNeverReplacesDerived(t *testing.T) {
 	a := hostAsset(1, "a.example.com")

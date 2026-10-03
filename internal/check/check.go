@@ -111,7 +111,8 @@ type Result struct {
 	// Partial marks a run that only observed a subset of what the check can
 	// report (for example a delta scan with a handful of new nuclei templates).
 	// Its findings are opened and refreshed as usual, but absence proves
-	// nothing: no misses are counted and no finding is resolved.
+	// nothing: no misses are counted, no finding is resolved and no derived
+	// asset is garbage-collected (Discovered is not applied either).
 	Partial bool
 }
 
