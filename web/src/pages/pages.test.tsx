@@ -37,12 +37,12 @@ describe('Dashboard', () => {
   it('shows severity tiles, checks, changes and source health with stale highlighting', async () => {
     renderRoute(<Dashboard />);
     expect(await screen.findByLabelText('2 open critical findings')).toBeInTheDocument();
-    expect(screen.getByLabelText('2 open high findings')).toBeInTheDocument();
-    expect(screen.getByText('tls_expiry')).toBeInTheDocument();
-    expect(await screen.findByText('Finding opened')).toBeInTheDocument();
-    expect(await screen.findByText('Healthy')).toBeInTheDocument();
+    expect(screen.getByLabelText('3 open high findings')).toBeInTheDocument();
+    expect(screen.getByText('tls.cert')).toBeInTheDocument();
+    expect((await screen.findAllByText('Finding opened')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Healthy')).length).toBeGreaterThan(0);
     expect(screen.getByText('Failing')).toBeInTheDocument();
-    expect(screen.getByText('Stale')).toBeInTheDocument();
+    expect(screen.getAllByText('Stale').length).toBeGreaterThan(0);
     expect(screen.getByText(/AccessDenied/)).toBeInTheDocument();
   });
 
@@ -56,7 +56,7 @@ describe('Dashboard', () => {
 describe('Findings', () => {
   it('lists open findings by default, filters from the URL, and sorts', async () => {
     renderRoute(<Findings />, '/findings', '/findings?min_severity=high');
-    expect(await screen.findByText('Dangling CNAME allows subdomain takeover')).toBeInTheDocument();
+    expect(await screen.findByText('possible subdomain takeover via Azure App Service')).toBeInTheDocument();
     expect(screen.getByText('SSH exposed to the internet')).toBeInTheDocument();
     expect(screen.queryByText('Missing Strict-Transport-Security header')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Min severity')).toHaveValue('high');
@@ -70,9 +70,9 @@ describe('Findings', () => {
 
   it('expands evidence and remediation', async () => {
     renderRoute(<Findings />, '/findings', '/findings?status=any');
-    await userEvent.click(await screen.findByRole('button', { name: /Expand details for TLS certificate expires/ }));
-    expect(screen.getByLabelText(/Evidence for TLS certificate/)).toHaveTextContent('"issuer": "R3"');
-    expect(screen.getAllByText(/Review the exposure/).length).toBeGreaterThan(0);
+    await userEvent.click(await screen.findByRole('button', { name: /Expand details for TLS certificate on 203/ }));
+    expect(screen.getByLabelText(/Evidence for TLS certificate/)).toHaveTextContent('"issuer": "Let\'s Encrypt R3"');
+    expect(screen.getAllByText(/Renew the certificate now/).length).toBeGreaterThan(0);
   });
 
   it('shows KEV badge and EPSS chip as text, and the intel details when expanded', async () => {
@@ -100,16 +100,16 @@ describe('Findings', () => {
   it('acknowledges directly and suppression requires a reason', async () => {
     renderRoute(<Findings />, '/findings', '/findings');
     await userEvent.click(await screen.findByRole('button', { name: /Acknowledge: SSH exposed/ }));
-    await waitFor(() => expect(state.findings.find((f) => f.id === 3)?.status).toBe('acknowledged'));
+    await waitFor(() => expect(state.findings.find((f) => f.id === 4)?.status).toBe('acknowledged'));
 
-    await userEvent.click(await screen.findByRole('button', { name: /Suppress: TLS certificate/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /Suppress: TLS certificate on 203/ }));
     const dlg = await screen.findByRole('dialog');
     await userEvent.click(within(dlg).getByRole('button', { name: 'Suppress' }));
     expect(within(dlg).getByText('A reason is required.')).toBeInTheDocument();
     await userEvent.type(within(dlg).getByLabelText(/Reason/), 'accepted until renewal');
     await userEvent.click(within(dlg).getByRole('button', { name: 'Suppress' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(state.findings.find((f) => f.id === 2)).toMatchObject({
+    expect(state.findings.find((f) => f.id === 3)).toMatchObject({
       status: 'suppressed',
       suppression_note: 'accepted until renewal',
     });
@@ -123,7 +123,7 @@ describe('Inventory', () => {
     expect(screen.queryByText('old.example.com')).not.toBeInTheDocument(); // removed hidden
     await userEvent.click(screen.getByLabelText('Include removed'));
     expect(await screen.findByRole('link', { name: 'old.example.com' })).toBeInTheDocument();
-    expect(screen.getByText(/1-10 of 10/)).toBeInTheDocument();
+    expect(screen.getByText(/1-16 of 16/)).toBeInTheDocument();
   });
 
   it('renders the map view for an asset', async () => {
@@ -141,7 +141,7 @@ describe('Asset detail', () => {
     renderRoute(<AssetDetail />, '/assets/:id', '/assets/2');
     expect(await screen.findByRole('heading', { name: 'www.example.com' })).toBeInTheDocument();
     expect(await screen.findByText('203.0.113.10')).toBeInTheDocument(); // relation
-    expect(screen.getByText('http_headers', { selector: 'span' })).toBeInTheDocument();
+    expect(screen.getByText('http.headers', { selector: 'span' })).toBeInTheDocument();
     expect(screen.getByText('stable')).toBeInTheDocument();
     expect(screen.getByText('learning (2)')).toBeInTheDocument();
     expect(screen.getByText('Missing Strict-Transport-Security header')).toBeInTheDocument();

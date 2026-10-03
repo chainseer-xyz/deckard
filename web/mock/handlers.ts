@@ -63,7 +63,7 @@ export function makeHandlers(state: MockState = { findings: d.makeFindings(), ca
         edges: d.edgesFor(id),
         observations: d.observations(id),
         baselines: d.baselines(id),
-        findings: state.findings.filter((f) => f.asset_id === id),
+        findings: state.findings.filter((f) => f.asset_id === id && f.status === 'open'),
       });
     }),
     http.post(`${B}/assets/:id/rescan`, () => HttpResponse.json({ queued: true }, { status: 202 })),
@@ -97,7 +97,12 @@ export function makeHandlers(state: MockState = { findings: d.makeFindings(), ca
     http.get(`${B}/sources`, () => HttpResponse.json({ items: d.sources, total: d.sources.length, limit: 100, offset: 0 })),
     http.post(`${B}/sources/:name/sync`, () => HttpResponse.json({ started: true }, { status: 202 })),
     http.get(`${B}/scans`, ({ request }) => HttpResponse.json(page(d.scans, new URL(request.url)))),
-    http.get(`${B}/changes`, ({ request }) => HttpResponse.json(page(d.changes, new URL(request.url)))),
+    http.get(`${B}/changes`, ({ request }) => {
+      const u = new URL(request.url);
+      // like the server: default window is the last 24h
+      const since = Date.parse(u.searchParams.get('since') ?? '') || Date.now() - 24 * 3600_000;
+      return HttpResponse.json(page(d.changes.filter((e) => Date.parse(e.at) >= since), u));
+    }),
     http.get(`${B}/events`, () => {
       // Emit a keep-alive then a synthetic change event every 10s.
       const enc = new TextEncoder();
