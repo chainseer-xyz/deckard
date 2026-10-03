@@ -32,6 +32,9 @@ const (
 	ingestExitUsage    = 1 // bad flags, unreadable or unparseable input, invalid request
 	ingestExitRejected = 2 // the server refused the request or some of its items
 	ingestExitNetwork  = 3 // the server could not be reached
+	// ingestExitIncomplete is for prowler-app: a run was posted as incomplete
+	// (or could not be built) because of an upstream condition in Prowler.
+	ingestExitIncomplete = 4
 )
 
 // ingestParsers maps --format to a parser.
@@ -57,6 +60,9 @@ const ingestUsage = `usage: deckard ingest --tool <name> --scope <scope> [--form
 Converts a scanner's native output into a POST /api/v1/ingest request and posts it.
 Parsers (--format, default: the tool name): %s.
 
+       deckard ingest prowler-app --api-url <Prowler API URL> --api-key-env <VAR> ...
+pulls the latest scans from a running Prowler App instead; see deckard ingest prowler-app --help.
+
   --incomplete   the output is not everything the tool found in the scope: nothing will be resolved
   --dry-run      print the request (never the token) after validating it locally, post nothing
 
@@ -71,6 +77,9 @@ type ingestFlags struct {
 }
 
 func runIngest(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "prowler-app" {
+		return runIngestProwlerApp(args[1:], stdout, stderr)
+	}
 	var f ingestFlags
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -232,14 +241,31 @@ func readIngestInput(path string) ([]byte, string, error) {
 // postIngest posts body, retrying network errors, 429 and 5xx (the server
 // treats a repeated body as a no-op, so retries are safe).
 func postIngest(ctx context.Context, endpoint, token string, body []byte, f ingestFlags, out, errw io.Writer) int {
-	client := &http.Client{Timeout: f.timeout}
+	status, respBody, netErr := postWithRetry(ctx, endpoint, token, body, f.timeout, f.verbose, errw)
+	if netErr != nil {
+		if errors.Is(netErr, errBadRequest) {
+			_, _ = fmt.Fprintf(errw, "deckard ingest: build request: %v\n", netErr)
+			return ingestExitUsage
+		}
+		_, _ = fmt.Fprintf(errw, "deckard ingest: could not reach deckard: %v\n", netErr)
+		return ingestExitNetwork
+	}
+	return ingestOutcome(status, respBody, f, out, errw)
+}
+
+// errBadRequest marks a request that could not even be built.
+var errBadRequest = errors.New("bad request")
+
+// postWithRetry is the transport half of postIngest: it returns the final HTTP
+// status and body, or the last network error when no answer was ever received.
+func postWithRetry(ctx context.Context, endpoint, token string, body []byte, timeout time.Duration, verbose bool, errw io.Writer) (int, []byte, error) {
+	client := &http.Client{Timeout: timeout}
 	const attempts = 4
 	var lastNet error
 	for attempt := 1; attempt <= attempts; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 		if err != nil {
-			_, _ = fmt.Fprintf(errw, "deckard ingest: build request: %v\n", err)
-			return ingestExitUsage
+			return 0, nil, fmt.Errorf("%w: %w", errBadRequest, err)
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -248,7 +274,7 @@ func postIngest(ctx context.Context, endpoint, token string, body []byte, f inge
 		resp, err := client.Do(req)
 		if err != nil {
 			lastNet = err
-			if f.verbose {
+			if verbose {
 				_, _ = fmt.Fprintf(errw, "deckard ingest: attempt %d: %v\n", attempt, err)
 			}
 			if !sleepCtx(ctx, backoff(attempt, "")) {
@@ -258,17 +284,16 @@ func postIngest(ctx context.Context, endpoint, token string, body []byte, f inge
 		}
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 		_ = resp.Body.Close()
-		if f.verbose {
+		if verbose {
 			_, _ = fmt.Fprintf(errw, "deckard ingest: attempt %d: HTTP %d in %s\n", attempt, resp.StatusCode, time.Since(start).Round(time.Millisecond))
 		}
 		retry := resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500
 		if retry && attempt < attempts && sleepCtx(ctx, backoff(attempt, resp.Header.Get("Retry-After"))) {
 			continue
 		}
-		return ingestOutcome(resp.StatusCode, respBody, f, out, errw)
+		return resp.StatusCode, respBody, nil
 	}
-	_, _ = fmt.Fprintf(errw, "deckard ingest: could not reach deckard: %v\n", lastNet)
-	return ingestExitNetwork
+	return 0, nil, lastNet
 }
 
 func ingestOutcome(status int, body []byte, f ingestFlags, out, errw io.Writer) int {
