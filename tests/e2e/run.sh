@@ -1,20 +1,23 @@
 #!/usr/bin/env zsh
 # Runs the end-to-end suite in this directory against a deployed deckard.
 #
-# Defaults target the marina-staging cluster; override with environment variables:
-#   E2E_CONTEXT   kubectl context           (marina-staging)
+# Required: E2E_CONTEXT, the kubectl context of the cluster running deckard.
+# Optional environment variables:
 #   E2E_NS        deckard namespace         (deckard)
 #   E2E_SECRET    secret holding the token  (deckard-secrets, key DECKARD_ADMIN_TOKEN)
-#   E2E_AM_NS     alertmanager namespace    (monitoring); set E2E_AM_PODS="" to skip alert tests
+#   E2E_AM_NS     alertmanager namespace    (monitoring)
+#   E2E_AM_PODS   space-separated Alertmanager pod names, ONE PER REPLICA; the alert-delivery
+#                 test is skipped when empty (Alertmanager replicas do not share alerts, so
+#                 every one must be queried)
 #   DECKARD_E2E_MUTATE=1   also run the tests that change finding state (acknowledge/reopen/rescan/sync)
 #   DECKARD_NOTIFY_MIN_SEVERITY  the configured notification floor (default info)
 # Extra arguments are passed to `go test` (for example: -run TestPagination -v).
 set -eu
-ctx=${E2E_CONTEXT:-marina-staging}
+ctx=${E2E_CONTEXT:?set E2E_CONTEXT to the kubectl context running deckard}
 ns=${E2E_NS:-deckard}
 secret=${E2E_SECRET:-deckard-secrets}
 am_ns=${E2E_AM_NS:-monitoring}
-am_pods=${E2E_AM_PODS-alertmanager-prometheus-monitoring-kube-alertmanager-0 alertmanager-prometheus-monitoring-kube-alertmanager-1 alertmanager-prometheus-monitoring-kube-alertmanager-2}
+am_pods=${E2E_AM_PODS-}
 here=${0:A:h}
 
 pids=()
