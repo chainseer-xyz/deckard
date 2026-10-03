@@ -39,6 +39,14 @@ func (e *env) stream(t *testing.T, ts *httptest.Server, path string, hdr ...stri
 		t.Fatal(err)
 	}
 	c := &sseClient{t: t, cancel: cancel, resp: resp, lines: make(chan string, 256), done: make(chan struct{})}
+	if resp.StatusCode != http.StatusOK {
+		// A refusal (429, 4xx) is a plain response the test reads itself; a reader
+		// goroutine here would race the test for the body bytes.
+		close(c.lines)
+		close(c.done)
+		t.Cleanup(func() { cancel(); _ = resp.Body.Close() })
+		return c
+	}
 	go func() {
 		defer close(c.done)
 		defer close(c.lines)
