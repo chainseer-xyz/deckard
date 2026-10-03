@@ -1,0 +1,86 @@
+{
+  "tool": "kubescape",
+  "scope": "test:scope",
+  "complete": true,
+  "observed_at": "2026-10-03T07:00:00Z",
+  "findings": [
+    {
+      "key": "C-0017:path=1/api=apps/v1/payments/Deployment/api",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "k8s://prod-example/path=1/api=apps/v1/payments/Deployment/api"
+      },
+      "title": "Deployment payments/api: Immutable container filesystem (C-0017)",
+      "description": "Kubescape control C-0017 (Immutable container filesystem) failed for Deployment payments/api in cluster prod-example.",
+      "severity": "low",
+      "remediation": "Fix: set spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem to true; set spec.template.spec.containers[1].securityContext.readOnlyRootFilesystem to true\n\nSee https://hub.armosec.io/docs/c-0017",
+      "tags": [
+        "kubescape",
+        "C-0017",
+        "Workload"
+      ],
+      "evidence": {
+        "cluster": "prod-example",
+        "control_id": "C-0017",
+        "kind": "Deployment",
+        "name": "api",
+        "namespace": "payments",
+        "resource_id": "path=1/api=apps/v1/payments/Deployment/api"
+      }
+    },
+    {
+      "key": "C-0035:rbac.authorization.k8s.io/v1//ClusterRoleBinding/ci-deployer",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "k8s://prod-example/rbac.authorization.k8s.io/v1//ClusterRoleBinding/ci-deployer"
+      },
+      "title": "ClusterRoleBinding ci-deployer: Administrative Roles (C-0035)",
+      "description": "Kubescape control C-0035 (Administrative Roles) failed for ClusterRoleBinding ci-deployer in cluster prod-example.\n\nFailed paths: roleRef.name, subjects[0]",
+      "severity": "medium",
+      "remediation": "See https://hub.armosec.io/docs/c-0035",
+      "tags": [
+        "kubescape",
+        "C-0035",
+        "Access control"
+      ],
+      "evidence": {
+        "cluster": "prod-example",
+        "control_id": "C-0035",
+        "failed_paths": [
+          "roleRef.name",
+          "subjects[0]"
+        ],
+        "kind": "ClusterRoleBinding",
+        "name": "ci-deployer",
+        "resource_id": "rbac.authorization.k8s.io/v1//ClusterRoleBinding/ci-deployer"
+      }
+    },
+    {
+      "key": "C-0057:path=2/api=apps/v1/kube-system/DaemonSet/node-agent",
+      "asset": {
+        "kind": "cloud_resource",
+        "key": "k8s://prod-example/path=2/api=apps/v1/kube-system/DaemonSet/node-agent"
+      },
+      "title": "DaemonSet kube-system/node-agent: Privileged container (C-0057)",
+      "description": "Kubescape control C-0057 (Privileged container) failed for DaemonSet kube-system/node-agent in cluster prod-example.\n\nFailed paths: spec.template.spec.containers[0].securityContext.privileged",
+      "severity": "high",
+      "remediation": "See https://hub.armosec.io/docs/c-0057",
+      "tags": [
+        "kubescape",
+        "C-0057",
+        "Workload"
+      ],
+      "evidence": {
+        "cluster": "prod-example",
+        "control_id": "C-0057",
+        "failed_paths": [
+          "spec.template.spec.containers[0].securityContext.privileged"
+        ],
+        "kind": "DaemonSet",
+        "name": "node-agent",
+        "namespace": "kube-system",
+        "resource_id": "path=2/api=apps/v1/kube-system/DaemonSet/node-agent"
+      }
+    }
+  ]
+}
