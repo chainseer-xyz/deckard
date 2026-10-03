@@ -149,6 +149,10 @@ metrics:
   dashboard:
     enabled: false
     label: grafana_dashboard
+    # -- Annotations on the dashboard ConfigMap. The Grafana sidecar can place the
+    # dashboard in a folder from an annotation, e.g. { grafana_folder: Security }
+    # (the annotation name is the sidecar's `folderAnnotation` setting).
+    annotations: {}
 
 persistence:
   # -- Volume for custom nuclei templates / wordlists / plugins and the

@@ -90,6 +90,10 @@ expect_error "worker+worker role rejected" "remove \"worker\" from roles" --set 
 dash=$(helm template t deckard --set database.cnpg.enabled=true --set metrics.dashboard.enabled=true)
 check "dashboard configmap" "grafana_dashboard: \"1\"" "$dash"
 check "dashboard json embedded" "deckard-surface" "$dash"
+absent "dashboard has no annotations by default" "grafana_folder" "$dash"
+dashf=$(helm template t deckard --set database.cnpg.enabled=true --set metrics.dashboard.enabled=true \
+  --set metrics.dashboard.annotations.grafana_folder=Security)
+check "dashboard folder annotation" "grafana_folder: Security" "$dashf"
 
 # Refreshed reference data lives under /var/lib/deckard: a volume is always mounted
 # (emptyDir without persistence, the PVC with it) so the root FS can stay read-only.
