@@ -83,3 +83,9 @@ func blockedReason(a netip.Addr) string {
 	}
 	return ""
 }
+
+// IsPublicAddr reports whether a is ordinary public unicast: none of the
+// ranges the client refuses to dial (private, loopback, link-local, CGNAT,
+// documentation, reserved, cloud metadata, ...). Checks use it to skip the
+// addresses a third-party service cannot know anything about.
+func IsPublicAddr(a netip.Addr) bool { return blockedReason(a) == "" }

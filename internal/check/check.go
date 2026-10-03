@@ -158,6 +158,17 @@ type DefaultTimeouter interface {
 	DefaultTimeout() time.Duration
 }
 
+// WantsBaselines is an optional Check interface. A check returning check names
+// receives those other checks' learned baselines for the same asset in
+// Target.Baseline (keyed by check name, absent when none was learned yet), next
+// to its own. The data is a check's last observation as the baseline machinery
+// keeps it, so a check can compare what it sees with what another check
+// observed, for example a third-party view of open ports against net.ports.
+// Keys starting with "_" are bookkeeping and must be ignored.
+type WantsBaselines interface {
+	BaselineChecks() []string
+}
+
 // DefaultIntervaler is an optional Check interface for checks whose natural
 // cadence differs from their tier's (slow-moving registry data, for
 // example). The interval replaces the tier and asset-group interval;
