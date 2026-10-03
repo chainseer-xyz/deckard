@@ -499,7 +499,7 @@ func TestRescanAndSync(t *testing.T) {
 		want int
 	}{
 		{api.ErrNotSupported, 501}, {api.ErrUnknownSource, 404}, {store.ErrNotFound, 404},
-		{api.ErrBusy, 409}, {errors.New("kaboom"), 500},
+		{api.ErrBusy, 409}, {api.ErrNotScannable, 409}, {errors.New("kaboom"), 500},
 	} {
 		e.actions.syncErr, e.actions.rescanErr = tt.err, tt.err
 		if r := e.do("POST", "/api/v1/sources/x/sync", ""); r.Code != tt.want {

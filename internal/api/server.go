@@ -31,6 +31,7 @@ var (
 	ErrNotSupported  = errors.New("action not supported")
 	ErrUnknownSource = errors.New("unknown source")
 	ErrBusy          = errors.New("already in progress")
+	ErrNotScannable  = errors.New("asset has no applicable checks")
 )
 
 // Actions are operator-triggered operations the API delegates to the engine.

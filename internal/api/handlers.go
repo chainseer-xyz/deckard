@@ -520,6 +520,8 @@ func (s *Server) actionError(w http.ResponseWriter, r *http.Request, err error) 
 		writeError(w, http.StatusNotFound, "not_found", "not found")
 	case errors.Is(err, ErrBusy):
 		writeError(w, http.StatusConflict, "busy", "already in progress")
+	case errors.Is(err, ErrNotScannable):
+		writeError(w, http.StatusConflict, "not_scannable", "asset has no applicable, in-scope, enabled checks to run")
 	default:
 		s.storeError(w, r, err)
 	}
