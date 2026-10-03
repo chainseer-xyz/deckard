@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useAllFindings, useFindingTotal, useStats } from '../api/hooks';
 import { SEVERITIES, STATUSES } from '../api/types';
 import type { Finding, FindingStatus, Severity } from '../api/types';
+import { FindingDrawer } from '../components/FindingDrawer';
 import { FindingGroups } from '../components/FindingGroups';
 import { FindingsTable } from '../components/FindingsTable';
 import { Card, ErrorBox, Loading, PageHeader, Pagination } from '../components/ui';
@@ -48,6 +49,11 @@ export default function Findings() {
     n.set(DRAWER_PARAM, String(f.id));
     setSp(n);
   };
+  const closeDrawer = () => {
+    const n = new URLSearchParams(sp);
+    n.delete(DRAWER_PARAM);
+    setSp(n, { replace: true });
+  };
 
   // search box is debounced into the URL
   const [text, setText] = useState(filter.q);
@@ -75,6 +81,7 @@ export default function Findings() {
   );
   const checks = Object.keys(stats.data?.findings_by_check ?? {});
   const sources = Object.keys(stats.data?.assets_by_source ?? {});
+  const seed = drawerId ? q.data?.find((f) => f.id === drawerId) : undefined;
   const showingAll = filter.minSeverity === 'info' && !filter.severity;
 
   return (
@@ -218,6 +225,8 @@ export default function Findings() {
             </>
           ))}
       </Card>
+
+      {drawerId && <FindingDrawer id={drawerId} seed={seed} onClose={closeDrawer} />}
     </>
   );
 }

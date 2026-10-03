@@ -253,6 +253,142 @@ describe('Findings', () => {
   });
 });
 
+describe('Finding drawer', () => {
+  it('opens from a row with title, description, remediation, tags and a readable evidence table', async () => {
+    renderRoute(<Findings />, '/findings');
+    await userEvent.click(await screen.findByRole('button', { name: 'possible subdomain takeover via Azure App Service' }));
+    const dlg = await screen.findByRole('dialog', { name: 'Finding details' });
+    expect(screen.getByTestId('location')).toHaveTextContent('finding=1');
+    expect(within(dlg).getByRole('heading', { name: 'possible subdomain takeover via Azure App Service' })).toBeInTheDocument();
+    expect(within(dlg).getByText('critical')).toBeInTheDocument();
+    expect(within(dlg).getByText(/An attacker could register that resource/)).toBeInTheDocument();
+    expect(within(dlg).getByText(/Prefer deleting the DNS record before decommissioning/)).toBeInTheDocument();
+    expect(within(dlg).getByText('azure-app-service')).toBeInTheDocument();
+    const ev = within(dlg).getByRole('table', { name: /Evidence for possible subdomain takeover/ });
+    expect(within(ev).getByRole('rowheader', { name: 'Provider' })).toBeInTheDocument();
+    expect(within(ev).getByText('Azure App Service')).toBeInTheDocument();
+    expect(ev.textContent).not.toContain('{');
+  });
+
+  it('closes with Escape and the close button, restoring the URL', async () => {
+    renderRoute(<Findings />, '/findings', '/findings?finding=3');
+    const dlg = await screen.findByRole('dialog', { name: 'Finding details' });
+    expect(within(dlg).getByRole('button', { name: 'Close' })).toHaveFocus();
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByTestId('location')).not.toHaveTextContent('finding=');
+  });
+
+  it('opens a finding straight from a link, even one outside the list filters', async () => {
+    renderRoute(<Findings />, '/findings', '/findings?finding=13');
+    const dlg = await screen.findByRole('dialog', { name: 'Finding details' });
+    expect(await within(dlg).findByRole('heading', { name: 'Unexpected port 8080 open' })).toBeInTheDocument();
+    expect(within(dlg).getByText('Resolved')).toBeInTheDocument();
+    expect(within(dlg).getByText('Resolved findings cannot be changed.')).toBeInTheDocument();
+  });
+
+  it('renders expiry as absolute and relative time and ports as chips', async () => {
+    renderRoute(<Findings />, '/findings', '/findings?finding=3');
+    const ev = await screen.findByRole('table', { name: /Evidence for TLS certificate on 203/ });
+    expect(within(ev).getByRole('rowheader', { name: 'Expires' })).toBeInTheDocument();
+    expect(within(ev).getByText(/\(in 6d\)/)).toBeInTheDocument();
+    expect(within(ev).getByText(/UTC/)).toBeInTheDocument();
+    expect(within(ev).getByRole('list', { name: 'Ports' })).toHaveTextContent('443');
+    expect(within(ev).getByRole('rowheader', { name: 'Served by' })).toBeInTheDocument();
+  });
+
+  it('shows KEV and EPSS intelligence', async () => {
+    renderRoute(<Findings />, '/findings', '/findings?finding=5');
+    const intel = await screen.findByLabelText('Exploit intelligence');
+    expect(intel).toHaveTextContent('Known exploited (CISA KEV, added 2021-12-10)');
+    expect(intel).toHaveTextContent('used in ransomware campaigns');
+    expect(intel).toHaveTextContent('Required action: Apply updates per vendor instructions.');
+    expect(intel).toHaveTextContent('EPSS 94.4%');
+    expect(intel).toHaveTextContent('(99.9th percentile)');
+  });
+
+  it('links to the asset, other findings on it, and the same check in the same zone', async () => {
+    renderRoute(<Findings />, '/findings', '/findings?finding=1');
+    const dlg = await screen.findByRole('dialog', { name: 'Finding details' });
+    expect(await within(dlg).findByRole('link', { name: /Open asset promo.example.com/ })).toHaveAttribute('href', '/assets/11');
+    const other = within(dlg).getByRole('link', { name: 'Other findings on this asset' });
+    expect(other).toHaveAttribute('href', '/findings?asset_id=11&min_severity=info');
+    const same = within(dlg).getByRole('link', { name: 'Same check, same zone' });
+    expect(same).toHaveAttribute('href', '/findings?check=dns.takeover&zone=example.com&min_severity=info');
+    await waitFor(() => expect(within(dlg).getByText('(2 open)')).toBeInTheDocument()); // asset 11 has 2 open
+  });
+
+  it('acknowledges directly from the drawer', async () => {
+    renderRoute(<Findings />, '/findings', '/findings?finding=4');
+    const dlg = await screen.findByRole('dialog', { name: 'Finding details' });
+    await userEvent.click(await within(dlg).findByRole('button', { name: 'Acknowledge' }));
+    await waitFor(() => expect(state.findings.find((f) => f.id === 4)?.status).toBe('acknowledged'));
+    expect(await within(dlg).findByRole('button', { name: 'Reopen' })).toBeInTheDocument();
+  });
+
+  it('suppress needs a reason; false-positive and reopen work', async () => {
+    renderRoute(<Findings />, '/findings', '/findings?finding=3');
+    const drawer = await screen.findByRole('dialog', { name: 'Finding details' });
+    await userEvent.click(await within(drawer).findByRole('button', { name: 'Suppress' }));
+    const dlg = (await screen.findAllByRole('dialog')).find((d) => d !== drawer) as HTMLElement;
+    await userEvent.click(within(dlg).getByRole('button', { name: 'Suppress' }));
+    expect(within(dlg).getByText('A reason is required.')).toBeInTheDocument();
+    await userEvent.type(within(dlg).getByLabelText(/Reason/), 'accepted until renewal');
+    await userEvent.click(within(dlg).getByRole('button', { name: 'Suppress' }));
+    await waitFor(() => expect(state.findings.find((f) => f.id === 3)).toMatchObject({ status: 'suppressed', suppression_note: 'accepted until renewal' }));
+    await userEvent.click(await within(drawer).findByRole('button', { name: 'Reopen' }));
+    await waitFor(() => expect(state.findings.find((f) => f.id === 3)?.status).toBe('open'));
+
+    await userEvent.click(await within(drawer).findByRole('button', { name: 'False positive' }));
+    const fp = (await screen.findAllByRole('dialog')).find((d) => d !== drawer) as HTMLElement;
+    await userEvent.type(within(fp).getByLabelText(/Reason/), 'scanner artefact');
+    await userEvent.click(within(fp).getByRole('button', { name: 'Mark false positive' }));
+    await waitFor(() => expect(state.findings.find((f) => f.id === 3)?.status).toBe('false_positive'));
+  });
+
+  it('Escape inside the suppress dialog closes only that dialog', async () => {
+    renderRoute(<Findings />, '/findings', '/findings?finding=6');
+    const drawer = await screen.findByRole('dialog', { name: 'Finding details' });
+    await userEvent.click(await within(drawer).findByRole('button', { name: 'Suppress' }));
+    await screen.findByRole('dialog', { name: 'Suppress finding' });
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Suppress finding' })).not.toBeInTheDocument());
+    expect(screen.getByRole('dialog', { name: 'Finding details' })).toBeInTheDocument();
+  });
+
+  it('queues a rescan of the asset', async () => {
+    let rescanned = 0;
+    server.use(http.post('*/api/v1/assets/11/rescan', () => { rescanned = 11; return HttpResponse.json({}, { status: 202 }); }));
+    renderRoute(<Findings />, '/findings', '/findings?finding=1');
+    await userEvent.click(await screen.findByRole('button', { name: /Rescan asset/ }));
+    await waitFor(() => expect(rescanned).toBe(11));
+    expect(await screen.findByText('Rescan queued for promo.example.com.')).toBeInTheDocument();
+  });
+
+  it('copies a ticket-ready markdown summary', async () => {
+    const user = userEvent.setup();
+    renderRoute(<Findings />, '/findings', '/findings?finding=1');
+    await user.click(await screen.findByRole('button', { name: /Copy as markdown/ }));
+    expect(await screen.findByText('Copied to clipboard.')).toBeInTheDocument();
+    const md = await navigator.clipboard.readText();
+    expect(md).toContain('## [CRITICAL] possible subdomain takeover via Azure App Service');
+    expect(md).toContain('- **Asset:** `promo.example.com`');
+    expect(md).toContain('### Remediation');
+    expect(md).toContain('- `cname`: promo-site.azurewebsites.net');
+    expect(md).toContain('/findings?finding=1');
+  });
+
+  it('disables write actions for read-only users but still allows copy', async () => {
+    state.canWrite = false;
+    renderRoute(<Findings />, '/findings', '/findings?finding=6');
+    const dlg = await screen.findByRole('dialog', { name: 'Finding details' });
+    expect(await within(dlg).findByRole('button', { name: 'Acknowledge' })).toBeDisabled();
+    expect(within(dlg).getByRole('button', { name: /Rescan asset/ })).toBeDisabled();
+    expect(within(dlg).getByRole('button', { name: /Copy as markdown/ })).toBeEnabled();
+    state.canWrite = true;
+  });
+});
+
 describe('Inventory', () => {
   it('lists, filters and paginates assets', async () => {
     renderRoute(<Inventory />, '/inventory');
