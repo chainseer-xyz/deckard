@@ -2,6 +2,7 @@ package dangling
 
 import (
 	"context"
+	"net"
 	"testing"
 
 	"github.com/chainseer-xyz/deckard/internal/check"
@@ -170,6 +171,31 @@ func TestDNSTransientServfailIsNotAFinding(t *testing.T) {
 		}
 		if len(res.Observations) != 1 || res.Observations[0].Data["dns_unknown"] != true || res.Observations[0].Data["cname_state"] != "unknown" {
 			t.Errorf("%s: observation: %+v", tc.name, res.Observations)
+		}
+		// Unknown is not clean: a clean run would count a miss against an
+		// open finding, so a resolver outage would resolve it.
+		if !res.Partial {
+			t.Errorf("%s: unknown DNS outcome reported as a complete run", tc.name)
+		}
+	}
+	ns := runDNS(t, checktest.NewDNS().Add("sub.example.com. 60 IN NS ns1.flaky.example.net.").Servfail("ns1.flaky.example.net"), "sub.example.com")
+	if !ns.Partial {
+		t.Errorf("unknown NS outcome reported as a complete run: %+v", ns.Observations)
+	}
+}
+
+func TestRunResolverErrorsArePartial(t *testing.T) {
+	servfail := &net.DNSError{Err: "server misbehaving", Name: "x", IsTemporary: true}
+	for name, r := range map[string]*checktest.Resolver{
+		"cname lookup fails": {Errs: map[string]error{"blog.example.com": servfail}},
+		"target lookup fails": {CNAMEs: map[string]string{"blog.example.com": "t.example.net"},
+			Errs: map[string]error{"t.example.net": servfail}},
+		"ns host lookup fails": {Hosts: map[string][]string{"blog.example.com": {"192.0.2.1"}},
+			NSs: map[string][]string{"blog.example.com": {"ns1.flaky.example.net"}}, Errs: map[string]error{"ns1.flaky.example.net": servfail}},
+	} {
+		_, _, out := run(t, r, "blog.example.com")
+		if res := out.(*check.Result); !res.Partial || len(res.Findings) != 0 {
+			t.Errorf("%s: unknown outcome reported as a clean run: %+v", name, res)
 		}
 	}
 }

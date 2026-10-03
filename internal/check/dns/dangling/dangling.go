@@ -97,6 +97,7 @@ func (c *Check) Run(ctx context.Context, t check.Target) (*check.Result, error) 
 	if t.DNS != nil {
 		c.runDNS(ctx, t, res, obs, cfg, host, zones)
 		res.Observations = append(res.Observations, model.ObservationInput{Check: Name, Data: obs})
+		res.Partial = unknown(obs)
 		return res, nil
 	}
 
@@ -118,7 +119,20 @@ func (c *Check) Run(ctx context.Context, t check.Target) (*check.Result, error) 
 		c.nsRun(ctx, t, res, obs, host)
 	}
 	res.Observations = append(res.Observations, model.ObservationInput{Check: Name, Data: obs})
+	res.Partial = unknown(obs)
 	return res, nil
+}
+
+// unknown reports whether a lookup ended in SERVFAIL, a timeout or another
+// non-NXDOMAIN error. Such a run is partial: it saw nothing, so it must not
+// count a miss against (and eventually resolve) an open finding.
+func unknown(obs map[string]any) bool {
+	for _, k := range []string{"dns_unknown", "cname_error", "final_error", "ns_error"} {
+		if _, ok := obs[k]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Check) cnameRun(ctx context.Context, t check.Target, res *check.Result, obs map[string]any, host, final string, zones []string) {
@@ -166,6 +180,7 @@ func (c *Check) nsRun(ctx context.Context, t check.Target, res *check.Result, ob
 			status[ns] = "nxdomain"
 		case err != nil:
 			status[ns] = "error"
+			obs["dns_unknown"] = true
 		default:
 			status[ns] = "ok"
 		}
