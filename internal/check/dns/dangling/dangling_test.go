@@ -229,3 +229,20 @@ func TestDNSNSDelegation(t *testing.T) {
 		t.Errorf("%+v", st)
 	}
 }
+
+func TestClassifyCNAMEServiceLabelIsLowNotTakeover(t *testing.T) {
+	for _, host := range []string{"sel._domainkey.example.com", "_domainconnect.example.com", "_acme-challenge.www.example.com"} {
+		for _, owned := range []bool{false, true} {
+			f := ClassifyCNAME(host, "gone.example.net", true, owned)
+			if f == nil || f.Severity != model.SeverityLow || f.Key != "cname-nxdomain-service" {
+				t.Fatalf("%s owned=%v: %+v", host, owned, f)
+			}
+		}
+	}
+	if f := ClassifyCNAME("www.example.com", "gone.example.net", true, false); f == nil || f.Severity != model.SeverityHigh {
+		t.Fatalf("a web CNAME must stay high: %+v", f)
+	}
+	if f := ClassifyCNAME("a_b.example.com", "gone.example.net", true, false); f == nil || f.Severity != model.SeverityHigh {
+		t.Fatalf("an underscore inside a label is not a service label: %+v", f)
+	}
+}
