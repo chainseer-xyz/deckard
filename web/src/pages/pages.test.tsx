@@ -390,13 +390,75 @@ describe('Finding drawer', () => {
 });
 
 describe('Inventory', () => {
-  it('lists, filters and paginates assets', async () => {
+  it('lists, filters and paginates assets, hiding removed ones by default', async () => {
     renderRoute(<Inventory />, '/inventory');
     expect(await screen.findByRole('link', { name: 'www.example.com' })).toBeInTheDocument();
     expect(screen.queryByText('old.example.com')).not.toBeInTheDocument(); // removed hidden
     await userEvent.click(screen.getByLabelText('Include removed'));
     expect(await screen.findByRole('link', { name: 'old.example.com' })).toBeInTheDocument();
     expect(screen.getByText(/1-16 of 16/)).toBeInTheDocument();
+    expect(screen.getByTestId('location')).toHaveTextContent('include_removed=1');
+  });
+
+  it('shows findings count with worst severity and last scanned per asset', async () => {
+    renderRoute(<Inventory />, '/inventory');
+    const promo = (await screen.findByRole('link', { name: 'promo.example.com' })).closest('tr') as HTMLElement;
+    const badge = await within(promo).findByLabelText('2 open findings on promo.example.com, worst critical');
+    expect(badge).toHaveAttribute('href', '/findings?asset_id=11&min_severity=info');
+    expect(within(badge).getByText('critical')).toBeInTheDocument(); // text, not colour alone
+    const clean = screen.getByRole('link', { name: 'example.org' }).closest('tr') as HTMLElement;
+    await waitFor(() => expect(within(clean).getAllByRole('cell')[5]).toHaveTextContent('0'));
+    // asset 1 was scanned 1m ago in the mock runs, asset 11 never
+    const zone = screen.getByRole('link', { name: 'example.com' }).closest('tr') as HTMLElement;
+    expect(within(zone).getAllByRole('cell')[6]).toHaveTextContent('1m ago');
+    expect(within(promo).getAllByRole('cell')[6]).toHaveTextContent('-');
+  });
+
+  it('reads kind, scope, source, zone and search from the URL', async () => {
+    renderRoute(<Inventory />, '/inventory', '/inventory?kind=hostname&scope=owned&source=cloudflare&zone=example.org&q=shop');
+    expect(await screen.findByRole('link', { name: 'shop.example.org' })).toBeInTheDocument();
+    expect(screen.getAllByRole('row')).toHaveLength(2);
+    expect(screen.getByLabelText('Kind')).toHaveValue('hostname');
+    expect(screen.getByLabelText('Scope')).toHaveValue('owned');
+    expect(screen.getByLabelText('Source')).toHaveValue('cloudflare');
+    expect(screen.getByLabelText('Zone')).toHaveValue('example.org');
+    expect(screen.getByLabelText('Search')).toHaveValue('shop');
+  });
+
+  it('writes filter changes to the URL', async () => {
+    renderRoute(<Inventory />, '/inventory');
+    await screen.findByRole('link', { name: 'www.example.com' });
+    await userEvent.selectOptions(screen.getByLabelText('Kind'), 'ip');
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('kind=ip'));
+    await userEvent.selectOptions(screen.getByLabelText('Scope'), 'external');
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('scope=external'));
+    expect(await screen.findByRole('link', { name: '198.51.100.7' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '203.0.113.10' })).not.toBeInTheDocument();
+  });
+
+  it('"has open findings >= medium" keeps only assets with needles, worst first, and persists in the URL', async () => {
+    renderRoute(<Inventory />, '/inventory');
+    await screen.findByRole('link', { name: 'www.example.com' });
+    await userEvent.click(screen.getByLabelText('Has open findings ≥ medium'));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('needles=1'));
+    await waitFor(() => expect(screen.queryByRole('link', { name: 'example.org' })).not.toBeInTheDocument()); // no findings
+    const keys = screen.getAllByRole('row').slice(1).map((r) => within(r).getAllByRole('link')[0]?.textContent);
+    // both critical; www has more open findings (3 vs 2), so it leads
+    expect(keys.slice(0, 2)).toEqual(['www.example.com', 'promo.example.com']);
+    expect(keys).toContain('api.example.com'); // medium only, sorts after the criticals and highs
+    expect(keys).toContain('staging.example.com');
+    expect(keys).not.toContain('_domainkey.example.com'); // only a low finding
+  });
+
+  it('applies the needles toggle straight from the URL', async () => {
+    renderRoute(<Inventory />, '/inventory', '/inventory?needles=1&scope=owned');
+    expect(await screen.findByRole('link', { name: 'promo.example.com' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Has open findings ≥ medium')).toBeChecked();
+  });
+
+  it('says what to do when the toggle matches nothing', async () => {
+    renderRoute(<Inventory />, '/inventory', '/inventory?needles=1&zone=nope.example');
+    expect(await screen.findByText(/No assets with an open finding at medium or above/)).toBeInTheDocument();
   });
 
   it('renders the map view for an asset', async () => {
