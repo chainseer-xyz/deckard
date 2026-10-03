@@ -3,7 +3,7 @@ deckard {{ .Chart.AppVersion }} installed as {{ include "deckard.fullname" . }}.
 {{- if not .Values.config.sources }}
 
 WARNING: config.sources is empty, so deckard has nothing to discover. Add at least
-one source (cloudflare, route53, kubernetes or static) to your values.
+one source (cloudflare, route53, gcpdns, kubernetes or static) to your values.
 {{- end }}
 {{- if not .Values.config.notify.alertmanager.urls }}
 

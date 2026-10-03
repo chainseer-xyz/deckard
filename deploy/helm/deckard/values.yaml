@@ -49,6 +49,7 @@ config:
   sources: []
   #  - { name: cloudflare, type: cloudflare, token_env: CF_API_TOKEN }
   #  - { name: aws, type: route53, region: us-east-1 }
+  #  - { name: gcp, type: gcpdns, projects: [my-project-a] }  # Application Default Credentials (see serviceAccount.annotations)
   #  - { name: this-cluster, type: kubernetes, in_cluster: true }
   scope:
     include: []
@@ -120,7 +121,9 @@ secretEnv: {}
 serviceAccount:
   create: true
   name: ""
-  annotations: {}  # e.g. eks.amazonaws.com/role-arn for the route53 source (IRSA)
+  # e.g. eks.amazonaws.com/role-arn for the route53 source (IRSA), or
+  # iam.gke.io/gcp-service-account for the gcpdns source (GKE Workload Identity)
+  annotations: {}
 
 # -- ClusterRole letting the kubernetes source list Services, Nodes, Ingresses and Gateway API routes.
 rbac:

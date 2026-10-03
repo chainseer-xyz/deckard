@@ -1,6 +1,6 @@
 // Package registry builds a source.Source from its config entry. Source types
 // register a Constructor under their type name; cloudflare and static are
-// built in. Other packages (route53, kubernetes) call Register from their own
+// built in. Other packages (route53, gcpdns, kubernetes) call Register from their own
 // init or from the binary's wiring code, which keeps this package free of
 // their dependencies.
 package registry

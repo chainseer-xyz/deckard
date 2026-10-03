@@ -115,8 +115,9 @@ traffic to your assets is separate and governed by the scope guard):
 | `api.first.org` | EPSS scores | `vulnintel.*` enabled |
 | `crt.sh` | Certificate Transparency discovery | `expansion.ct_logs` is on |
 
-Plus whatever your configured sources use (Cloudflare API, AWS APIs, your
-Kubernetes API). If you restrict egress with a NetworkPolicy or proxy, allow
+Plus whatever your configured sources use (Cloudflare API, AWS APIs, Google
+Cloud DNS at `dns.googleapis.com` with tokens from `oauth2.googleapis.com` or the
+GKE metadata server, your Kubernetes API). If you restrict egress with a NetworkPolicy or proxy, allow
 exactly the rows that match the features you left on.
 
 ## Running air-gapped

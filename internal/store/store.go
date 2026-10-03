@@ -34,7 +34,7 @@ type InventoryDiff struct {
 
 // IsDerivedSource reports whether an asset source label marks a derived asset,
 // one discovered by a check, port scan or expansion rather than reported by an
-// inventory source (cloudflare, route53, aws, kubernetes, static). Derived
+// inventory source (cloudflare, route53, gcpdns, aws, kubernetes, static). Derived
 // assets may be claimed by a source snapshot, merge attrs per key and are
 // garbage-collected by ReplaceDerived; source-owned assets are only changed
 // or removed by their source's snapshot.
