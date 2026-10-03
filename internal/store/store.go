@@ -209,7 +209,8 @@ type Store interface {
 	// (assetID, origin) that are absent now lose that registration; a derived
 	// child no (parent, origin) observes any more is marked removed, its
 	// relations are deleted and its findings resolved. Source-owned (claimed)
-	// children are never removed here. Engine contract: for checks whose
+	// children are never removed here. A removed parent is a no-op (a scan
+	// that finished after the removal). Engine contract: for checks whose
 	// Result.Discovered are children of the scanned asset (net.ports,
 	// http.probe, ...) call ReplaceDerived with assetID = the scanned asset and
 	// origin = the check name on every successful run, even when nothing was
