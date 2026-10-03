@@ -90,6 +90,7 @@ metadata:
     {{- end }}
 spec:
   serviceAccountName: {{ include "deckard.serviceAccountName" $root }}
+  terminationGracePeriodSeconds: {{ $root.Values.terminationGracePeriodSeconds }}
   {{- with $root.Values.imagePullSecrets }}
   imagePullSecrets: {{- toYaml . | nindent 4 }}
   {{- end }}

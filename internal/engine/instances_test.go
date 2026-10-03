@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 
+	"github.com/chainseer-xyz/deckard/internal/check"
 	"github.com/chainseer-xyz/deckard/internal/model"
 )
 
@@ -288,5 +289,61 @@ func TestPruneInstances(t *testing.T) {
 	}
 	if strings.Join(left, ",") != "gone_recently" {
 		t.Errorf("left %v", left)
+	}
+}
+
+// ctxCheck blocks until its context is cancelled, like a scan cut off by
+// shutdown.
+type ctxCheck struct{ started chan struct{} }
+
+func (c *ctxCheck) Name() string             { return "p.block" }
+func (c *ctxCheck) Tier() model.Tier         { return model.TierPassive }
+func (c *ctxCheck) Applies(model.Asset) bool { return true }
+func (c *ctxCheck) Run(ctx context.Context, _ check.Target) (*check.Result, error) {
+	select {
+	case c.started <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// TestStopPastDeadlineLeavesNothingRunning: when the drain deadline passes,
+// Stop cancels in-flight jobs and River records them before Stop returns, so
+// a shutdown that completes inside the pod's grace period orphans nothing, and
+// the instance deregisters.
+func TestStopPastDeadlineLeavesNothingRunning(t *testing.T) {
+	chk := &ctxCheck{started: make(chan struct{}, 1)}
+	e, _, _, _, _ := integrationSetup(t, []string{RoleScheduler, RoleWorker}, chk, []model.AssetInput{
+		{Kind: model.KindHostname, Key: "app.example.com", Source: "fake", Zone: "example.com"},
+	})
+	ctx := context.Background()
+	if err := e.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-chk.started:
+	case <-time.After(45 * time.Second):
+		_ = e.Stop(ctx)
+		t.Fatal("scan never started")
+	}
+
+	sctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancel()
+	began := time.Now()
+	if err := e.Stop(sctx); err == nil {
+		t.Error("Stop past its deadline should report the cancelled jobs")
+	}
+	if took := time.Since(began); took > 200*time.Millisecond+StopOverrun {
+		t.Errorf("Stop took %v, budget is the deadline + %v", took, StopOverrun)
+	}
+	var running, registered int
+	if err := e.d.Pool.QueryRow(ctx, `SELECT
+		(SELECT count(*) FROM river_job WHERE state = 'running'),
+		(SELECT count(*) FROM deckard_instances WHERE client_id = $1)`, e.clientID).Scan(&running, &registered); err != nil {
+		t.Fatal(err)
+	}
+	if running != 0 || registered != 0 {
+		t.Errorf("after Stop: %d jobs running, instance registered=%d; want 0 and 0", running, registered)
 	}
 }

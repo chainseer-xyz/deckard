@@ -162,6 +162,16 @@ func New(d Deps, opts ...Option) (*Engine, error) {
 	return e, nil
 }
 
+// stopCancelWindow is how long Stop waits for cancelled jobs to return once
+// the graceful drain deadline has passed.
+const stopCancelWindow = 10 * time.Second
+
+// StopOverrun is the most Stop can run past its context's deadline: the cancel
+// window plus deregistering the instance. Whoever owns the process lifetime
+// (the pod's terminationGracePeriodSeconds) must allow the drain deadline plus
+// this, or the process is killed mid-cancel and its jobs stay running.
+const StopOverrun = stopCancelWindow + deregisterTimeout
+
 // rescueMargin is how far River's RescueStuckJobsAfter sits above the longest
 // worker timeout. River rescues a job that has been running that long even if
 // its client is alive, so the value must exceed every worker's Timeout:
@@ -371,7 +381,7 @@ func (e *Engine) Stop(ctx context.Context) error {
 	<-e.instDone
 	err := e.client.Stop(ctx)
 	if err != nil && ctx.Err() != nil {
-		cctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		cctx, cancel := context.WithTimeout(context.Background(), stopCancelWindow)
 		defer cancel()
 		if cerr := e.client.StopAndCancel(cctx); cerr != nil {
 			return errors.Join(err, cerr)
