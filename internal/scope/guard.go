@@ -6,14 +6,18 @@
 package scope
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/netip"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"golang.org/x/net/idna"
 	"golang.org/x/net/publicsuffix"
@@ -95,6 +99,18 @@ func NewGuard(cfg config.ScopeConfig, opts ...Option) (*Guard, error) {
 	}
 	if g.log == nil {
 		g.log = slog.Default()
+	}
+	if len(cfg.Resolvers) > 0 {
+		servers, err := normalizeResolvers(cfg.Resolvers)
+		if err != nil {
+			return nil, fmt.Errorf("scope.resolvers: %w", err)
+		}
+		if g.resolver == nil {
+			g.resolver = stdResolver{resolverVia(servers)}
+		}
+		if g.dnsq == nil {
+			g.dnsq = dnsx.New(dnsx.WithServers(servers...))
+		}
 	}
 	if g.resolver == nil {
 		g.resolver = stdResolver{net.DefaultResolver}
@@ -504,4 +520,49 @@ func overlapsNeverOwned(p netip.Prefix) bool {
 		}
 	}
 	return false
+}
+
+// normalizeResolvers validates scope.resolvers: each entry must be an IP
+// literal with an optional port (default 53). Hostnames are refused because
+// resolving them would need a resolver first.
+func normalizeResolvers(in []string) ([]string, error) {
+	out := make([]string, 0, len(in))
+	for _, e := range in {
+		e = strings.TrimSpace(e)
+		host, port := e, "53"
+		if h, p, err := net.SplitHostPort(e); err == nil {
+			host, port = h, p
+		}
+		host = strings.Trim(host, "[]")
+		if net.ParseIP(host) == nil {
+			return nil, fmt.Errorf("%q is not an IP address with an optional port", e)
+		}
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return nil, fmt.Errorf("%q has an invalid port", e)
+		}
+		out = append(out, net.JoinHostPort(host, port))
+	}
+	return out, nil
+}
+
+// resolverVia returns a pure-Go resolver that sends every lookup to servers,
+// starting at a rotating index so one dead server does not stall all lookups.
+func resolverVia(servers []string) *net.Resolver {
+	var next atomic.Uint32
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			d := net.Dialer{Timeout: 3 * time.Second}
+			start := int(next.Add(1) - 1)
+			var last error
+			for i := range servers {
+				c, err := d.DialContext(ctx, network, servers[(start+i)%len(servers)])
+				if err == nil {
+					return c, nil
+				}
+				last = err
+			}
+			return nil, last
+		},
+	}
 }
