@@ -36,6 +36,7 @@
 //
 //	enabled                  bool      false skips the check (default true)
 //	zones                    []string  only these apexes are checked (default every owned apex)
+//	exclude_zones            []string  owned registrable apexes never swept; findings resolve
 //	exclude                  []string  names to ignore, and everything under them
 //	tlds                     []string  suffixes for tld-swap (default about 25); [] disables it
 //	max_candidates_per_zone  int       cap on names checked per apex (default 600)
@@ -99,6 +100,7 @@ const (
 	StateSkipped     = "skipped"      // no lookup client: nothing was checked
 	StateDisabled    = "disabled"     // enabled: false
 	StateNotSelected = "not_selected" // zones is set and does not list this apex
+	StateExcluded    = "excluded"     // exclude_zones lists this apex
 	StateShortLabel  = "label_too_short"
 	StateUnsupported = "unsupported_label" // an internationalised (xn--) brand label
 )
@@ -147,6 +149,7 @@ func (*Check) Applies(a model.Asset) bool {
 type options struct {
 	enabled       bool
 	zones         []string
+	excludeZones  []string
 	exclude       []string
 	tlds          []string // nil: default list
 	maxCandidates int
@@ -184,6 +187,8 @@ func parseOptions(cfg map[string]any) options {
 	var bad []string
 	o.zones, bad = names(cfg, "zones")
 	o.notes = append(o.notes, invalidNames("zones", bad)...)
+	o.excludeZones, bad = names(cfg, "exclude_zones")
+	o.notes = append(o.notes, invalidNames("exclude_zones", bad)...)
 	o.exclude, bad = names(cfg, "exclude")
 	o.notes = append(o.notes, invalidNames("exclude", bad)...)
 	if _, present := cfg["tlds"]; present {
@@ -297,6 +302,8 @@ func (c *Check) Run(ctx context.Context, t check.Target) (*check.Result, error) 
 		return done(StateSkipped, "not a registrable domain (a subzone or public suffix)", true)
 	case !o.enabled:
 		return done(StateDisabled, "checks.domain.lookalike.enabled is false", false)
+	case slices.Contains(o.excludeZones, apex):
+		return done(StateExcluded, "this apex is listed in checks.domain.lookalike.exclude_zones", false)
 	case len(o.zones) > 0 && !slices.Contains(o.zones, apex):
 		return done(StateNotSelected, "this apex is not listed in checks.domain.lookalike.zones", false)
 	case t.Lookup == nil:

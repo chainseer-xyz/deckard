@@ -398,6 +398,7 @@ ignored):
 | `domain.expiry` | `lock_exempt_tlds` | `[]` | TLDs (for example `[de]`) whose registrars cannot set transfer or delete locks: `transfer-unlocked` and `no-delete-protection` are not raised for them. |
 | `domain.lookalike` | `enabled` | `true` | `false` switches the check off (and resolves its findings). The check is DNS-only and does not depend on `intel`. |
 | `domain.lookalike` | `zones` | every owned apex | Only these registrable domains are swept. Apexes not listed record `lookalike: not_selected` and their findings resolve. |
+| `domain.lookalike` | `exclude_zones` | `[]` | Owned registrable apexes never swept. They record `lookalike: excluded`, and existing findings for them resolve on a clean run. Names are normalised; invalid entries are ignored and noted. |
 | `domain.lookalike` | `exclude` | `[]` | Names to ignore, for example known partners or defensive registrations: a name and everything under it is never queried or reported. Every owned zone is ignored automatically. |
 | `domain.lookalike` | `tlds` | about 25 common suffixes (`com`, `net`, `org`, `io`, `co`, `app`, ...) | Suffixes tried by the TLD-swap technique. `[]` turns the technique off. Invalid names are ignored and noted. |
 | `domain.lookalike` | `max_candidates_per_zone`, `max_findings_per_zone` | `600`, `50` | Cap on the names queried per apex per run (taken evenly across the techniques; the observation says how many were dropped) and on the findings reported (highest severity first; the observation says how many were cut). `1` to `5000` and `1` to `500`. |
@@ -455,6 +456,16 @@ splitting the label into a subdomain (`ex.ample.com`), single-bit flips that
 stay in the hostname alphabet, and swapping the TLD. Names inside any owned zone
 (the estate legitimately owns many variants of its own names, including your
 other apexes) and names under `exclude` are never generated.
+
+For example, sweep two active brand zones but leave a defensive registration
+out of the sweep:
+
+```yaml
+checks:
+  domain.lookalike:
+    zones: [brand-example.net, brand-example.org]
+    exclude_zones: [brand-example.com]
+```
 
 A candidate is registered when it has NS records, an A/AAAA record or a usable
 MX (a null MX, `0 .`, does not count), or is an alias (CNAME). Each registered
