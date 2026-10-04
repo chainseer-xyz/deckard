@@ -1,11 +1,8 @@
-```text
-  `      /   .          `              `//   '                  ./ /
-   '     .                   . /         .       ` '   /  .       .
-`                          /     .              /.           ''
+<pre align="center">
  _______   _______   ______  __  ___      ___      .______       _______
 |       \ |   ____| /      ||  |/  /     /   \     |   _  \     |       \
 |  .--.  ||  |__   |  ,----'|  '  /     /  ^  \    |  |_)  |    |  .--.  |
-|  |  |  ||   __|  |  |     |    <     /  /_\  \   |      /     |  |  |  |
+|  |  |  ||   __|  |  |     |    &lt;     /  /_\  \   |      /     |  |  |  |
 |  '--'  ||  |____ |  `----.|  .  \   /  _____  \  |  |\  \----.|  '--'  |
 |_______/ |_______| \______||__|\__\ /__/     \__\ | _| `._____||_______/
 
@@ -15,304 +12,420 @@
 ████  ██████ █▒██▒███▒██▒██ █▒█▒███████████ █████████▒█████▒▒██▒█ ████████
 ████  ██████ ██████████████ ███████████████ █████████████████████ ████████
 ██████████████████████████████████████████████████████████████████████████
-   E X T E R N A L   A T T A C K   S U R F A C E   M O N I T O R I N G
 
+   E X T E R N A L   A T T A C K   S U R F A C E   M O N I T O R I N G
       h u n t   t h e   r e p l i c a n t s   i n   y o u r   D N S
-```
+</pre>
+
+<h1 align="center">deckard</h1>
 
 <p align="center">
-  <a href="https://github.com/chainseer-xyz/deckard/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/chainseer-xyz/deckard/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
-  <img alt="Go" src="https://img.shields.io/badge/go-1.26-00ADD8?logo=go&logoColor=white">
-  <img alt="Self-hosted" src="https://img.shields.io/badge/self--hosted-docker%20%7C%20helm-informational">
-  <img alt="Alerts via Alertmanager" src="https://img.shields.io/badge/alerts-Alertmanager-E6522C?logo=prometheus&logoColor=white">
+  <strong>Self-hosted, continuous external attack-surface monitoring.</strong><br>
+  Discover what you expose. Re-check it continuously. Know when it drifts, dangles or becomes vulnerable.
 </p>
 
 <p align="center">
-  <b>Self-hosted, always-on external attack-surface monitoring.</b><br>
-  Point it at Cloudflare, AWS and Kubernetes. It keeps an inventory of everything you expose,
-  re-checks it around the clock, and tells you the moment something drifts, dangles or expires.
+  <a href="https://github.com/chainseer-xyz/deckard/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/chainseer-xyz/deckard/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/chainseer-xyz/deckard/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/chainseer-xyz/deckard"></a>
+  <a href="LICENSE"><img alt="Apache-2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
+  <img alt="Go 1.26" src="https://img.shields.io/badge/go-1.26-00ADD8?logo=go&logoColor=white">
+  <img alt="Docker and Helm" src="https://img.shields.io/badge/deploy-Docker%20%7C%20Helm-informational">
+  <img alt="Prometheus Alertmanager" src="https://img.shields.io/badge/alerts-Alertmanager-E6522C?logo=prometheus&logoColor=white">
 </p>
 
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
-  <a href="#what-it-looks-like">Screenshots</a> ·
-  <a href="#what-it-finds">What it finds</a> ·
-  <a href="#how-it-works">How it works</a> ·
-  <a href="#deploy-on-kubernetes">Helm</a> ·
-  <a href="docs/configuration.md">Docs</a>
+  <a href="#what-deckard-does">Features</a> ·
+  <a href="#what-it-finds">Checks</a> ·
+  <a href="#deploy-on-kubernetes">Kubernetes</a> ·
+  <a href="#how-it-works">Architecture</a> ·
+  <a href="#documentation">Documentation</a>
 </p>
 
 ---
 
-## Why deckard
+Deckard builds an inventory from Cloudflare, AWS, Google Cloud and Kubernetes, then continuously checks the assets you own. It remembers what it saw, resolves findings when problems disappear, and sends actionable alerts through Prometheus Alertmanager.
 
-Most attack-surface tools are point-in-time scanners you run once and forget. The
-things that actually bite you are the ones that change *after* the scan: a CNAME
-left pointing at a deleted service, a certificate that quietly stopped renewing, a
-port opened for a test, a CVE published last night.
+Unlike a folder of one-shot recon output, Deckard keeps a living model of your attack surface: assets, relationships, scan history, baselines and finding state. It runs as one application plus PostgreSQL and includes a web UI, REST API, Prometheus metrics and Grafana dashboard.
 
-deckard is built for the long haul:
+> [!CAUTION]
+> Use Deckard only on infrastructure you own or are authorised to test. Active checks enforce an ownership-based scope guard, but you remain responsible for provider policies and scan authorisation. Read [Responsible use](#responsible-use) before enabling active checks.
 
-- **Inventory first.** It builds a graph from your real sources (Cloudflare, Route 53,
-  Google Cloud DNS, AWS, Kubernetes, static lists), so it knows what you own instead of guessing.
-- **Continuous, not periodic.** New assets are scanned immediately; everything else is
-  re-checked on a cadence you set, per tier and per check. CVE templates, CISA KEV and
-  EPSS data refresh on their own, and a newly exploited CVE triggers a targeted scan.
-- **Signal over noise.** Findings are deduplicated, have a lifecycle, resolve themselves
-  when the problem goes away, and are ranked. A severity floor decides what reaches your pager.
-- **Safe by construction.** A scope guard means it can only ever probe assets you own.
-  A source that fails or only partly succeeds never causes anything to be marked removed.
-- **One container plus Postgres.** Alerts go through **Prometheus Alertmanager**, so Slack,
-  Discord, ntfy, email and PagerDuty all work. Metrics, a Grafana dashboard and a web UI included.
+## Quick start
 
-> **Use it only on infrastructure you own or are authorised to test.** See [Responsible use](#responsible-use).
+### Requirements
+
+- Docker Engine or Docker Desktop with Compose
+- A read-only Cloudflare API token, or another configured [inventory source](#inventory-sources)
+- About five minutes
+
+```sh
+git clone https://github.com/chainseer-xyz/deckard.git
+cd deckard
+cp .env.example .env
+$EDITOR .env
+$EDITOR deploy/compose/deckard.yaml
+docker compose up -d
+docker compose logs -f deckard
+```
+
+Set these values in `.env`:
+
+| Variable | Required | Purpose |
+|---|---:|---|
+| `DECKARD_ADMIN_TOKEN` | yes | API and UI bearer token; generate at least 32 bytes with `openssl rand -hex 32` |
+| `POSTGRES_PASSWORD` | yes | Local Compose database password; generate with `openssl rand -hex 24` |
+| `CF_API_TOKEN` | for the default example | Read-only Cloudflare discovery token |
+
+The Cloudflare token needs `Zone:Read`, `DNS:Read`, zone and account `Load Balancers:Read`, `Account Settings:Read` and `Cloudflare Tunnel:Read`.
+
+Open the UI at [http://127.0.0.1:8080](http://127.0.0.1:8080). Prometheus metrics are available at [http://127.0.0.1:9090/metrics](http://127.0.0.1:9090/metrics).
+
+The default Compose stack binds both ports to loopback. It starts PostgreSQL automatically and stores Deckard's mutable data in named volumes.
+
+Start the included example Alertmanager when you want to test notifications:
+
+```sh
+docker compose --profile alerting up -d
+```
+
+## What Deckard does
+
+| Capability | How it works |
+|---|---|
+| Inventory from authority | Reads Cloudflare, Route 53, AWS resources, Google Cloud DNS, Kubernetes and static declarations |
+| Continuous checks | Scans new assets immediately and re-checks them on configurable per-tier and per-check schedules |
+| Ownership-aware scope | Separates owned, shared and external infrastructure before any active probe runs |
+| Finding lifecycle | Deduplicates findings and tracks open, acknowledged, suppressed, false-positive and resolved states |
+| Change detection | Learns stable observations and reports meaningful DNS, HTTP and TLS drift |
+| Fresh intelligence | Refreshes takeover fingerprints, shared-hosting ranges, Nuclei templates, CISA KEV and FIRST EPSS data |
+| External scanner ingest | Reconciles Prowler, Kubescape, trufflehog, gitleaks, s3scanner and SARIF results into the same lifecycle |
+| Operations built in | Exposes a web UI, REST API, SSE stream, Prometheus metrics, alert rules and a Grafana dashboard |
+
+### Why continuous inventory matters
+
+The failures that hurt most often appear after a point-in-time audit:
+
+- a CNAME survives after its service is deleted;
+- a certificate stops renewing;
+- a test port becomes permanent;
+- a cloud origin becomes reachable around its CDN;
+- a new CVE lands against technology already in production;
+- a source sync becomes partial and silently stops seeing assets.
+
+Deckard keeps re-evaluating the inventory and retains enough history to distinguish a new problem from an old baseline.
 
 ## What it looks like
 
 <p align="center">
-  <img src="docs/img/dashboard.png" alt="Dashboard: needs-attention list, severity tiles, source health" width="92%">
+  <img src="docs/img/dashboard.png" alt="Deckard dashboard showing findings by severity, items needing attention and inventory source health" width="92%">
 </p>
 
-The dashboard leads with what needs attention: takeovers, expiring certificates and
-actively exploited CVEs first, each with a one-line fix. Source health shows partial or
-stale syncs so you never trust an incomplete inventory by accident.
+The dashboard puts urgent findings and source health first. A partial source sync is visible and cannot remove assets from the inventory.
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/img/finding.png" alt="Finding drawer with evidence, remediation and actions"></td>
-    <td width="50%"><img src="docs/img/asset.png" alt="Asset detail with properties, DNS chain ending in NXDOMAIN, and baselines"></td>
+    <td width="50%"><img src="docs/img/finding.png" alt="Finding drawer with evidence, remediation and lifecycle actions"></td>
+    <td width="50%"><img src="docs/img/asset.png" alt="Asset detail showing scope, properties, relationships and baselines"></td>
   </tr>
   <tr>
-    <td><sub><b>Investigate a finding</b> without leaving the page: readable evidence, remediation, acknowledge / suppress / false-positive, rescan, copy as Markdown.</sub></td>
-    <td><sub><b>Understand an asset</b>: what it is, whether deckard may probe it, its DNS chain with the dead end highlighted, and what changed against its baseline.</sub></td>
+    <td><sub><strong>Investigate a finding:</strong> review evidence and remediation, acknowledge it, suppress it with a note, mark it false-positive or trigger a rescan.</sub></td>
+    <td><sub><strong>Understand an asset:</strong> inspect ownership scope, source lineage, DNS relationships, services, scan history and learned baselines.</sub></td>
   </tr>
 </table>
 
 ## What it finds
 
-| Tier | Check | Finds |
+| Tier | Check | Detects |
 |---|---|---|
-| passive | `dns.dangling` | CNAME chains ending in NXDOMAIN, dangling NS delegations |
-| passive | `dns.takeover` | provider takeover fingerprints (S3, GitHub Pages, Heroku, Azure, CloudFront, …) |
-| passive | `dns.hygiene` | SPF/DMARC/CAA/DNSSEC gaps, wildcard records, open AXFR |
-| passive | `mail.policy` | MTA-STS and TLS-RPT gaps, weak DMARC (`pct`, `sp=none`, no `rua`), `~all` on mail zones |
-| passive | `intel.internetdb` | CVEs, unexpected open ports and compromised/malware tags that internet scanners report for your public IPs (Shodan InternetDB) |
-| passive | `domain.expiry` | registrations near or past expiry, missing transfer/delete locks, registrar or nameserver changes (RDAP) |
-| passive | `domain.lookalike` | registered typosquats and lookalikes of your domains, with mail-capable ones flagged (DNS only, never contacts them) |
-| passive | `web.history` | sensitive files and admin surfaces the Wayback Machine saw served on your hostnames (`.env`, `.git`, dumps, actuator) |
-| passive | `cloud.bucket` | publicly listable S3, GCS or Azure buckets behind your hostnames |
-| passive | `tls.cert` | expiry, hostname mismatch, weak keys, self-signed |
-| passive | `http.probe`, `http.headers` | liveness, tech fingerprint, missing security headers |
-| passive | `origin.exposed`, `origin.correlation` | CDN origin reachable directly; origin IP published by an unproxied record |
-| active | `net.ports`, `net.services` | unexpected open ports, unauthenticated databases and caches |
-| active | `tls.config` | TLS 1.0/1.1, weak ciphers |
-| active | `http.exposed` | `.git`, `.env`, actuator, backups, directory listings |
-| active | `cve.nuclei` | known CVEs and misconfigurations via [nuclei](https://github.com/projectdiscovery/nuclei) templates |
+| passive | `dns.dangling` | CNAME chains ending in NXDOMAIN and dangling NS delegations |
+| passive | `dns.takeover` | Provider takeover fingerprints for S3, GitHub Pages, Heroku, Azure, CloudFront and others |
+| passive | `dns.hygiene` | SPF, DMARC, CAA and DNSSEC gaps; wildcard records; open AXFR |
+| passive | `mail.policy` | Missing MTA-STS and TLS-RPT, weak DMARC policy and soft-fail SPF on mail zones |
+| passive | `domain.expiry` | Expiry risk, missing registry locks, and registrar or nameserver changes through RDAP |
+| passive | `domain.lookalike` | Registered typosquats and lookalikes, with mail-capable domains raised in severity |
+| passive | `intel.internetdb` | Reported CVEs, unexpected ports, and compromised or malware tags from Shodan InternetDB |
+| passive | `web.history` | Sensitive files and administrative paths previously observed by the Wayback Machine |
+| passive | `cloud.bucket` | Publicly listable S3, Google Cloud Storage and Azure Blob containers behind hostnames |
+| passive | `tls.cert` | Expiry, hostname mismatch, weak keys and self-signed certificates |
+| passive | `http.probe`, `http.headers` | Reachability, technology fingerprinting and missing security headers |
+| passive | `origin.exposed`, `origin.correlation` | Directly reachable CDN origins and origins disclosed by unproxied records |
+| active | `net.ports`, `net.services` | Unexpected ports and unauthenticated databases, caches and administrative services |
+| active | `tls.config` | TLS 1.0 or 1.1 and weak cipher configuration |
+| active | `http.exposed` | Exposed `.git`, `.env`, backups, directory listings and framework diagnostics |
+| active | `cve.nuclei` | Known CVEs and misconfigurations through Nuclei's official templates and Deckard finder pack |
 
-Findings that reference a CVE are ranked by CISA KEV and FIRST EPSS. Add your own checks
-with **nuclei templates** (no code) or **exec plugins** in any language
-([docs/plugins.md](docs/plugins.md)).
+Findings that reference a CVE are enriched with CISA Known Exploited Vulnerabilities and FIRST EPSS data. Add organisation-specific checks with [Nuclei templates](docs/configuration.md#custom-templates) or [exec plugins](docs/plugins.md).
 
-**Real-world catches** from the first run against a production estate: a Cloudflare Pages
-project deleted while its CNAME stayed behind (a textbook takeover), CNAMEs to deleted load
-balancers, a certificate that had been expired for four months because renewal asked for the
-wrong issuer kind, and a CloudFront takeover signature on a staging asset hostname.
+## How it works
 
-## Quick start
+```mermaid
+flowchart LR
+  subgraph Sources
+    CF[Cloudflare]
+    AWS[AWS / Route 53]
+    GCP[Google Cloud DNS]
+    K8S[Kubernetes]
+    STATIC[Static inventory]
+    EXT[External scanners]
+  end
 
-```sh
-cp .env.example .env            # set DECKARD_ADMIN_TOKEN, POSTGRES_PASSWORD and CF_API_TOKEN
-$EDITOR deploy/compose/deckard.yaml
-docker compose up -d            # UI on http://127.0.0.1:8080, metrics on :9090
+  Sources --> INV[(Inventory graph)]
+  CT[CT logs and DNS expansion] --> INV
+  INV --> SCOPE{Scope guard}
+  SCOPE -->|owned| QUEUES[Scheduled check queues]
+  SCOPE -->|shared / external| PASSIVE[Safe metadata and hostname checks]
+  QUEUES --> CHECKS[Passive, active and intrusive checks]
+  PASSIVE --> FINDINGS[Finding lifecycle and baselines]
+  CHECKS --> FINDINGS
+  EXT --> FINDINGS
+  FINDINGS --> PG[(PostgreSQL)]
+  FINDINGS --> AM[Alertmanager]
+  PG --> UI[Web UI and REST API]
+  PG --> METRICS[Prometheus and Grafana]
 ```
 
-Images: `ghcr.io/chainseer-xyz/deckard` (includes the nuclei engine, a pinned official template snapshot,
-and deckard's custom finder pack) and
-`ghcr.io/chainseer-xyz/deckard:latest-slim` (13 MB, no nuclei; set `nuclei.enabled: false`).
-Both run as non-root on a distroless base, signed with cosign, with an SBOM and provenance.
+### Check tiers
 
-Or run the image directly:
+- **Passive** checks use DNS, certificate, HTTP and restricted metadata lookups comparable to ordinary client traffic.
+- **Active** checks make bounded connections to owned destinations. They are rate-limited and concurrency-limited.
+- **Intrusive** checks are disabled by default, never run automatically on inventory change, and require explicit operator configuration.
 
-```sh
-docker run --rm \
-  -e DECKARD_DATABASE__URL=postgres://user:pass@db:5432/deckard \
-  -e CF_API_TOKEN=... -e DECKARD_ADMIN_TOKEN=... \
-  -v ./deckard.yaml:/etc/deckard/deckard.yaml:ro \
-  ghcr.io/chainseer-xyz/deckard:latest serve --config /etc/deckard/deckard.yaml
-```
+Slow metadata checks run on a separate `intel` queue, so RDAP, Wayback and lookalike lookups cannot starve fast DNS checks.
 
-A minimal `deckard.yaml`:
+### Built to run unattended
+
+| Requirement | Deckard behaviour |
+|---|---|
+| Fresh inventory | Sources re-sync on a schedule; newly discovered assets receive immediate checks |
+| Safe removals | Failed, partial or suspiciously small source syncs cannot remove assets |
+| Fresh intelligence | Templates, provider fingerprints, shared ranges, KEV and EPSS refresh automatically |
+| Honest health | Metrics and alerts cover stale sources, stuck queues, stale feeds and failed attempted Nuclei runs |
+| Crash recovery | Instance heartbeats allow orphaned jobs to be reclaimed after a hard failure |
+| External viewpoint | Optional public resolvers avoid split-horizon DNS answers during scans |
+| Bounded cardinality | Metrics describe posture and health without using asset or finding IDs as labels |
+
+## Inventory sources
+
+| Type | Discovers | Authentication |
+|---|---|---|
+| `cloudflare` | Zones, records, load balancers and tunnels | Read-only API token |
+| `route53` | Route 53 hosted zones and records | AWS SDK credentials or assumed role |
+| `aws` | Public AWS resources across one or more regions | AWS SDK credentials or assumed role |
+| `gcpdns` | Public Google Cloud DNS managed zones | Application Default Credentials |
+| `kubernetes` | Ingresses, Services, Nodes and Gateway API routes | In-cluster service account or kubeconfig |
+| `static` | Explicit hostnames, IPs, CIDRs and URLs | None |
+
+A minimal configuration looks like this:
 
 ```yaml
 sources:
-  - { name: cf, type: cloudflare, token_env: CF_API_TOKEN }   # read-only token
+  - name: cloudflare
+    type: cloudflare
+    token_env: CF_API_TOKEN
+
+auth:
+  mode: token
+  token_env: DECKARD_ADMIN_TOKEN
+
 notify:
-  alertmanager: { urls: ["http://alertmanager:9093"], min_severity: medium }
-auth: { mode: token, token_env: DECKARD_ADMIN_TOKEN }
+  alertmanager:
+    urls: ["http://alertmanager:9093"]
+    min_severity: medium
 ```
 
-The Cloudflare token needs only read permissions: Zone:Read, DNS:Read, Load Balancers:Read
-(zone and account), Account Settings:Read, Cloudflare Tunnel:Read.
+Configuration is YAML. Environment variables override file values with a `DECKARD_` prefix and `__` between nested keys. For example, `DECKARD_DATABASE__URL` sets `database.url`.
+
+Secrets should stay in environment variables or secret stores. Configuration fields such as `token_env`, `password_env` and `client_secret_env` name the environment variable to read.
+
+See the complete [configuration reference](docs/configuration.md).
+
+## Deployment
+
+### Container images
+
+| Image | Contents | Use it when |
+|---|---|---|
+| `ghcr.io/chainseer-xyz/deckard:<version>` | Deckard, Nuclei, a pinned official template snapshot and the Deckard finder pack | You want built-in CVE and exposure scanning |
+| `ghcr.io/chainseer-xyz/deckard:<version>-slim` | Deckard without the Nuclei binary | You disable `nuclei.enabled` or supply scanning another way |
+
+Both images are multi-architecture, run as a non-root user on a distroless base, and publish an SBOM and build provenance. Release digests are signed with keyless Cosign. See [release verification](SECURITY.md#verifying-releases).
+
+Pin a version or digest in production. The `latest` tags follow the newest release.
+
+### Run one container
+
+Provide PostgreSQL separately and mount a configuration file:
+
+```sh
+docker run --rm \
+  -p 127.0.0.1:8080:8080 \
+  -p 127.0.0.1:9090:9090 \
+  -e DECKARD_DATABASE__URL='postgres://deckard:password@db:5432/deckard' \
+  -e DECKARD_ADMIN_TOKEN \
+  -e CF_API_TOKEN \
+  -v "$PWD/deckard.yaml:/etc/deckard/deckard.yaml:ro" \
+  ghcr.io/chainseer-xyz/deckard:latest \
+  serve --config /etc/deckard/deckard.yaml
+```
 
 ### Deploy on Kubernetes
 
+The OCI Helm chart supports an existing PostgreSQL database or an optional CloudNativePG cluster. CloudNativePG mode requires the operator to exist first.
+
 ```sh
-helm install deckard deploy/helm/deckard \
+helm install deckard oci://ghcr.io/chainseer-xyz/charts/deckard \
+  --version <release-version> \
+  --namespace deckard \
+  --create-namespace \
   --set database.cnpg.enabled=true \
-  --set-json 'config.sources=[{"name":"cf","type":"cloudflare","token_env":"CF_API_TOKEN"}]' \
+  --set-json 'config.sources=[{"name":"cloudflare","type":"cloudflare","token_env":"CF_API_TOKEN"}]' \
   --set 'extraEnvFrom[0].secretRef.name=deckard-secrets'
 ```
 
-The chart ships a CloudNativePG database option, a NetworkPolicy, a ServiceMonitor, a Grafana
-dashboard and, for clusters that route through a Gateway instead of an Ingress, a
-**Gateway API `HTTPRoute`** (Envoy Gateway, Istio, Cilium, GKE Gateway, …):
+The chart includes:
+
+- hardened pod and container security contexts;
+- a NetworkPolicy with ingress-controller and Prometheus selectors;
+- Ingress and Gateway API `HTTPRoute` options;
+- ServiceMonitor and Grafana dashboard resources;
+- optional CloudNativePG, persistence and separate worker deployments;
+- ConfigMap and PVC mounts for custom Nuclei templates.
+
+Example Gateway API configuration:
 
 ```yaml
 httpRoute:
   enabled: true
   hostnames: [deckard.example.com]
   parentRefs:
-    - { name: public-gateway, namespace: gateway-system, sectionName: https }
-  httpRedirect:                     # optional: send plain HTTP to HTTPS
+    - name: public-gateway
+      namespace: gateway-system
+      sectionName: https
+  httpRedirect:
     enabled: true
     parentRefs:
-      - { name: public-gateway, namespace: gateway-system, sectionName: http }
+      - name: public-gateway
+        namespace: gateway-system
+        sectionName: http
 ```
 
-The NetworkPolicy automatically admits the namespaces your `parentRefs` point at.
-
-## How it works
-
-```mermaid
-flowchart LR
-  subgraph S[Sources]
-    CF[Cloudflare] ~~~ R53[Route 53] ~~~ AWS[AWS] ~~~ K8S[Kubernetes] ~~~ ST[Static]
-  end
-  S --> INV[(Inventory graph)]
-  CT[CT logs and DNS expansion] --> INV
-  INV --> SCH[Scheduler and cadence]
-  SCH --> CHK[Tiered checks]
-  CHK --> FND[Findings: dedup, lifecycle, baselines]
-  FND --> PG[(Postgres)]
-  FND --> AM[Alertmanager] --> OUT[Slack, Discord, ntfy, PagerDuty, email]
-  PG --> UI[API and web UI]
-  PG --> MET[Prometheus metrics and Grafana]
-```
-
-- **Sources** discover assets and relationships (hostname → IP → service → cloud resource).
-  A source that fails or only partly succeeds never causes assets to be marked removed.
-- **Checks** run in three **tiers**: `passive` (about the traffic a browser sends), `active`
-  (port and service scanning, rate-limited) and `intrusive` (off unless you enable it for a group).
-  Each tier has its own cadence, and new assets are inspected immediately.
-- **Findings** are deduplicated, have a lifecycle (open → resolved, with acknowledge, suppress and
-  false-positive), and resolve automatically when the issue stops reproducing. Learned baselines
-  turn "port 8080 appeared" into a drift finding.
-- **Alerts** carry lineage ("api.example.com → Cloudflare → origin 203.0.113.7 → :8080"),
-  evidence and remediation, and respect a severity floor.
-
-### Built to run unattended
-
-| What | How |
-|---|---|
-| Fresh inventory | sources re-sync every few minutes; a new asset is scanned straight away |
-| Fresh intelligence | nuclei templates, reference data, CISA KEV and EPSS update on their own; a newly exploited CVE triggers a targeted scan |
-| Honest about gaps | partial or stale syncs are flagged in the UI and API and block removals |
-| Tells you when it is blind | health alerts for stale sources, a stuck queue, stale feeds; an optional external **heartbeat** for a dead-man's switch |
-| Survives crashes | instances heartbeat, and jobs orphaned by a hard kill are reclaimed instead of blocking the queue |
-| Vantage point | `scope.resolvers` scans through public DNS so you see your names the way an attacker does |
+The NetworkPolicy automatically admits namespaces referenced by `parentRefs`.
 
 ## Responsible use
 
-deckard sends network traffic to the assets it inventories. It is built so that it cannot be
-pointed at things you do not own:
+Deckard sends network traffic to inventory assets. Its safety model has several independent controls:
 
-- Every probe goes through a **scope guard**. Only hostnames under zones from your sources (or
-  `scope.include`) and IPs you own or explicitly list are ever actively probed. `scope.exclude` always wins.
-- Names that resolve to a CDN or third-party edge are **skipped** by the active tier rather than probed.
-- Third-party CNAME targets (S3, Heroku, GitHub Pages, …) are only *fingerprinted* by requesting
-  **your** hostname. They are never port-scanned.
-- Each dial re-checks the resolved IP (defence against DNS rebinding), refuses loopback, link-local
-  and cloud-metadata ranges, and sources can never register them as owned.
-- A skipped or refused check makes no observation and can never resolve a finding.
-- `intrusive` checks are off by default and never triggered automatically.
+- Every active or intrusive probe passes through an ownership gate.
+- An origin address is not considered owned merely because a hostname points to it.
+- Published CDN and shared-service ranges are classified as shared infrastructure.
+- Names that resolve to shared or external addresses are skipped by active checks.
+- Third-party CNAME services are fingerprinted through your hostname, not port-scanned directly.
+- Every dial re-resolves the destination and rejects DNS rebinding to a disallowed address.
+- Loopback, link-local, cloud-metadata and other unsafe ranges are refused.
+- `scope.exclude` always overrides discovered or explicit ownership.
+- A refused check makes no observation and cannot resolve an existing finding.
+- Intrusive checks never run on inventory change and are off by default.
 
-You are still responsible for having authorisation to test everything in scope, and for your cloud
-provider's and CDN's acceptable-use policies.
+Use `scope.include` only for assets you can prove you own. Review cloud-provider and CDN acceptable-use policies before enabling active scans.
+
+## Findings, alerts and automation
+
+Findings preserve evidence, remediation, source lineage and scan history. Operators can acknowledge, suppress with a reason and optional expiry, mark false-positive, reopen or rescan them. A clean observation resolves an open finding automatically after the configured confirmation count.
+
+Alertmanager receives firing and resolved notifications at or above `notify.alertmanager.min_severity`. Findings below that floor remain visible in the database, UI, API and metrics.
+
+The REST API supports inventory and finding queries, lifecycle actions, rescans, source syncs and server-sent events. See the [OpenAPI 3.0 specification](docs/openapi.yaml).
+
+External scanners can post native output into the same lifecycle:
+
+```sh
+deckard ingest \
+  --tool prowler \
+  --scope aws:123456789012:us-east-1 \
+  --file prowler-output.json \
+  --url https://deckard.example.com \
+  --token-env DECKARD_TOKEN
+```
+
+Supported parsers include Prowler, Kubescape, trufflehog, gitleaks, s3scanner and SARIF. `deckard ingest prowler-app` can pull every provider's latest complete scan from a running Prowler App. Read [Ingesting findings](docs/ingest.md) for reconciliation guarantees, limits and CronJob examples.
+
+## CLI reference
+
+| Command | Purpose |
+|---|---|
+| `deckard serve` | Run the API, scheduler and configured worker roles |
+| `deckard migrate` | Apply database migrations and exit |
+| `deckard config validate` | Load and validate configuration without starting the service |
+| `deckard sync` | Run one inventory sync and print source changes |
+| `deckard scan` | Refresh intelligence, sync inventory, scan everything due and flush notifications |
+| `deckard scan --no-update` | Run one scan pass without network refreshes; useful for air-gapped operation |
+| `deckard findings` | Print filtered findings as a table or JSON |
+| `deckard ingest` | Convert and post external scanner output |
+| `deckard ingest prowler-app` | Pull and reconcile a complete Prowler App scan |
+| `deckard version` | Print version and commit information |
+
+The `serve`, `migrate`, `sync`, `scan` and `findings` commands accept `--config <path>`. Set `DECKARD_CONFIG` to provide their default path. The ingest commands are standalone clients and use their own connection flags.
+
+## Observability and operations
+
+Deckard exposes:
+
+- `/healthz` for process health;
+- `/readyz` for readiness;
+- `/metrics` on the metrics listener;
+- bounded Prometheus metrics for assets, findings, checks, queues, sources and intelligence freshness;
+- health alert rules and a Grafana dashboard under `deploy/`;
+- an optional external heartbeat for dead-man's-switch monitoring.
+
+The operations guide covers network egress, air-gapped operation, skipped checks, queue behaviour, crashes, updater failures and stale-feed runbooks. Read [Operations](docs/operations.md).
 
 ## How it compares
 
-| | deckard | One-shot recon CLIs (amass, subfinder, nuclei) | Commercial EASM |
-|---|---|---|---|
-| Runs continuously, remembers state | yes | no, you script it | yes |
-| Knows what you own from your own accounts | yes | no | partly |
-| Findings lifecycle, baselines, dedup | yes | no | yes |
-| Self-hosted, your data stays yours | yes | yes | no |
-| Cost | free (Apache-2.0) | free | per-asset pricing |
-| Extensible with nuclei templates and plugins | yes | n/a | rarely |
+| | Deckard | One-shot recon tools | Commercial EASM |
+|---|---:|---:|---:|
+| Continuous inventory and history | yes | you build it | yes |
+| Authoritative cloud and DNS sources | yes | usually no | varies |
+| Ownership-based active-scan guard | yes | manual scope | varies |
+| Finding lifecycle and baselines | yes | no | yes |
+| Self-hosted | yes | yes | usually no |
+| Prometheus-native operations | yes | you build it | rarely |
+| Custom Nuclei and exec checks | yes | Nuclei only | rarely |
+| License or service cost | Apache-2.0 | usually free | per asset or subscription |
 
-deckard builds on those tools (it runs nuclei) rather than replacing them: they find, it remembers,
-correlates and alerts.
+Deckard orchestrates and remembers scanners; it does not replace them. Use specialised tools for discovery or assessment, then let Deckard retain, reconcile and alert on their results.
 
-## Metrics, alerting and operations
+## Documentation
 
-Prometheus metrics (default `:9090/metrics`) expose posture, not per-finding labels, so cardinality stays
-bounded: `deckard_assets`, `deckard_findings_open`, `deckard_checks_skipped_total`,
-`deckard_scan_errors_total`, `deckard_source_last_success_timestamp`, `deckard_queue_depth`, plus the
-freshness and exploit-intelligence series (full list in
-[docs/operations.md](docs/operations.md#metrics)). A Grafana dashboard ships in the Helm chart (it can be
-filed into a folder with `metrics.dashboard.annotations`), and `deploy/examples/` has an Alertmanager
-config (Slack, Discord, ntfy) and alert rules for deckard's own health.
-
-## Configuration
-
-Everything is YAML plus `DECKARD_`-prefixed environment variables (`__` for nesting, env wins). The full
-reference is in [docs/configuration.md](docs/configuration.md); validate with
-`deckard config validate --config deckard.yaml`. Per-tier cadence, per-check intervals, asset-group
-overrides, suppressions and baselines are all configurable.
-
-## Commands
-
-```
-deckard serve             run API, scheduler and workers (roles via server.roles)
-deckard migrate           apply database migrations
-deckard sync              one inventory sync
-deckard scan              sync, scan everything due, notify, print a summary
-deckard findings          print current findings (--min-severity, --status, --format table|json)
-deckard config validate   check a config file
-```
-
-Run several replicas by splitting roles: API pods plus worker pods against the same Postgres (see the
-Helm `worker.enabled` option).
-
-## API
-
-A documented REST API (OpenAPI 3.0, [docs/openapi.yaml](docs/openapi.yaml)) backs the UI and is meant for
-automation: list and filter findings and assets, acknowledge or suppress, trigger a rescan or a source
-sync, and stream changes over server-sent events. An end-to-end suite in [tests/e2e](tests/e2e) checks a
-deployed instance against that spec.
-
-External scanners (Prowler, Kubescape, trufflehog, gitleaks, s3scanner, any SARIF producer) can post their findings into the same lifecycle with `deckard ingest`, without deckard ever reaching their targets: see [docs/ingest.md](docs/ingest.md). `deckard ingest prowler-app` pulls the findings of every provider of a running Prowler App (AWS, GCP, Azure, GitHub, Kubernetes, ...) into the same lifecycle.
+| Document | Contents |
+|---|---|
+| [Configuration](docs/configuration.md) | Every setting, source, check override, scope rule and authentication mode |
+| [Operations](docs/operations.md) | Egress, updates, metrics, alerts, queues and runbooks |
+| [External scanner ingest](docs/ingest.md) | API semantics, CLI usage, Prowler App and Kubernetes CronJobs |
+| [Exec plugins](docs/plugins.md) | Plugin configuration and protocol |
+| [AWS IAM](docs/aws-iam.md) | Minimum permissions for AWS inventory sources |
+| [OpenAPI](docs/openapi.yaml) | REST API contract |
+| [Contributing](CONTRIBUTING.md) | Local setup, workflow and pull-request expectations |
+| [Security](SECURITY.md) | Vulnerability reporting, operator hardening and release verification |
 
 ## Development
 
+Deckard requires Go 1.26. Building the web UI requires Node.js 22. Integration tests use Docker through testcontainers.
+
 ```sh
-make test         # go test -race ./...  (Postgres tests use Docker via testcontainers)
-make build        # static binary in bin/
-make web          # build the UI (Node 22)
-deploy/helm/tests/render_test.sh
+make build                              # build bin/deckard
+make test                               # run Go tests with the race detector
+make lint                               # run golangci-lint
+make web                                # install and build the web UI
+deploy/helm/tests/render_test.sh        # validate Helm render variants
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). The design lives in [docs/superpowers/specs](docs/superpowers/specs).
+PostgreSQL integration tests skip when Docker is unavailable. Treat a reported skip as missing coverage, not a passing integration test.
 
 ## Security
 
-Report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
+Report vulnerabilities privately through the process in [SECURITY.md](SECURITY.md). Do not open a public issue for a suspected vulnerability.
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
-
-<sub>Keywords: attack surface management, external attack surface monitoring, EASM, subdomain takeover,
-dangling DNS, certificate expiry monitoring, Cloudflare, Route 53, Kubernetes, nuclei, Prometheus,
-Alertmanager, self-hosted security monitoring.</sub>
+Deckard is licensed under the [Apache License 2.0](LICENSE).
