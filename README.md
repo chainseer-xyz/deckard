@@ -1,21 +1,6 @@
-<pre align="center">
- _______   _______   ______  __  ___      ___      .______       _______
-|       \ |   ____| /      ||  |/  /     /   \     |   _  \     |       \
-|  .--.  ||  |__   |  ,----'|  '  /     /  ^  \    |  |_)  |    |  .--.  |
-|  |  |  ||   __|  |  |     |    &lt;     /  /_\  \   |      /     |  |  |  |
-|  '--'  ||  |____ |  `----.|  .  \   /  _____  \  |  |\  \----.|  '--'  |
-|_______/ |_______| \______||__|\__\ /__/     \__\ | _| `._____||_______/
-
-  ╷          ▄▒████▄▄████▒▄                    ▄██▄               ▄█▒██▄
-▄██▄         ██████████████                    ████               ██████
-████         ██▒███████▒▒██ ▄██▒▄           █████▒█▄█████▄        ████████
-████  ██████ █▒██▒███▒██▒██ █▒█▒███████████ █████████▒█████▒▒██▒█ ████████
-████  ██████ ██████████████ ███████████████ █████████████████████ ████████
-██████████████████████████████████████████████████████████████████████████
-
-   E X T E R N A L   A T T A C K   S U R F A C E   M O N I T O R I N G
-      h u n t   t h e   r e p l i c a n t s   i n   y o u r   D N S
-</pre>
+<p align="center">
+  <img src="docs/img/readme-hero.svg" alt="Deckard — external attack surface monitoring" width="100%">
+</p>
 
 <h1 align="center">deckard</h1>
 
@@ -26,11 +11,9 @@
 
 <p align="center">
   <a href="https://github.com/chainseer-xyz/deckard/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/chainseer-xyz/deckard/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/chainseer-xyz/deckard/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/chainseer-xyz/deckard"></a>
+  <a href="https://github.com/chainseer-xyz/deckard/tags"><img alt="Latest release" src="https://img.shields.io/github/v/tag/chainseer-xyz/deckard?label=release"></a>
   <a href="LICENSE"><img alt="Apache-2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
   <img alt="Go 1.26" src="https://img.shields.io/badge/go-1.26-00ADD8?logo=go&logoColor=white">
-  <img alt="Docker and Helm" src="https://img.shields.io/badge/deploy-Docker%20%7C%20Helm-informational">
-  <img alt="Prometheus Alertmanager" src="https://img.shields.io/badge/alerts-Alertmanager-E6522C?logo=prometheus&logoColor=white">
 </p>
 
 <p align="center">
