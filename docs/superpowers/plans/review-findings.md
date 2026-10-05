@@ -43,3 +43,33 @@ CloudFront alias found. It also exposed four precision problems, all fixed and r
 - [x] **L4 http.headers duplicated http/https findings:** headers judged on https only; http judged only for missing redirect.
 - [x] **L5 log noise:** external redirect refusals at DEBUG, URLs stripped of query strings.
 - Before -> after: 1,090 -> 940 findings; high 8 -> 1; medium 62 -> 8; scope-refusal WARN lines 89 -> 15.
+
+## Graph-guided review (round 2, 2026-10-04)
+
+Review base: `e41f232378562539b8c19151d34110daf9ad8091`. Graph queries guided source inspection and focused regression tests.
+Go interfaces and callbacks need manual tracing; a missing graph edge does not prove dead code or missing tests.
+
+- [x] **R1 Scanner network policy did not contain subprocess traffic.** Nuclei now receives a fresh exact-address policy and isolated configuration. Request failures make scans incomplete. Exec plugins use an OS-enforced socket sandbox and guarded network channel.
+- [x] **R2 Failed SARIF scans could reconcile findings.** Explicitly unsuccessful invocations now fail before ingestion posts any findings.
+- [x] **R3 SSE replay could skip large backlogs.** Ascending ID pages and a fixed replay boundary preserve every event. The newest-first changes endpoint keeps its existing behavior.
+- [x] **R4 Published intelligence could lose its scan fan-out.** A pre-publication PostgreSQL outbox preserves template and KEV deltas across crashes, partial insertion, restarts, and volume moves. Revision checks prevent premature template scans. One-shot scans drain local work before acknowledgment.
+- [x] **R5 Old relationship reporters survived complete snapshots.** Source and check reporters now replace only their own registrations. Partial snapshots preserve edges, and queries exclude removed endpoints.
+- [x] **R6 Findings survived when their check stopped applying.** Enabled checks retire those findings with `no_longer_applicable`. Disabled checks and scope refusals cannot use this path.
+- [x] **R7 Capped collection reads hid findings in triage views.** Server-side queries provide complete counts, bounded pages, exact severity filters, group members, and asset summaries. Graph views disclose truncation. Debounced search cannot overwrite newer filters.
+- [x] **R8 Scan retention erased scheduling watermarks.** Atomic `RecordScan` updates durable `scan_state`, independent of history pruning.
+
+Additional regressions cover exactly-full Nuclei verification pages, global proxy configuration, unsafe/pipeline request clients, repeated KEV catalog additions, and failed observation reads.
+Migration `00009` adds relationship reporters, `00010` adds scan state, and `00011` adds the scan-trigger outbox.
+
+Validation passed `2,411` race-enabled Go tests with real PostgreSQL and no test-level skips, plus `225` UI tests, build, and lint.
+Go vet, security lint, Helm lint/render variants, and scanner fixtures also passed. Govulncheck found no reachable or imported-package vulnerabilities.
+
+Linux ARM64 plugin fixtures verify the actual sandbox and guarded channel. Local Nuclei fixtures exercise normal, raw, unsafe, and pipeline clients.
+
+This review did not deploy Deckard or scan the user's estate. Network plugins must migrate to the [guarded channel](../../plugins.md#guarded-network-channel).
+
+### Remaining operator work
+
+Deploy a chosen release through the normal environment workflow. Let Deckard apply the three migrations before starting workers.
+Migrate any custom network plugins, then verify source freshness, pending triggers, and expected findings in that environment.
+These steps require environment-specific choices and were not performed during this repository review.
