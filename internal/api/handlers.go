@@ -97,23 +97,53 @@ var findingStatuses = map[string]bool{
 func in(set map[string]bool) func(string) bool { return func(s string) bool { return set[s] } }
 
 func (s *Server) listAssets(w http.ResponseWriter, r *http.Request) {
-	q := newQuery(r, "kind", "source", "scope", "zone", "q", "include_removed", "limit", "offset")
+	q := newQuery(r, "kind", "source", "scope", "zone", "q", "include_removed", "open_min_severity", "include_summary", "limit", "offset")
 	f := store.AssetFilter{
-		Kind:           model.AssetKind(q.enum("kind", in(assetKinds))),
-		Source:         q.str("source"),
-		Scope:          model.ScopeClass(q.enum("scope", in(scopeClasses))),
-		Zone:           q.str("zone"),
-		Query:          q.str("q"),
-		IncludeRemoved: q.boolean("include_removed"),
-		Limit:          q.limit(),
-		Offset:         q.offset(),
+		Kind:            model.AssetKind(q.enum("kind", in(assetKinds))),
+		Source:          q.str("source"),
+		Scope:           model.ScopeClass(q.enum("scope", in(scopeClasses))),
+		Zone:            q.str("zone"),
+		Query:           q.str("q"),
+		IncludeRemoved:  q.boolean("include_removed"),
+		OpenMinSeverity: model.Severity(q.enum("open_min_severity", func(v string) bool { return model.Severity(v).Valid() })),
+		Limit:           q.limit(),
+		Offset:          q.offset(),
 	}
+	summary := q.boolean("include_summary")
 	if q.reject(w) {
 		return
 	}
 	items, total, err := s.d.Store.ListAssets(r.Context(), f)
 	if err != nil {
 		s.storeError(w, r, err)
+		return
+	}
+	if summary {
+		ids := make([]int64, len(items))
+		for i, a := range items {
+			ids[i] = a.ID
+		}
+		summaries, err := s.d.Store.AssetSummaries(r.Context(), ids)
+		if err != nil {
+			s.storeError(w, r, err)
+			return
+		}
+		byID := make(map[int64]store.AssetSummary, len(summaries))
+		for _, v := range summaries {
+			byID[v.AssetID] = v
+		}
+		type item struct {
+			model.Asset
+			OpenFindings int            `json:"open_findings"`
+			TopSeverity  model.Severity `json:"top_severity"`
+			LastScan     *time.Time     `json:"last_scan"`
+		}
+		out := make([]item, 0, len(items))
+		for _, a := range items {
+			v := byID[a.ID]
+			out = append(out, item{Asset: a, OpenFindings: v.OpenFindings, TopSeverity: v.TopSeverity, LastScan: v.LastScan})
+		}
+		writeJSON(w, http.StatusOK, newList(out, total, f.Limit, f.Offset))
 		return
 	}
 	writeJSON(w, http.StatusOK, newList(items, total, f.Limit, f.Offset))
@@ -316,21 +346,49 @@ func (s *Server) assetGraph(w http.ResponseWriter, r *http.Request) {
 // ---- findings ----
 
 func (s *Server) listFindings(w http.ResponseWriter, r *http.Request) {
-	q := newQuery(r, "status", "min_severity", "check", "zone", "source", "asset_id", "q", "limit", "offset")
+	q := newQuery(r, "status", "min_severity", "severity", "check", "zone", "source", "asset_id", "q", "sort", "direction", "group_by", "group_key", "attention", "first_seen_after", "limit", "offset")
 	f := store.FindingFilter{
-		MinSeverity: model.Severity(q.enum("min_severity", func(v string) bool { return model.Severity(v).Valid() })),
-		Check:       q.str("check"),
-		Zone:        q.str("zone"),
-		Source:      q.str("source"),
-		AssetID:     q.posInt64("asset_id"),
-		Query:       q.str("q"),
-		Limit:       q.limit(),
-		Offset:      q.offset(),
+		MinSeverity:   model.Severity(q.enum("min_severity", func(v string) bool { return model.Severity(v).Valid() })),
+		Severity:      model.Severity(q.enum("severity", func(v string) bool { return model.Severity(v).Valid() })),
+		Sort:          q.enum("sort", in(map[string]bool{"severity": true, "first_seen": true, "last_seen": true, "attention": true, "count": true})),
+		Direction:     q.enum("direction", in(map[string]bool{"asc": true, "desc": true})),
+		GroupBy:       q.enum("group_by", in(map[string]bool{"asset": true, "check": true, "zone": true})),
+		AttentionOnly: q.boolean("attention"),
+		Check:         q.str("check"),
+		Zone:          q.str("zone"),
+		Source:        q.str("source"),
+		AssetID:       q.posInt64("asset_id"),
+		Query:         q.str("q"),
+		Limit:         q.limit(),
+		Offset:        q.offset(),
+	}
+	if _, present := q.v["group_key"]; present {
+		// Asset keys include URLs and cloud-resource IDs, longer than search text.
+		key := q.strMax("group_key", 8192)
+		f.GroupKey = &key
+		if f.GroupBy == "" {
+			q.fail("group_key requires group_by")
+		}
+	}
+	if f.Sort == "count" && (f.GroupBy == "" || f.GroupKey != nil) {
+		q.fail("sort=count requires grouped results")
+	}
+	if after, ok := q.timeParam("first_seen_after"); ok {
+		f.FirstSeenAfter = after
 	}
 	for _, st := range q.enums("status", in(findingStatuses)) {
 		f.Statuses = append(f.Statuses, model.FindingStatus(st))
 	}
 	if q.reject(w) {
+		return
+	}
+	if f.GroupBy != "" && f.GroupKey == nil {
+		groups, total, err := s.d.Store.ListFindingGroups(r.Context(), f)
+		if err != nil {
+			s.storeError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, newList(groups, total, f.Limit, f.Offset))
 		return
 	}
 	items, total, err := s.d.Store.ListFindings(r.Context(), f)

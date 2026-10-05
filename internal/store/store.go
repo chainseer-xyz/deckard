@@ -58,14 +58,15 @@ func (d InventoryDiff) Empty() bool {
 
 // AssetFilter narrows ListAssets. Zero values mean "any".
 type AssetFilter struct {
-	Kind           model.AssetKind
-	Source         string
-	Scope          model.ScopeClass
-	Zone           string
-	Query          string // substring match on key
-	IncludeRemoved bool
-	Limit          int
-	Offset         int
+	Kind            model.AssetKind
+	Source          string
+	Scope           model.ScopeClass
+	Zone            string
+	Query           string // substring match on key
+	IncludeRemoved  bool
+	OpenMinSeverity model.Severity // assets with open findings at or above this severity
+	Limit           int
+	Offset          int
 }
 
 // Edge is a stored relation with its far-side asset resolved.
@@ -194,21 +195,45 @@ type IngestScope struct {
 
 // FindingFilter narrows ListFindings. Zero values mean "any".
 type FindingFilter struct {
-	Statuses    []model.FindingStatus
-	MinSeverity model.Severity
-	Check       string
-	Zone        string
-	Source      string
-	AssetID     int64
-	Query       string
-	Limit       int
-	Offset      int
+	Statuses       []model.FindingStatus
+	MinSeverity    model.Severity
+	Severity       model.Severity // exact severity; empty means any
+	Sort           string         // severity, last_seen, first_seen, attention
+	Direction      string         // asc or desc
+	GroupBy        string         // asset, check, or zone
+	GroupKey       *string        // nil means no group filter; an empty zone is valid
+	AttentionOnly  bool
+	FirstSeenAfter time.Time
+	Check          string
+	Zone           string
+	Source         string
+	AssetID        int64
+	Query          string
+	Limit          int
+	Offset         int
 	// IncludeRemovedAssets keeps unresolved findings (open, acknowledged,
 	// suppressed, false_positive) of removed assets in the result. The zero
 	// value hides them, so the dispatcher's open list never re-alerts on a
 	// removed asset. Resolved findings (history) are always listed, and a
 	// filter naming an AssetID is never narrowed.
 	IncludeRemovedAssets bool
+}
+
+// FindingGroup summarizes every matching finding in one group.
+type FindingGroup struct {
+	Key    string         `json:"key"`
+	Label  string         `json:"label"`
+	Total  int            `json:"total"`
+	Counts map[string]int `json:"counts"`
+	Top    model.Severity `json:"top"`
+}
+
+// AssetSummary describes current findings and scanning state for one asset.
+type AssetSummary struct {
+	AssetID      int64          `json:"asset_id"`
+	OpenFindings int            `json:"open_findings"`
+	TopSeverity  model.Severity `json:"top_severity"`
+	LastScan     *time.Time     `json:"last_scan"`
 }
 
 // StatusChange is an operator action on a finding.
@@ -330,6 +355,8 @@ type Store interface {
 	GetAsset(ctx context.Context, id int64) (*model.Asset, error)
 	GetAssetByKey(ctx context.Context, kind model.AssetKind, key string) (*model.Asset, error)
 	ListAssets(ctx context.Context, f AssetFilter) ([]model.Asset, int, error)
+	AssetSummaries(ctx context.Context, ids []int64) ([]AssetSummary, error)
+	// Edges returns only relationships whose endpoints are both live.
 	Edges(ctx context.Context, assetID int64) ([]Edge, error)
 
 	SaveObservation(ctx context.Context, assetID int64, o model.ObservationInput, now time.Time) error
@@ -350,6 +377,7 @@ type Store interface {
 	ListIngestScopes(ctx context.Context) ([]IngestScope, error)
 	GetFinding(ctx context.Context, id int64) (*model.Finding, error)
 	ListFindings(ctx context.Context, f FindingFilter) ([]model.Finding, int, error)
+	ListFindingGroups(ctx context.Context, f FindingFilter) ([]FindingGroup, int, error)
 	// ChangeFindingStatus applies an operator action. Expired suppressions are
 	// returned to open by ExpireSuppressions.
 	ChangeFindingStatus(ctx context.Context, id int64, c StatusChange, now time.Time) error

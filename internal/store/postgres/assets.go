@@ -639,6 +639,9 @@ func (s *Store) ListAssets(ctx context.Context, f store.AssetFilter) ([]model.As
 	if f.Scope != "" {
 		w.add("a.scope = ?", f.Scope)
 	}
+	if f.OpenMinSeverity != "" {
+		w.add("EXISTS (SELECT 1 FROM findings f WHERE f.asset_id = a.id AND f.status = 'open' AND f.severity_rank >= ?)", f.OpenMinSeverity.Rank())
+	}
 	if f.Zone != "" {
 		w.add("a.zone = ?", f.Zone)
 	}
@@ -652,7 +655,12 @@ func (s *Store) ListAssets(ctx context.Context, f store.AssetFilter) ([]model.As
 	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM assets a`+w.sql(), w.args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	q := `SELECT ` + assetCols + ` FROM assets a` + w.sql() + ` ORDER BY a.kind COLLATE "C", a.key COLLATE "C"`
+	order := ` ORDER BY a.kind COLLATE "C", a.key COLLATE "C"`
+	if f.OpenMinSeverity != "" {
+		order = ` ORDER BY (SELECT max(f.severity_rank) FROM findings f WHERE f.asset_id = a.id AND f.status = 'open') DESC,
+			(SELECT count(*) FROM findings f WHERE f.asset_id = a.id AND f.status = 'open') DESC, a.key COLLATE "C", a.id`
+	}
+	q := `SELECT ` + assetCols + ` FROM assets a` + w.sql() + order
 	args := w.args
 	if f.Limit > 0 {
 		args = append(args, f.Limit)

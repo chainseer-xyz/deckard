@@ -65,12 +65,16 @@ func (q *query) single(name string) (string, bool) {
 }
 
 func (q *query) str(name string) string {
+	return q.strMax(name, maxTextParam)
+}
+
+func (q *query) strMax(name string, max int) string {
 	s, ok := q.single(name)
 	if !ok {
 		return ""
 	}
-	if len(s) > maxTextParam {
-		q.fail("parameter %q longer than %d characters", name, maxTextParam)
+	if len(s) > max {
+		q.fail("parameter %q longer than %d characters", name, max)
 		return ""
 	}
 	return s
