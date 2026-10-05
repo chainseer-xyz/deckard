@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sort"
 	"strconv"
 	"time"
 
@@ -17,9 +16,8 @@ const (
 	maxDrainPages = 20 // at most sseBatch*maxDrainPages events per drain
 )
 
-// cursor tracks what a stream has delivered. Events are de-duplicated by ID;
-// the time bound only narrows the store query, and keeps a margin so events
-// sharing a timestamp with the last one delivered are never skipped.
+// cursor tracks what a stream has delivered. The fixed time bound limits
+// replay; ascending ID pagination handles batches and shared timestamps.
 type cursor struct {
 	id    int64
 	since time.Time
@@ -159,27 +157,16 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 // pushEvents writes every store event newer than the cursor. A write error
 // means the client is gone.
 func (s *Server) pushEvents(ctx context.Context, w http.ResponseWriter, cur *cursor) error {
-	// qsince pages through a backlog larger than one batch. The persistent
-	// cursor keeps a 1s margin (so same-timestamp events are never skipped
-	// between polls); paging within one drain advances to the batch's newest
-	// timestamp instead, otherwise a burst wider than one batch inside that
-	// margin would be re-read forever.
-	qsince := cur.since
 	// Bounded work per drain: a huge backlog is delivered over successive
 	// drains (the cursor persists) instead of in one unbounded burst.
 	for page := 0; page < maxDrainPages; page++ {
 		qctx, cancel := context.WithTimeout(ctx, s.d.RequestTimeout)
-		evs, err := s.d.Store.ListEvents(qctx, qsince, sseBatch)
+		evs, err := s.d.Store.ListEventsAfter(qctx, cur.since, cur.id, sseBatch)
 		cancel()
 		if err != nil {
 			return err
 		}
-		sort.Slice(evs, func(i, j int) bool { return evs[i].ID < evs[j].ID })
-		var maxAt time.Time
 		for _, e := range evs {
-			if e.At.After(maxAt) {
-				maxAt = e.At
-			}
 			if e.ID <= cur.id {
 				continue
 			}
@@ -191,19 +178,10 @@ func (s *Server) pushEvents(ctx context.Context, w http.ResponseWriter, cur *cur
 				return err
 			}
 			cur.id = e.ID
-			if t := e.At.Add(-time.Second); t.After(cur.since) {
-				cur.since = t
-			}
 		}
-		if len(evs) < sseBatch || !maxAt.After(qsince) {
+		if len(evs) < sseBatch {
 			return nil
 		}
-		qsince = maxAt
-	}
-	// Page budget spent: resume from the newest timestamp reached so the next
-	// drain does not re-read what this one already delivered.
-	if qsince.After(cur.since) {
-		cur.since = qsince
 	}
 	return nil
 }

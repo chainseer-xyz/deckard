@@ -362,5 +362,8 @@ type Store interface {
 	// many were deleted.
 	PruneScans(ctx context.Context, olderThan time.Time) (int, error)
 	ListEvents(ctx context.Context, since time.Time, limit int) ([]Event, error)
+	// ListEventsAfter returns events at or after since with IDs greater than
+	// afterID, ordered by ascending ID. The stream advances only the ID cursor.
+	ListEventsAfter(ctx context.Context, since time.Time, afterID int64, limit int) ([]Event, error)
 	Stats(ctx context.Context) (Stats, error)
 }

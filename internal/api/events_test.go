@@ -237,6 +237,64 @@ func TestSSEDeliversInOrderAndBatches(t *testing.T) {
 	}
 }
 
+func TestSSEPagesAndResumesEventsWithIdenticalTimestamps(t *testing.T) {
+	e := newEnv(t)
+	e.store.Do(func(s *fakestore.Store) {
+		for id := int64(1); id <= 1200; id++ {
+			s.Events = append(s.Events, evAt(id, "asset_added", t0.Add(-time.Minute)))
+		}
+	})
+	ts := e.sseServer(t)
+	t.Run("replays every batch", func(t *testing.T) {
+		c := e.stream(t, ts, "/api/v1/events?since="+t0.Add(-time.Hour).Format(time.RFC3339))
+		c.expectIDs(1, 1200)
+		c.expectNo("event: change", 100*time.Millisecond)
+	})
+	t.Run("resumes within a timestamp", func(t *testing.T) {
+		c := e.stream(t, ts, "/api/v1/events", "Last-Event-ID", "600")
+		c.expectIDs(601, 1200)
+		c.expectNo("event: change", 100*time.Millisecond)
+	})
+}
+
+func TestSSECursorDoesNotSkipLaterIDsWithEarlierTimestamps(t *testing.T) {
+	e := newEnv(t)
+	ts := e.sseServer(t)
+	c := e.stream(t, ts, "/api/v1/events?since="+t0.Add(-time.Hour).Format(time.RFC3339))
+	c.until(": connected", 2*time.Second)
+	e.store.Do(func(s *fakestore.Store) {
+		s.Events = append(s.Events, evAt(1, "asset_added", t0.Add(-time.Minute)))
+	})
+	c.expectIDs(1, 1)
+	e.store.Do(func(s *fakestore.Store) {
+		s.Events = append(s.Events, evAt(2, "finding_opened", t0.Add(-2*time.Minute)))
+	})
+	c.expectIDs(2, 2)
+}
+
+func (c *sseClient) expectIDs(first, last int64) {
+	c.t.Helper()
+	deadline := time.After(5 * time.Second)
+	for want := first; want <= last; {
+		select {
+		case line, ok := <-c.lines:
+			if !ok {
+				c.t.Fatalf("stream closed before event %d", want)
+			}
+			if strings.HasPrefix(line, "id: ") {
+				var id int64
+				if _, err := fmt.Sscan(line[4:], &id); err != nil || id != want {
+					c.t.Fatalf("event ID %q, want %d", line, want)
+				}
+				want++
+			}
+		case <-deadline:
+			c.t.Fatalf("stream stopped before event %d", want)
+		}
+	}
+	c.until("data:", 2*time.Second) // finish the last frame before checking for repeats
+}
+
 func TestSSEKeepsStreamOnTransientStoreError(t *testing.T) {
 	e := newEnv(t)
 	ts := e.sseServer(t)
