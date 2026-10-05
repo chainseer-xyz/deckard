@@ -42,7 +42,6 @@ type Guard struct {
 	dnsq    dnsx.Querier // recursive-resolver client behind Guard.DNS
 	dnsOnce sync.Once
 
-	verified verifyCache // VerifyOwnedTarget results (see verify.go)
 	throttle refusalThrottle
 	observe  func(tier, class, reason string) // refusal counter, may be nil
 
