@@ -44,6 +44,14 @@ check "non-root"                     "runAsNonRoot: true" "$cnpg"
 check "read-only rootfs"             "readOnlyRootFilesystem: true" "$cnpg"
 absent "no cpu limit by default"     "cpu: " "$(print -r -- "$cnpg" | awk "/limits:/{f=1} f&&/cpu/{print} /requests:/{f=0}")"
 check "roles env"                    "api,scheduler,worker" "$cnpg"
+absent "default keeps implicit rolling strategy" "strategy:" "$cnpg"
+recreate=$(helm template t deckard --set database.cnpg.enabled=true --set worker.enabled=true --set "roles={api,scheduler}" --set deploymentStrategy.type=Recreate)
+check_count "Recreate applied to server and worker" "^    type: Recreate$" 2 "$recreate"
+absent "Recreate omits rollingUpdate" "rollingUpdate:" "$recreate"
+rolling=$(helm template t deckard --set database.cnpg.enabled=true --set deploymentStrategy.type=RollingUpdate --set deploymentStrategy.rollingUpdate.maxSurge=0 --set deploymentStrategy.rollingUpdate.maxUnavailable=1)
+check "explicit rolling strategy supported" "type: RollingUpdate" "$rolling"
+check "explicit rolling maxSurge preserved" "maxSurge: 0" "$rolling"
+check "explicit rolling maxUnavailable preserved" "maxUnavailable: 1" "$rolling"
 # deckard drains for 30s then cancels for up to ~12s; Kubernetes' default 30s
 # grace would SIGKILL it mid-cancel and orphan running jobs.
 check "termination grace default"    "terminationGracePeriodSeconds: 60" "$cnpg"
