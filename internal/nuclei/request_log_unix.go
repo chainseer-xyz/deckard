@@ -5,6 +5,7 @@ package nuclei
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 
 	"golang.org/x/sys/unix"
@@ -22,6 +23,10 @@ func startRequestLog(path string) (func() error, error) {
 	if err != nil {
 		return nil, err
 	}
+	if fd < 0 || fd > math.MaxInt32 {
+		return nil, errors.Join(fmt.Errorf("request log descriptor is out of range"), unix.Close(fd))
+	}
+	pollFD := int32(fd)
 	stop, done := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	var failed bool
@@ -29,7 +34,7 @@ func startRequestLog(path string) (func() error, error) {
 	go func() {
 		defer close(done)
 		var buffer [16 << 10]byte
-		poll := [1]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+		poll := [1]unix.PollFd{{Fd: pollFD, Events: unix.POLLIN}}
 		read := func() (int, error) {
 			n, err := unix.Read(fd, buffer[:])
 			failed = failed || n > 0
