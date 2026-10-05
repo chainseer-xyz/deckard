@@ -6,7 +6,7 @@ import Findings from './Findings';
 import Inventory from './Inventory';
 
 const { server } = mockServer();
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterAll(() => server.close());
 afterEach(() => server.resetHandlers());
 

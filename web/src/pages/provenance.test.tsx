@@ -20,7 +20,7 @@ const sharedIP: Asset = {
 };
 const resource: Asset = { ...sharedIP, id: 77, kind: 'cloud_resource', key: 'aws:ec2:i-123456', source: 'aws', reporters: ['aws'], source_facts: { aws: sharedIP.source_facts?.aws ?? {} } };
 const { server, state } = mockServer({ assets: [sharedIP], findings: [] });
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterAll(() => server.close());
 afterEach(() => {
   server.resetHandlers();
