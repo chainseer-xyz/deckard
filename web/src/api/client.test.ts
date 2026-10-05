@@ -5,7 +5,7 @@ import { api, ApiError, buildQuery, configureClient, safeLoginUrl, setCsrfToken 
 import { clearToken, getToken, setToken } from './auth';
 
 const server = setupServer();
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 

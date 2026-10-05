@@ -27,7 +27,7 @@ vi.mock('../components/AssetGraph', () => ({
 }));
 
 const { server, state } = mockServer();
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => {
   server.resetHandlers();
   clearToken();
