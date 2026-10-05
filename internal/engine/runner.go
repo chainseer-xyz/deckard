@@ -335,10 +335,11 @@ func (r *runner) runCheck(ctx context.Context, c check.Check, asset model.Asset,
 	if w, ok := c.(check.WantsOpenFindings); ok && w.WantsOpenFindings() && runErr == nil {
 		// A failed lookup fails the run: a check that re-verifies findings must
 		// never run blind, or it could let them resolve unverified.
-		if of, err := r.openFindings(cctx, asset.ID, c.Name()); err != nil {
+		if of, truncated, err := r.openFindings(cctx, asset.ID, c.Name()); err != nil {
 			runErr = fmt.Errorf("load open findings: %w", err)
 		} else {
 			target.OpenFindings = of
+			target.OpenFindingsTruncated = truncated
 		}
 	}
 	if b, err := r.Store.GetBaseline(cctx, asset.ID, c.Name()); err == nil && b != nil {
@@ -419,18 +420,18 @@ var unresolvedStatuses = []model.FindingStatus{
 
 // openFindings returns the asset's unresolved findings of one check, one
 // indexed query (findings_asset_check_idx), bounded by check.MaxOpenFindings.
-func (r *runner) openFindings(ctx context.Context, assetID int64, name string) ([]check.OpenFinding, error) {
-	fs, _, err := r.Store.ListFindings(ctx, store.FindingFilter{
+func (r *runner) openFindings(ctx context.Context, assetID int64, name string) ([]check.OpenFinding, bool, error) {
+	fs, total, err := r.Store.ListFindings(ctx, store.FindingFilter{
 		AssetID: assetID, Check: name, Statuses: unresolvedStatuses, Limit: check.MaxOpenFindings,
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	out := make([]check.OpenFinding, 0, len(fs))
 	for _, f := range fs {
 		out = append(out, check.OpenFinding{Fingerprint: f.Fingerprint, Severity: f.Severity, Status: f.Status, Evidence: f.Evidence})
 	}
-	return out, nil
+	return out, total > len(fs), nil
 }
 
 // safeRun calls the check, converting a panic into an error so one bad check

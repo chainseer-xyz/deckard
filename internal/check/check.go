@@ -118,6 +118,9 @@ type Target struct {
 	// capped at MaxOpenFindings. The engine fills it only for checks that
 	// implement WantsOpenFindings; it is nil for every other check.
 	OpenFindings []OpenFinding
+	// OpenFindingsTruncated means additional unresolved findings were omitted
+	// from the bounded view. Absence cannot resolve unverified findings.
+	OpenFindingsTruncated bool
 }
 
 // MaxOpenFindings bounds Target.OpenFindings.

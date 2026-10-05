@@ -260,7 +260,7 @@ func (c *nucleiCheck) Run(ctx context.Context, t check.Target) (*check.Result, e
 	}
 	return &check.Result{
 		Findings: findings,
-		Partial:  partial || plan.Unverifiable,
+		Partial:  partial || plan.Unverifiable || t.OpenFindingsTruncated,
 		Observations: []model.ObservationInput{{Check: c.Name(), Data: map[string]any{
 			"target": tg.arg, "matches": len(findings), "partial": runErr != nil,
 		}}},
