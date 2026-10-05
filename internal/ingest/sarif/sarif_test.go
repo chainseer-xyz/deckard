@@ -53,6 +53,25 @@ func TestCleanAndErrors(t *testing.T) {
 	}
 }
 
+func TestInvocationFailuresAreRejected(t *testing.T) {
+	for _, results := range []string{`[]`, `[{"ruleId":"r1","message":{"text":"partial result"}}]`} {
+		data := `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"CodeQL"}},"invocations":[{"executionSuccessful":false}],"results":` + results + `}]}`
+		if _, err := Parse([]byte(data), ingest.ParseOptions{}); err == nil || !strings.Contains(err.Error(), "did not complete successfully") {
+			t.Fatalf("failed invocation accepted: results=%s err=%v", results, err)
+		}
+	}
+	for _, invocations := range []string{`[{"executionSuccessful":true}]`, `[{}]`, `[]`} {
+		data := `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"CodeQL"}},"invocations":` + invocations + `,"results":[]}]}`
+		if _, err := Parse([]byte(data), ingest.ParseOptions{}); err != nil {
+			t.Fatalf("invocations=%s rejected: %v", invocations, err)
+		}
+	}
+	data := `{"version":"2.1.0","runs":[{"invocations":[{"executionSuccessful":true}],"results":[]},{"invocations":[{"executionSuccessful":false}],"results":[]}]}`
+	if _, err := Parse([]byte(data), ingest.ParseOptions{}); err == nil {
+		t.Fatal("a failed run in a multi-run log was accepted")
+	}
+}
+
 func FuzzParse(f *testing.F) {
 	ingesttest.Seeds(f)
 	f.Add([]byte(`{"version":"2.1.0","runs":[{"results":[{"ruleIndex":-1,"locations":[{"physicalLocation":{"region":{"startLine":-3}}}],"properties":{"security-severity":"NaN"}}]}]}`))

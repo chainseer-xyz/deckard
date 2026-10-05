@@ -42,6 +42,9 @@ type run struct {
 		RepositoryURI string `json:"repositoryUri"`
 		RevisionID    string `json:"revisionId"`
 	} `json:"versionControlProvenance"`
+	Invocations []struct {
+		ExecutionSuccessful *bool `json:"executionSuccessful"`
+	} `json:"invocations"`
 	Results []result `json:"results"`
 }
 
@@ -123,7 +126,12 @@ func Parse(data []byte, o ingest.ParseOptions) ([]ingest.Finding, error) {
 		return nil, fmt.Errorf("SARIF log has no runs")
 	}
 	var out []ingest.Finding
-	for _, r := range l.Runs {
+	for i, r := range l.Runs {
+		for _, invocation := range r.Invocations {
+			if invocation.ExecutionSuccessful != nil && !*invocation.ExecutionSuccessful {
+				return nil, fmt.Errorf("SARIF run %d did not complete successfully; no findings were ingested", i)
+			}
+		}
 		for _, res := range r.Results {
 			if f, ok := finding(r, res, o); ok {
 				out = append(out, f)
