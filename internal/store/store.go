@@ -358,11 +358,11 @@ type Store interface {
 	RecordScan(ctx context.Context, r ScanRun) error
 	ListScans(ctx context.Context, limit int) ([]ScanRun, error)
 	// LastScans returns one row per (asset, check) that has any recorded run,
-	// independent of how many runs exist (backed by an index). The scheduler
+	// from durable scan_state, independent of retained history. The scheduler
 	// uses LastAttempt to pace retries and LastSuccess for due-ness.
 	LastScans(ctx context.Context) ([]ScanLast, error)
 	// PruneScans deletes runs that started before olderThan and returns how
-	// many were deleted.
+	// many were deleted. Durable scheduling state survives pruning.
 	PruneScans(ctx context.Context, olderThan time.Time) (int, error)
 	ListEvents(ctx context.Context, since time.Time, limit int) ([]Event, error)
 	// ListEventsAfter returns events at or after since with IDs greater than

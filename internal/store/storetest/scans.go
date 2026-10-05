@@ -97,11 +97,20 @@ func testScanHistory(t *testing.T, f Factory) {
 			t.Errorf("remaining runs = %+v", runs)
 		}
 		got := last(e)
-		if len(got) != 1 || !got[k{a.ID, "c1"}].LastSuccess.Equal(at(3)) {
+		if len(got) != 2 || !got[k{a.ID, "c1"}].LastSuccess.Equal(at(3)) || !got[k{a.ID, "c2"}].LastSuccess.Equal(at(1)) {
 			t.Errorf("LastScans after prune = %+v", got)
 		}
 		if n, err := e.s.PruneScans(e.ctx, at(3)); err != nil || n != 0 {
 			t.Errorf("second prune = %d, %v", n, err)
+		}
+		if _, err := e.s.PruneScans(e.ctx, at(4)); err != nil {
+			t.Fatal(err)
+		}
+		if runs, err := e.s.ListScans(e.ctx, 0); err != nil || len(runs) != 0 {
+			t.Fatalf("all history pruned: runs=%v err=%v", runs, err)
+		}
+		if remaining := last(e); len(remaining) != 2 || !remaining[k{a.ID, "c1"}].LastAttempt.Equal(at(3)) {
+			t.Errorf("scheduling state disappeared with history: %+v", remaining)
 		}
 	})
 }
