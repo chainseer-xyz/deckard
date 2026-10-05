@@ -50,6 +50,59 @@ describe('EvidenceTable', () => {
     expect(table.textContent).not.toContain(long);
   });
 
+  it('bounds long ARN/JSON rows without losing their expandable full values', async () => {
+    const arn = `arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/${'resource-'.repeat(30)}`;
+    const json = [{ resource: arn, metadata: 'x'.repeat(400) }];
+    const longKey = `aws_${'metadata_'.repeat(20)}identifier`;
+    render(<EvidenceTable data={{ arn, payload: json, [longKey]: 'recorded' }} label="AWS facts" raw={false} />);
+    const table = screen.getByRole('table', { name: 'AWS facts' });
+    // jsdom does not calculate intrinsic table widths. Guard the layout and
+    // wrapping contract here; actual 375px rendering requires Brave verification.
+    expect(table).toHaveClass('w-full', 'table-fixed');
+    for (const header of within(table).getAllByRole('rowheader')) {
+      expect(header).toHaveAttribute('scope', 'row');
+      expect(header).toHaveClass('[overflow-wrap:anywhere]');
+      expect(header).not.toHaveClass('min-w-28');
+    }
+    for (const cell of within(table).getAllByRole('cell')) {
+      expect(cell).toHaveClass('[overflow-wrap:anywhere]');
+    }
+    expect(table.textContent).not.toContain(arn);
+    const expandArn = within(table).getByRole('button', { name: 'Show more: Arn' });
+    await userEvent.click(expandArn);
+    expect(expandArn).toHaveAttribute('aria-expanded', 'true');
+    expect(table.textContent).toContain(arn);
+    await userEvent.click(within(table).getByRole('button', { name: 'Show more: Payload' }));
+    expect(table.textContent).toContain(JSON.stringify(json));
+    expect(within(table).getByRole('button', { name: 'Show less: Payload' })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('wraps long list chips and lets each chip reveal its complete value', async () => {
+    const arn = `arn:aws:iam::123456789012:role/${'nested-role/'.repeat(25)}`;
+    render(<EvidenceTable data={{ resources: [arn, 'short'] }} label="AWS resources" raw={false} />);
+    const table = screen.getByRole('table', { name: 'AWS resources' });
+    expect(table.textContent).not.toContain(arn);
+    const expand = within(table).getByRole('button', { name: 'Show more: Resources item 1' });
+    await userEvent.click(expand);
+    expect(expand).toHaveAttribute('aria-expanded', 'true');
+    expect(table.textContent).toContain(arn);
+    for (const chip of within(table).getAllByRole('listitem')) {
+      expect(chip).toHaveClass('min-w-0', 'max-w-full', '[overflow-wrap:anywhere]');
+    }
+    await userEvent.click(within(table).getByRole('button', { name: 'Show less: Resources item 1' }));
+    expect(table.textContent).not.toContain(arn);
+    expect(within(table).getByText('short')).toBeInTheDocument();
+  });
+
+  it('keeps long CNAME chips within the evidence value column', () => {
+    render(<EvidenceTable data={{ cname_chain: [`${'long-host'.repeat(20)}.example.com`, 'target.example.com'] }} label="DNS facts" raw={false} />);
+    const chain = screen.getByRole('list', { name: 'Chain' });
+    for (const hop of within(chain).getAllByRole('listitem')) {
+      expect(hop).toHaveClass('min-w-0', 'max-w-full');
+      expect(hop.querySelector('span')).toHaveClass('[overflow-wrap:anywhere]');
+    }
+  });
+
   it('collapses long lists to the first items', async () => {
     const tags = Array.from({ length: 12 }, (_, i) => `tag${i}`);
     render(<EvidenceTable data={{ names: tags }} label="E" raw={false} />);
