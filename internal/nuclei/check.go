@@ -38,6 +38,7 @@ type options struct {
 	logger      *slog.Logger
 	observe     RunObserver
 	gate        *ProcessGate
+	policy      DestinationPolicy
 }
 
 // RunObserver receives one nuclei process result. source is downloaded,
@@ -73,6 +74,9 @@ func WithRunObserver(f RunObserver) Option { return func(o *options) { o.observe
 // deckard process.
 func WithProcessGate(g *ProcessGate) Option { return func(o *options) { o.gate = g } }
 
+// WithDestinationPolicy installs the runtime IP boundary for real processes.
+func WithDestinationPolicy(p DestinationPolicy) Option { return func(o *options) { o.policy = p } }
+
 func buildOptions(opts []Option) options {
 	var o options
 	for _, f := range opts {
@@ -98,7 +102,7 @@ func Checks(cfg config.NucleiConfig, defaults map[string]map[string]any, verify 
 		return nil
 	}
 	o := buildOptions(opts)
-	r := ExecRunner{Env: o.env, Gate: o.gate}
+	r := ExecRunner{Env: o.env, Gate: o.gate, Policy: o.policy}
 	return []check.Check{
 		New(cfg, verify, r, false, defaults[NameActive], opts...),
 		New(cfg, verify, r, true, defaults[NameIntrusive], opts...),

@@ -828,7 +828,8 @@ func TestOutOfScopeTargetsNeverReachTheBinary(t *testing.T) {
 		verified = append(verified, host)
 		return host == "a.example.com"
 	}
-	scanner := nuclei.NewScanner(config.NucleiConfig{TemplatesDir: root, Binary: bin.Path}, verify, nuclei.ExecRunner{}, nil)
+	scanner := nuclei.NewScanner(config.NucleiConfig{TemplatesDir: root, Binary: bin.Path}, verify,
+		nuclei.ExecRunner{Policy: func(context.Context, []string) ([]string, error) { return []string{"192.0.2.0/24"}, nil }}, nil)
 
 	th := newTmplHarness(t, nil, []model.Asset{
 		urlAsset(1, "https://a.example.com/"),

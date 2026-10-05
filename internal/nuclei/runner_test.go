@@ -2,6 +2,7 @@ package nuclei
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"strings"
 	"testing"
@@ -24,5 +25,25 @@ func TestExecRunnerVerboseStderrDoesNotFailRun(t *testing.T) {
 	}
 	if !strings.Contains(string(out), `"ok":true`) {
 		t.Fatalf("stdout = %q", out)
+	}
+}
+
+func TestExecRunnerSuccessfulExitWithFailedRequestsIsIncomplete(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	script := `previous=''; for argument do
+	if [ "$previous" = '-elog' ]; then printf '{"error":"denied address found for host"}\n' > "$argument"; fi
+	previous="$argument"
+	done
+	printf '{"partial_match":true}\n'`
+	r := ExecRunner{Policy: fixturePolicy}
+	out, err := r.Run(context.Background(), sh, []string{"-c", script, "--", "-u", "https://app.example.com/"})
+	if err == nil || !strings.Contains(err.Error(), "incomplete scan") || !strings.Contains(string(out), "partial_match") {
+		t.Fatalf("request failure became clean or lost matches: stdout=%q err=%v", out, err)
+	}
+	if errors.Is(err, ErrOutOfScope) {
+		t.Fatal("partial process output must remain salvageable, not a preflight refusal")
 	}
 }

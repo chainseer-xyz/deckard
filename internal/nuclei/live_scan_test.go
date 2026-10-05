@@ -72,7 +72,7 @@ func TestLiveScanner(t *testing.T) {
 			"NUCLEI_CONFIG_DIR=" + state + "/config/nuclei", "NUCLEI_TEMPLATES_DIR=" + root}, func() {}, nil
 	}
 	s := NewScanner(config.NucleiConfig{TemplatesDir: root, Binary: bin}, func(context.Context, string) bool { return true },
-		ExecRunner{Env: env}, nil)
+		ExecRunner{Env: env, Policy: fixturePolicy}, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	res, err := s.Scan(ctx, ScanRequest{Targets: []ScanTarget{{1, vuln.URL}, {2, clean.URL}}, Templates: []string{tpl}})

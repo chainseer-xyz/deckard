@@ -99,7 +99,7 @@ func (a *App) nuclei() *nucleiWiring {
 		}))
 	}
 	nw.scanner = nuclei.NewScanner(nw.cfg, nuclei.ScopeVerifier(a.guard.VerifyOwnedTarget),
-		nuclei.ExecRunner{Env: nw.env, Gate: nw.gate}, a.cfg.Checks[nuclei.NameActive], runtimeOpts...)
+		nuclei.ExecRunner{Env: nw.env, Gate: nw.gate, Policy: a.guard.DestinationDenylist}, a.cfg.Checks[nuclei.NameActive], runtimeOpts...)
 	return nw
 }
 

@@ -352,7 +352,7 @@ func TestScanWithFakeBinary(t *testing.T) {
 	root := fixtureSet(t)
 	bin := fakenuclei.Install(t, fakenuclei.Conf{Probes: []fakenuclei.Probe{{TemplateID: "CVE-2025-55182", Path: "/_rsc", Contains: "rce-confirmed"}}})
 	cfg := config.NucleiConfig{TemplatesDir: root, Binary: bin.Path}
-	s := NewScanner(cfg, func(context.Context, string) bool { return true }, ExecRunner{}, nil)
+	s := NewScanner(cfg, func(context.Context, string) bool { return true }, ExecRunner{Policy: fixturePolicy}, nil)
 	res, err := s.Scan(context.Background(), ScanRequest{
 		Targets:   []ScanTarget{{1, vuln.URL}, {2, clean.URL}},
 		Templates: abs(root, "http/cves/2025/CVE-2025-55182.yaml", "http/misc/other.yaml"),

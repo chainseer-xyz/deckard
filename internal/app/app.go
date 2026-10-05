@@ -239,7 +239,8 @@ func (a *App) checks() []check.Check {
 	nw := a.nuclei()
 	opts := append([]nuclei.Option{}, nw.opts...)
 	opts = append(opts, nuclei.WithEnv(nw.env), nuclei.WithLogger(a.log),
-		nuclei.WithRunObserver(a.metrics.ObserveNucleiRun), nuclei.WithProcessGate(nw.gate))
+		nuclei.WithRunObserver(a.metrics.ObserveNucleiRun), nuclei.WithProcessGate(nw.gate),
+		nuclei.WithDestinationPolicy(a.guard.DestinationDenylist))
 	if nw.upd != nil {
 		upd := nw.upd
 		opts = append(opts, nuclei.WithTemplateSource(func() string {
