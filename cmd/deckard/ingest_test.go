@@ -21,6 +21,7 @@ import (
 	"github.com/chainseer-xyz/deckard/internal/config"
 	"github.com/chainseer-xyz/deckard/internal/finding"
 	"github.com/chainseer-xyz/deckard/internal/ingest"
+	"github.com/chainseer-xyz/deckard/internal/model"
 	"github.com/chainseer-xyz/deckard/internal/store"
 )
 
@@ -120,6 +121,48 @@ func TestIngestParseErrorPostsNothing(t *testing.T) {
 	code, _, errs := runI(t, "--tool", "prowler", "--scope", "s", "--file", bad, "--url", srv.URL, "--token-env", "DECKARD_TEST_TOKEN")
 	if code != ingestExitUsage || !strings.Contains(errs, "empty") || hits.Load() != 0 {
 		t.Fatalf("exit %d hits %d: %s", code, hits.Load(), errs)
+	}
+}
+
+func TestIngestFailedSARIFDoesNotResolveFindings(t *testing.T) {
+	st := fakestore.New()
+	srv := api.New(api.Deps{
+		Store: st, Authenticator: auth.NewToken(testIngestToken),
+		Ingester: finding.NewProcessor(st, finding.ProcessorConfig{ResolveAfter: 2}, nil),
+		Ingest:   config.IngestConfig{Enabled: true, RateLimit: "100/s", Burst: 100},
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	var requests atomic.Int64
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		srv.Handler().ServeHTTP(w, r)
+	}))
+	defer hs.Close()
+	args := []string{"--tool", "codeql", "--format", "sarif", "--scope", "github.com/example/app",
+		"--url", hs.URL, "--token-env", "DECKARD_TEST_TOKEN"}
+	fixture := filepath.Join("..", "..", "internal", "ingest", "sarif", "testdata", "scan.sarif")
+	if code, _, errs := runI(t, append(args, "--file", fixture)...); code != ingestExitOK {
+		t.Fatalf("seed findings: exit %d: %s", code, errs)
+	}
+	stdin = strings.NewReader("")
+	t.Cleanup(func() { stdin = os.Stdin })
+	for i := 0; i < 2; i++ {
+		stdin = strings.NewReader(`{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"CodeQL"}},"invocations":[{"executionSuccessful":false}],"results":[]}]}`)
+		if code, _, errs := runI(t, args...); code != ingestExitUsage || !strings.Contains(errs, "did not complete successfully") {
+			t.Fatalf("failed scan %d: exit %d: %s", i, code, errs)
+		}
+	}
+	if requests.Load() != 1 {
+		t.Fatalf("failed scans reached the API: %d requests", requests.Load())
+	}
+	findings, total, err := st.ListFindings(context.Background(), store.FindingFilter{Check: "ext.codeql"})
+	if err != nil || total != 4 {
+		t.Fatalf("findings: total=%d err=%v", total, err)
+	}
+	for _, f := range findings {
+		if f.Status != model.StatusOpen || f.MissedRuns != 0 {
+			t.Errorf("failed scans changed finding %d: status=%s missed=%d", f.ID, f.Status, f.MissedRuns)
+		}
 	}
 }
 

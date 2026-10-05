@@ -118,6 +118,9 @@ type Target struct {
 	// capped at MaxOpenFindings. The engine fills it only for checks that
 	// implement WantsOpenFindings; it is nil for every other check.
 	OpenFindings []OpenFinding
+	// OpenFindingsTruncated means additional unresolved findings were omitted
+	// from the bounded view. Absence cannot resolve unverified findings.
+	OpenFindingsTruncated bool
 }
 
 // MaxOpenFindings bounds Target.OpenFindings.
@@ -140,6 +143,14 @@ type OpenFinding struct {
 // scan for it and skips the query for every other check.
 type WantsOpenFindings interface {
 	WantsOpenFindings() bool
+}
+
+// RequiresOwnedDestinations strengthens guarded clients to require owned
+// destination addresses even for a passive check. Scheduling, rate limits and
+// recorded scan tiers remain unchanged. Exec plugins use this boundary because
+// their operator-provided probes must never reach shared or external addresses.
+type RequiresOwnedDestinations interface {
+	RequiresOwnedDestinations() bool
 }
 
 // WantsOwnedZones is an optional Check interface. A check returning true

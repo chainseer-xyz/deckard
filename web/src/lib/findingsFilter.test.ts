@@ -55,10 +55,11 @@ describe('findings filter URL state', () => {
     expect(toSearchParams({ ...defaultFilter, minSeverity: 'medium' }).has('min_severity')).toBe(false);
   });
 
-  it('an exact severity wins over the floor and is applied client-side', () => {
+  it('an exact severity is passed to the server before pagination', () => {
     const f = parseFilter(sp('severity=high'));
     expect(f.severity).toBe('high');
     expect(toApiParams(f).min_severity).toBe('high');
+    expect(toApiParams(f).severity).toBe('high');
     expect(parseFilter(toSearchParams(f))).toEqual(f);
     const items = [{ severity: 'critical' }, { severity: 'high' }, { severity: 'high' }] as Finding[];
     expect(applyExactSeverity(items, f)).toHaveLength(2);

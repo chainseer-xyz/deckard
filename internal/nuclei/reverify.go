@@ -69,8 +69,8 @@ func (x *templateIndex) planReverify(root string, open []check.OpenFinding, tags
 	if len(open) == 0 {
 		return p, nil
 	}
-	if len(open) >= check.MaxOpenFindings {
-		p.Unverifiable = true // there may be more than the engine handed over
+	if len(open) > check.MaxOpenFindings {
+		p.Unverifiable = true // a direct caller supplied more than the bounded view
 		open = open[:check.MaxOpenFindings]
 	}
 	if root == "" {

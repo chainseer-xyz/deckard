@@ -84,6 +84,7 @@ type Store interface {
 	// ListFindings feeds Target.OpenFindings for checks that re-verify their
 	// own unresolved findings (check.WantsOpenFindings).
 	ListFindings(ctx context.Context, f store.FindingFilter) ([]model.Finding, int, error)
+	ResolveInapplicableFindings(ctx context.Context, asset model.Asset, check string, now time.Time) (int, error)
 	// LastScans returns one row per (asset, check) with its latest attempt
 	// and latest success; the scheduler's due-computation reads it.
 	LastScans(ctx context.Context) ([]store.ScanLast, error)

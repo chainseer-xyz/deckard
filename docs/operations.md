@@ -25,6 +25,13 @@ the affected assets with just those templates ("new-template scans"), so a
 newly published CVE template is tried against your inventory within hours
 rather than at the next full cadence.
 
+Template and KEV scan deltas enter the PostgreSQL `scan_triggers` outbox before
+the updater publishes new state. Failed fan-out retries from that outbox, including after restart or a volume move.
+Acknowledgment follows complete queue insertion. One-shot scans acknowledge only after their queued scans finish.
+
+Delivery is at least once. A crash before acknowledgment can repeat work; queue uniqueness and finding reconciliation tolerate retries.
+KEV trigger identity includes the catalog revision, so a later revision can scan the same CVE again.
+
 - Source: projectdiscovery/nuclei-templates, downloaded by the pinned nuclei
   binary's own installer (`nuclei -update-templates`; no template is executed).
   The hosts are nuclei's, not deckard's, so confirm them in your proxy logs when
@@ -458,6 +465,30 @@ Do not edit `river_job` by hand: a job that looks stuck is either about to be
 reclaimed or still running on a live instance.
 
 ## Runbooks
+
+### Scan state and finding retirement
+
+Housekeeping prunes scan history, not scheduling watermarks. The `scan_state` table retains the latest attempt and settled run for each asset and check.
+Long check intervals therefore survive short history retention and process restarts.
+
+Complete source snapshots replace that source's reported relationships. Partial snapshots retain existing relationships.
+Checks replace their own relationships without removing another reporter's registrations.
+
+An enabled check that stops applying to a live, owned asset retires its findings with event reason `no_longer_applicable`.
+Disabled checks, excluded targets and refused destinations cannot retire findings through this path.
+
+### Scanner network boundaries
+
+Nuclei receives an exact-address policy after acquiring its process slot.
+Its dialer rejects every address outside the freshly verified destination set, even if DNS changes during execution.
+Deckard supplies an isolated Nuclei configuration to prevent user-global proxies from bypassing that policy.
+
+Nuclei request errors make the run incomplete, even when the binary exits successfully.
+Matches remain usable, but absent findings cannot resolve from an incomplete run.
+
+Exec plugins cannot open sockets directly. Use the [guarded plugin channel](plugins.md#guarded-network-channel) for network checks.
+Network plugins written before this boundary need migration. Offline plugins keep the same protocol.
+Every plugin tier requires owned destination addresses at dial time. A passive plugin retains its passive schedule and rate limit.
 
 ### Updater failing
 

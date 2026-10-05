@@ -254,7 +254,26 @@ func (s *Store) GetFinding(ctx context.Context, id int64) (*model.Finding, error
 	return &f, nil
 }
 
-func (s *Store) ListFindings(ctx context.Context, f store.FindingFilter) ([]model.Finding, int, error) {
+// These predicates mirror the dashboard triage rules, before pagination.
+const findingKEV = `(f.evidence->'kev' = 'true'::jsonb OR EXISTS (SELECT 1 FROM unnest(f.tags) tag WHERE lower(tag) = 'kev'))`
+const findingAttentionRank = `CASE WHEN 'takeover' = ANY(f.tags) OR f.check_name ~* 'takeover' THEN 0
+	WHEN (f.check_name ~* 'cert' AND (f.evidence ? 'not_after' OR f.evidence ? 'days_remaining'))
+		OR f.title ~* '\m(expired|expires|expiring|expiry)\M' THEN 1 ELSE 2 END`
+
+func findingGroupColumn(by string) string {
+	switch by {
+	case "asset":
+		return "a.key"
+	case "check":
+		return "f.check_name"
+	case "zone":
+		return "a.zone"
+	default:
+		return ""
+	}
+}
+
+func findingWhere(f store.FindingFilter) where {
 	var w where
 	if len(f.Statuses) > 0 {
 		st := make([]string, len(f.Statuses))
@@ -265,6 +284,9 @@ func (s *Store) ListFindings(ctx context.Context, f store.FindingFilter) ([]mode
 	}
 	if f.MinSeverity != "" {
 		w.add("f.severity_rank >= ?", f.MinSeverity.Rank())
+	}
+	if f.Severity != "" {
+		w.add("f.severity = ?", string(f.Severity))
 	}
 	if f.Check != "" {
 		w.add("f.check_name = ?", f.Check)
@@ -284,11 +306,44 @@ func (s *Store) ListFindings(ctx context.Context, f store.FindingFilter) ([]mode
 	if !f.IncludeRemovedAssets && f.AssetID == 0 {
 		w.add("(a.removed_at IS NULL OR f.status = 'resolved')")
 	}
+	if f.GroupKey != nil {
+		if col := findingGroupColumn(f.GroupBy); col != "" {
+			w.add(col+" = ?", *f.GroupKey)
+		}
+	}
+	if f.AttentionOnly {
+		w.add("f.status = 'open' AND (f.severity_rank >= 3 OR " + findingKEV + ")")
+	}
+	if !f.FirstSeenAfter.IsZero() {
+		w.add("f.first_seen >= ?", f.FirstSeenAfter)
+	}
+	return w
+}
+
+func findingOrder(f store.FindingFilter) string {
+	dir := "DESC"
+	if f.Direction == "asc" {
+		dir = "ASC"
+	}
+	switch f.Sort {
+	case "last_seen":
+		return "f.last_seen " + dir + ", f.severity_rank DESC, f.id ASC"
+	case "first_seen":
+		return "f.first_seen " + dir + ", f.severity_rank DESC, f.id ASC"
+	case "attention":
+		return findingAttentionRank + ", f.severity_rank DESC, COALESCE(" + findingKEV + ", false) DESC, f.first_seen ASC, f.id ASC"
+	default:
+		return "f.severity_rank " + dir + ", f.last_seen DESC, f.id ASC"
+	}
+}
+
+func (s *Store) ListFindings(ctx context.Context, f store.FindingFilter) ([]model.Finding, int, error) {
+	w := findingWhere(f)
 	var total int
 	if err := s.pool.QueryRow(ctx, `SELECT count(*)`+findingFrom+w.sql(), w.args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	q := `SELECT ` + findingCols + findingFrom + w.sql() + ` ORDER BY f.severity_rank DESC, f.last_seen DESC, f.id DESC`
+	q := `SELECT ` + findingCols + findingFrom + w.sql() + ` ORDER BY ` + findingOrder(f)
 	args := w.args
 	if f.Limit > 0 {
 		args = append(args, f.Limit)
@@ -304,6 +359,60 @@ func (s *Store) ListFindings(ctx context.Context, f store.FindingFilter) ([]mode
 	}
 	out, err := collectFindings(rows)
 	return out, total, err
+}
+
+// ListFindingGroups aggregates the complete filtered set, then pages groups.
+// Members are fetched separately with GroupKey so one large group cannot
+// produce an unbounded response.
+func (s *Store) ListFindingGroups(ctx context.Context, f store.FindingFilter) ([]store.FindingGroup, int, error) {
+	col := findingGroupColumn(f.GroupBy)
+	if col == "" {
+		return nil, 0, fmt.Errorf("invalid finding group %q", f.GroupBy)
+	}
+	w := findingWhere(f)
+	from := findingFrom + w.sql()
+	var total int
+	if err := s.pool.QueryRow(ctx, "SELECT count(DISTINCT "+col+")"+from, w.args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	order := "max(f.severity_rank) DESC, count(*) DESC, " + col + " ASC"
+	if f.Sort == "count" {
+		order = "count(*) DESC, " + col + " ASC"
+	}
+	q := "SELECT " + col + `, count(*), max(f.severity_rank),
+		count(*) FILTER (WHERE f.severity = 'info'), count(*) FILTER (WHERE f.severity = 'low'),
+		count(*) FILTER (WHERE f.severity = 'medium'), count(*) FILTER (WHERE f.severity = 'high'),
+		count(*) FILTER (WHERE f.severity = 'critical')` + from + " GROUP BY " + col + " ORDER BY " + order
+	args := w.args
+	if f.Limit > 0 {
+		args = append(args, f.Limit)
+		q += fmt.Sprintf(" LIMIT $%d", len(args))
+	}
+	if f.Offset > 0 {
+		args = append(args, f.Offset)
+		q += fmt.Sprintf(" OFFSET $%d", len(args))
+	}
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []store.FindingGroup
+	severities := []model.Severity{model.SeverityInfo, model.SeverityLow, model.SeverityMedium, model.SeverityHigh, model.SeverityCritical}
+	for rows.Next() {
+		var g store.FindingGroup
+		var top, info, low, medium, high, critical int
+		if err := rows.Scan(&g.Key, &g.Total, &top, &info, &low, &medium, &high, &critical); err != nil {
+			return nil, 0, err
+		}
+		g.Label, g.Top = g.Key, severities[top]
+		if g.Label == "" {
+			g.Label = "(no zone)"
+		}
+		g.Counts = map[string]int{"info": info, "low": low, "medium": medium, "high": high, "critical": critical}
+		out = append(out, g)
+	}
+	return out, total, rows.Err()
 }
 
 func (s *Store) ChangeFindingStatus(ctx context.Context, id int64, c store.StatusChange, now time.Time) error {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"github.com/chainseer-xyz/deckard/internal/engine"
 	"github.com/chainseer-xyz/deckard/internal/nuclei"
 	"github.com/chainseer-xyz/deckard/internal/nuclei/updater"
+	"github.com/chainseer-xyz/deckard/internal/store"
 )
 
 const bakedNucleiTemplates = "/usr/local/share/deckard/nuclei-templates"
@@ -56,7 +58,14 @@ func (a *App) nuclei() *nucleiWiring {
 			"templates_dir", nw.cfg.TemplatesDir, "update_dir", u.Dir)
 		nw.cfg.Update.Enabled = false
 	default:
-		upd, err := updater.New(updater.Config{Dir: u.Dir, BakedDir: bakedNucleiTemplates, Binary: nw.cfg.Binary, Timeout: u.Timeout, Logger: a.log})
+		upd, err := updater.New(updater.Config{Dir: u.Dir, BakedDir: bakedNucleiTemplates, Binary: nw.cfg.Binary, Timeout: u.Timeout, Logger: a.log,
+			BeforePublish: func(ctx context.Context, up updater.Update) error {
+				if !u.RunNewTemplates || len(up.NewTemplates) == 0 {
+					return nil
+				}
+				return a.st.PutScanTrigger(ctx, store.NewScanTrigger(store.ScanTriggerTemplates, up.Version, up.NewTemplates, nil))
+			},
+		})
 		if err != nil {
 			a.log.Error("nuclei template updater disabled", "err", err)
 			nw.cfg.Update.Enabled = false
@@ -99,7 +108,7 @@ func (a *App) nuclei() *nucleiWiring {
 		}))
 	}
 	nw.scanner = nuclei.NewScanner(nw.cfg, nuclei.ScopeVerifier(a.guard.VerifyOwnedTarget),
-		nuclei.ExecRunner{Env: nw.env, Gate: nw.gate}, a.cfg.Checks[nuclei.NameActive], runtimeOpts...)
+		nuclei.ExecRunner{Env: nw.env, Gate: nw.gate, Policy: a.guard.DestinationDenylist}, a.cfg.Checks[nuclei.NameActive], runtimeOpts...)
 	return nw
 }
 

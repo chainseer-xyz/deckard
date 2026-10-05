@@ -225,6 +225,9 @@ CronJobs below run it as an init container, which stops the pod on failure). Min
 tools' exit codes: Prowler exits 3 when checks fail unless `--ignore-exit-code-3`, gitleaks
 exits 1 on leaks unless `--exit-code 0`, trufflehog exits 0 unless `--fail`.
 
+SARIF logs with any invocation declaring `executionSuccessful: false` are rejected before posting, including empty failed scans.
+Omitted invocation metadata remains compatible with SARIF producers that do not report it.
+
 ### Secrets
 
 The trufflehog parser decodes only the detector, verification flag and location fields;

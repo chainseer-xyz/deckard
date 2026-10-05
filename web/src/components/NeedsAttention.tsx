@@ -46,7 +46,7 @@ export function AttentionRow({ f, now }: { f: Finding; now?: number }) {
 }
 
 /** Open critical/high (and KEV) findings, takeover and expiry first. `items` must already be ordered. */
-export function NeedsAttentionList({ items, now }: { items: Finding[]; now?: number }) {
+export function NeedsAttentionList({ items, total = items.length, now }: { items: Finding[]; total?: number; now?: number }) {
   const [all, setAll] = useState(false);
   if (items.length === 0) {
     return (
@@ -72,9 +72,15 @@ export function NeedsAttentionList({ items, now }: { items: Finding[]; now?: num
       {items.length > VISIBLE && (
         <div className="border-t border-line px-3 py-2">
           <button className="btn btn-sm" aria-expanded={all} onClick={() => setAll(!all)}>
-            {all ? 'Show fewer' : `Show all ${items.length}`}
+            {all ? 'Show fewer' : total > items.length ? `Show first ${items.length}` : `Show all ${items.length}`}
           </button>
         </div>
+      )}
+      {total > items.length && (
+        <p className="border-t border-line px-3 py-2 text-xs text-muted">
+          First {items.length} of {total} findings needing attention.{' '}
+          <Link className="text-accent hover:underline" to="/findings?min_severity=info">Review findings</Link>
+        </p>
       )}
     </>
   );

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/chainseer-xyz/deckard/internal/config"
 )
@@ -78,21 +77,18 @@ func TestVerifyOwnedTargetResolverError(t *testing.T) {
 	}
 }
 
-func TestVerifyOwnedTargetCachesAndExpires(t *testing.T) {
+func TestVerifyOwnedTargetRechecksEveryCall(t *testing.T) {
 	res := newFakeResolver(map[string][][]string{"owned.example.com": {{"198.51.100.7"}, {"93.184.216.34"}}})
 	g := verifyGuard(t, res)
-	now := time.Now()
-	g.verified.now = func() time.Time { return now }
 	ctx := context.Background()
-	if !g.VerifyOwnedTarget(ctx, "owned.example.com") || !g.VerifyOwnedTarget(ctx, "OWNED.example.com.") {
-		t.Fatal("first answers are owned")
+	if !g.VerifyOwnedTarget(ctx, "owned.example.com") {
+		t.Fatal("first answer is owned")
 	}
-	if res.count["owned.example.com"] != 1 {
-		t.Fatalf("expected one lookup, got %d", res.count["owned.example.com"])
+	if g.VerifyOwnedTarget(ctx, "OWNED.example.com.") {
+		t.Fatal("a rebound answer must be refused immediately")
 	}
-	now = now.Add(31 * time.Second)
-	if g.VerifyOwnedTarget(ctx, "owned.example.com") {
-		t.Fatal("after expiry the rebound answer must be refused")
+	if res.count["owned.example.com"] != 2 {
+		t.Fatalf("expected two lookups, got %d", res.count["owned.example.com"])
 	}
 }
 
@@ -101,9 +97,8 @@ func TestVerifyOwnedTargetCancelledNotCached(t *testing.T) {
 	g := verifyGuard(t, res)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	g.VerifyOwnedTarget(ctx, "owned.example.com")
-	if _, hit := g.verified.get("owned.example.com"); hit {
-		t.Fatal("cancelled lookup must not be cached")
+	if g.VerifyOwnedTarget(ctx, "owned.example.com") {
+		t.Fatal("cancelled lookup must fail closed")
 	}
 }
 

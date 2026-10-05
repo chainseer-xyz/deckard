@@ -185,6 +185,9 @@ func (r *runner) runScan(ctx context.Context, j scanJob) error {
 		r.log.Warn("scan: invalid tier", "tier", j.Tier)
 		return nil
 	}
+	if err := r.resolveInapplicable(ctx, *asset, j.Tier, j.Check); err != nil {
+		return err
+	}
 	checks := r.checksFor(*asset, j.Tier, j.Check)
 	if len(checks) == 0 {
 		return nil
@@ -294,18 +297,24 @@ func (r *runner) runCheck(ctx context.Context, c check.Check, asset model.Asset,
 	class model.ScopeClass, limiter scope.RateLimiter) error {
 
 	tier := c.Tier()
+	networkTier := tier
+	if owned, ok := c.(check.RequiresOwnedDestinations); ok && owned.RequiresOwnedDestinations() && tier == model.TierPassive {
+		// An exec plugin's configured tier controls scheduling, not permission
+		// to probe a third-party address after an owned-hostname DNS change.
+		networkTier = model.TierActive
+	}
 	timeout := r.timeoutFor(c)
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	dialer, refusals := trackRefusals(r.Guard.Dialer(tier, class, limiter))
+	dialer, refusals := trackRefusals(r.Guard.Dialer(networkTier, class, limiter))
 	target := check.Target{
 		Asset:      asset,
 		Neighbours: neigh,
 		Baseline:   map[string]map[string]any{},
 		Dialer:     dialer,
-		Resolver:   r.Guard.Resolver(tier, class, limiter),
-		HTTP:       r.Guard.HTTPClient(tier, class, limiter, scope.WithHTTPTimeout(timeout)),
+		Resolver:   r.Guard.Resolver(networkTier, class, limiter),
+		HTTP:       r.Guard.HTTPClient(networkTier, class, limiter, scope.WithHTTPTimeout(timeout)),
 		Intel:      r.Intel,
 		Lookup:     r.Lookup,
 		Config:     r.Config.Checks[c.Name()],
@@ -315,7 +324,7 @@ func (r *runner) runCheck(ctx context.Context, c check.Check, asset model.Asset,
 	if dg, ok := r.Guard.(interface {
 		DNS(model.Tier, model.ScopeClass, scope.RateLimiter) check.DNSQuerier
 	}); ok {
-		target.DNS = dg.DNS(tier, class, limiter)
+		target.DNS = dg.DNS(networkTier, class, limiter)
 	}
 	start := r.now()
 	var res *check.Result
@@ -332,10 +341,11 @@ func (r *runner) runCheck(ctx context.Context, c check.Check, asset model.Asset,
 	if w, ok := c.(check.WantsOpenFindings); ok && w.WantsOpenFindings() && runErr == nil {
 		// A failed lookup fails the run: a check that re-verifies findings must
 		// never run blind, or it could let them resolve unverified.
-		if of, err := r.openFindings(cctx, asset.ID, c.Name()); err != nil {
+		if of, truncated, err := r.openFindings(cctx, asset.ID, c.Name()); err != nil {
 			runErr = fmt.Errorf("load open findings: %w", err)
 		} else {
 			target.OpenFindings = of
+			target.OpenFindingsTruncated = truncated
 		}
 	}
 	if b, err := r.Store.GetBaseline(cctx, asset.ID, c.Name()); err == nil && b != nil {
@@ -416,18 +426,18 @@ var unresolvedStatuses = []model.FindingStatus{
 
 // openFindings returns the asset's unresolved findings of one check, one
 // indexed query (findings_asset_check_idx), bounded by check.MaxOpenFindings.
-func (r *runner) openFindings(ctx context.Context, assetID int64, name string) ([]check.OpenFinding, error) {
-	fs, _, err := r.Store.ListFindings(ctx, store.FindingFilter{
+func (r *runner) openFindings(ctx context.Context, assetID int64, name string) ([]check.OpenFinding, bool, error) {
+	fs, total, err := r.Store.ListFindings(ctx, store.FindingFilter{
 		AssetID: assetID, Check: name, Statuses: unresolvedStatuses, Limit: check.MaxOpenFindings,
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	out := make([]check.OpenFinding, 0, len(fs))
 	for _, f := range fs {
 		out = append(out, check.OpenFinding{Fingerprint: f.Fingerprint, Severity: f.Severity, Status: f.Status, Evidence: f.Evidence})
 	}
-	return out, nil
+	return out, total > len(fs), nil
 }
 
 // safeRun calls the check, converting a panic into an error so one bad check
@@ -659,6 +669,13 @@ func (r *runner) scheduleTier(ctx context.Context, tier model.Tier) (int, error)
 		} else {
 			for _, c := range tierChecks {
 				if !c.Applies(a) {
+					// Only previously attempted pairs need cleanup. Durable state
+					// avoids probing every never-applicable (asset, check) pair.
+					if _, known := last[ScanKey{a.ID, c.Name()}]; known {
+						if err := r.resolveInapplicable(ctx, a, tier, c.Name()); err != nil {
+							return queued, err
+						}
+					}
 					continue
 				}
 				interval := resolveFor(r.Config, a, tier, c).Interval

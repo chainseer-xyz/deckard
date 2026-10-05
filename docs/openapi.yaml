@@ -122,6 +122,14 @@ paths:
         - {name: zone, in: query, schema: {type: string}}
         - {name: q, in: query, description: Substring match on key, schema: {type: string}}
         - {name: include_removed, in: query, schema: {type: boolean, default: false}}
+        - name: open_min_severity
+          in: query
+          description: Only assets with an open finding at or above this severity; sorted by worst severity, open count, then key.
+          schema: {$ref: '#/components/schemas/Severity'}
+        - name: include_summary
+          in: query
+          description: Add open_findings, top_severity, and the latest recorded scan attempt as last_scan to every asset in this page.
+          schema: {type: boolean, default: false}
         - {$ref: '#/components/parameters/Limit'}
         - {$ref: '#/components/parameters/Offset'}
       responses:
@@ -186,6 +194,15 @@ paths:
   /api/v1/findings:
     get:
       summary: List findings
+      description: |
+        Filters and sorting apply to the full result before pagination. Set group_by
+        without group_key to page aggregate FindingGroup objects instead of findings.
+        Group totals and severity counts cover the complete filtered set. Set group_key
+        (including an empty string for the no-zone group) to page that group's findings.
+        Groups sort by worst severity, count, then key; sort=count orders groups by count,
+        then key. Finding sorts use stable ID tie-breakers. attention selects open high,
+        critical, or KEV findings; sort=attention ranks takeover, expiry, severity, KEV,
+        then oldest first. Responses remain bounded by limit in every mode.
       parameters:
         - name: status
           in: query
@@ -196,11 +213,18 @@ paths:
             type: array
             items: {$ref: '#/components/schemas/FindingStatus'}
         - {name: min_severity, in: query, schema: {$ref: '#/components/schemas/Severity'}}
+        - {name: severity, in: query, description: Exact severity, schema: {$ref: '#/components/schemas/Severity'}}
         - {name: check, in: query, schema: {type: string}}
         - {name: zone, in: query, schema: {type: string}}
         - {name: source, in: query, schema: {type: string}}
         - {name: asset_id, in: query, schema: {type: integer, format: int64, minimum: 1}}
         - {name: q, in: query, schema: {type: string}}
+        - {name: sort, in: query, schema: {type: string, enum: [severity, last_seen, first_seen, attention, count], default: severity}}
+        - {name: direction, in: query, schema: {type: string, enum: [asc, desc], default: desc}}
+        - {name: group_by, in: query, schema: {type: string, enum: [asset, check, zone]}}
+        - {name: group_key, in: query, description: Requires group_by; selects members rather than group aggregates, allowEmptyValue: true, schema: {type: string, maxLength: 8192}}
+        - {name: attention, in: query, schema: {type: boolean, default: false}}
+        - {name: first_seen_after, in: query, schema: {type: string, format: date-time}}
         - {$ref: '#/components/parameters/Limit'}
         - {$ref: '#/components/parameters/Offset'}
       responses:
@@ -213,7 +237,10 @@ paths:
                   - {$ref: '#/components/schemas/ListEnvelope'}
                   - type: object
                     properties:
-                      items: {type: array, items: {$ref: '#/components/schemas/Finding'}}
+                      items:
+                        anyOf:
+                          - {type: array, items: {$ref: '#/components/schemas/Finding'}}
+                          - {type: array, items: {$ref: '#/components/schemas/FindingGroup'}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
   /api/v1/findings/{id}:
@@ -530,6 +557,20 @@ components:
         first_seen: {type: string, format: date-time}
         last_seen: {type: string, format: date-time}
         removed_at: {type: string, format: date-time, nullable: true}
+        open_findings: {type: integer, description: Present when include_summary=true; all open findings for this asset}
+        top_severity: {$ref: '#/components/schemas/Severity'}
+        last_scan: {type: string, format: date-time, nullable: true, description: Present when include_summary=true; survives scan-history retention}
+    FindingGroup:
+      type: object
+      required: [key, label, total, counts, top]
+      properties:
+        key: {type: string}
+        label: {type: string}
+        total: {type: integer}
+        counts:
+          type: object
+          additionalProperties: {type: integer}
+        top: {$ref: '#/components/schemas/Severity'}
     AssetDetail:
       type: object
       properties:

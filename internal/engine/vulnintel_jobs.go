@@ -121,6 +121,9 @@ func (e *Engine) vulnJob() *vulnintelJob {
 	fl, _ := e.d.Store.(findingLister)
 	e.vulnOnce.Do(func() {
 		e.vuln = &vulnintelJob{feed: e.o.vi.feed, trigger: e.o.vi.trigger, findings: fl, rec: rec, log: log}
+		if e.r.Delta != nil {
+			e.vuln.triggers, _ = e.d.Store.(store.ScanTriggerStore)
+		}
 	})
 	return e.vuln
 }
@@ -140,6 +143,11 @@ type vulnintelJob struct {
 	findings findingLister
 	rec      VulnIntelRecorder
 	log      *slog.Logger
+	triggers store.ScanTriggerStore
+	// One-shot execution collects work first and acknowledges only after its
+	// in-memory queue finishes, rather than after accepting a queued batch.
+	deferAck     bool
+	deferredKeys []string
 
 	mu      sync.Mutex
 	pending map[string]struct{} // new-KEV CVEs the trigger has not accepted yet
@@ -186,7 +194,7 @@ func (j *vulnintelJob) run(ctx context.Context) error {
 		}
 	}
 
-	if terr := j.dispatchNewKEV(ctx, delta.NewKEV, openCVEs); terr != nil {
+	if terr := j.dispatchNewKEV(ctx, delta, openCVEs); terr != nil {
 		errs = append(errs, terr)
 	}
 	return errors.Join(errs...)
@@ -226,7 +234,11 @@ func (j *vulnintelJob) openCVEs(ctx context.Context) (cves []string, kevOpen int
 // dispatchNewKEV passes newly KEV-listed CVEs (plus any the trigger rejected
 // earlier) to the trigger. CVEs matching currently open findings need no scan:
 // the next processor pass upgrades those findings, which this only logs.
-func (j *vulnintelJob) dispatchNewKEV(ctx context.Context, newKEV, openCVEs []string) error {
+func (j *vulnintelJob) dispatchNewKEV(ctx context.Context, delta vulnintel.Delta, openCVEs []string) error {
+	if j.triggers != nil {
+		return j.dispatchDurableKEV(ctx, delta)
+	}
+	newKEV := delta.NewKEV
 	j.mu.Lock()
 	if j.pending == nil {
 		j.pending = map[string]struct{}{}
@@ -276,6 +288,39 @@ func (j *vulnintelJob) dispatchNewKEV(ctx context.Context, newKEV, openCVEs []st
 	}
 	j.mu.Unlock()
 	j.log.Info("vulnintel: queued targeted scans for newly exploited CVEs", "cves", len(batch), "scans", n)
+	return nil
+}
+
+// dispatchDurableKEV consumes the shared outbox rather than process-local
+// pending state. A crash or partial enqueue leaves the entire delta retryable.
+func (j *vulnintelJob) dispatchDurableKEV(ctx context.Context, delta vulnintel.Delta) error {
+	if j.trigger == nil {
+		return nil
+	}
+	if len(delta.NewKEV) > 0 {
+		trigger := store.NewScanTrigger(store.ScanTriggerKEV, delta.Revision, nil, delta.NewKEV)
+		if err := j.triggers.PutScanTrigger(ctx, trigger); err != nil {
+			return fmt.Errorf("persist KEV scans: %w", err)
+		}
+	}
+	pending, err := j.triggers.ListPendingScanTriggers(ctx, store.ScanTriggerKEV)
+	if err != nil {
+		return err
+	}
+	for _, trigger := range pending {
+		n, err := j.trigger.EnqueueCVEScan(ctx, trigger.CVEs)
+		if err != nil {
+			return fmt.Errorf("enqueue pending KEV scans: %w", err)
+		}
+		if j.deferAck {
+			j.deferredKeys = append(j.deferredKeys, trigger.Key)
+		} else {
+			if err := j.triggers.AckScanTrigger(ctx, trigger.Key); err != nil {
+				return fmt.Errorf("acknowledge KEV scans: %w", err)
+			}
+		}
+		j.log.Info("vulnintel: queued durable scans for newly exploited CVEs", "cves", len(trigger.CVEs), "scans", n)
+	}
 	return nil
 }
 

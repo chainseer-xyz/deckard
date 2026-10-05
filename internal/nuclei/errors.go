@@ -11,6 +11,12 @@ func ErrorReason(err error) string {
 	if err == nil {
 		return ""
 	}
+	if errors.Is(err, ErrOutOfScope) {
+		return "scope-refused"
+	}
+	if strings.Contains(err.Error(), "incomplete scan") {
+		return "incomplete"
+	}
 	if errors.Is(err, ErrNoTemplates) || strings.Contains(strings.ToLower(err.Error()), "no templates") {
 		return "no-templates"
 	}

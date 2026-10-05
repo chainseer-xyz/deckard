@@ -6,6 +6,7 @@ import type {
   Baseline,
   ChangeEvent,
   Finding,
+  FindingGroup,
   FindingAction,
   FindingActionBody,
   Graph,
@@ -53,7 +54,8 @@ export function buildQuery(q?: Query): string {
   if (!q) return '';
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(q)) {
-    if (v === undefined || v === null || v === '' || v === false) continue;
+    // An empty group_key selects the legitimate "no zone" group.
+    if (v === undefined || v === null || (v === '' && k !== 'group_key') || v === false) continue;
     if (Array.isArray(v)) v.forEach((x) => sp.append(k, x));
     else sp.append(k, String(v));
   }
@@ -192,6 +194,8 @@ export interface AssetsParams {
   zone?: string;
   q?: string;
   include_removed?: boolean;
+  include_summary?: boolean;
+  open_min_severity?: string;
   limit?: number;
   offset?: number;
 }
@@ -199,11 +203,18 @@ export interface AssetsParams {
 export interface FindingsParams {
   status?: string[];
   min_severity?: string;
+  severity?: string;
   check?: string;
   zone?: string;
   source?: string;
   asset_id?: number;
   q?: string;
+  sort?: 'severity' | 'last_seen' | 'first_seen' | 'attention' | 'count';
+  direction?: 'asc' | 'desc';
+  group_by?: 'asset' | 'check' | 'zone';
+  group_key?: string;
+  attention?: boolean;
+  first_seen_after?: string;
   limit?: number;
   offset?: number;
 }
@@ -249,6 +260,7 @@ export const api = {
   },
   graph: (id: number, depth = 2) => request<Graph>(`/assets/${id}/graph`, { query: { depth } }),
   findings: (p: FindingsParams = {}) => request<Page<Finding>>('/findings', { query: { ...p } }),
+  findingGroups: (p: FindingsParams) => request<Page<FindingGroup>>('/findings', { query: { ...p } }),
   finding: (id: number) => request<Finding>(`/findings/${id}`),
   findingAction: (id: number, action: FindingAction, body: FindingActionBody) =>
     request<unknown>(`/findings/${id}/${action}`, { method: 'POST', body }),

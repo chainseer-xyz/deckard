@@ -57,7 +57,7 @@ func (s *Store) applySnapshot(ctx context.Context, source string, assets []store
 			return err
 		}
 		diff = d
-		if err := upsertRelations(ctx, tx, rels); err != nil {
+		if err := syncRelations(ctx, tx, relationReporter{name: "source:" + source}, rels, remove); err != nil {
 			return err
 		}
 		// Heal findings left behind by older versions that classified an asset
@@ -131,7 +131,7 @@ func (s *Store) AddDiscovered(ctx context.Context, assets []store.AssetUpsert, r
 			return err
 		}
 		diff = d
-		return upsertRelations(ctx, tx, rels)
+		return syncRelations(ctx, tx, relationReporter{name: "discovered"}, rels, false)
 	})
 	return diff, err
 }
@@ -164,6 +164,9 @@ func removeAssets(ctx context.Context, tx pgx.Tx, in []model.Asset, now time.Tim
 		}
 	}
 	if err := resolveFindings(ctx, tx, ids, now); err != nil {
+		return nil, err
+	}
+	if err := dropCheckRelations(ctx, tx, ids); err != nil {
 		return nil, err
 	}
 
@@ -326,7 +329,7 @@ func (s *Store) ReplaceDerived(ctx context.Context, assetID int64, origin string
 			return err
 		}
 		diff = d
-		if err := upsertRelations(ctx, tx, rels); err != nil {
+		if err := syncRelations(ctx, tx, checkRelationReporter(assetID, origin), rels, true); err != nil {
 			return err
 		}
 		keep := make([]int64, 0, len(seen))
@@ -604,29 +607,6 @@ func upsertAssets(ctx context.Context, tx pgx.Tx, mode upsertMode, snap string, 
 	return diff, seen, nil
 }
 
-// upsertRelations links existing assets. Relations whose endpoints are not in
-// the inventory are skipped.
-func upsertRelations(ctx context.Context, tx pgx.Tx, rels []model.RelationInput) error {
-	if len(rels) == 0 {
-		return nil
-	}
-	b := &pgx.Batch{}
-	for _, r := range rels {
-		b.Queue(`INSERT INTO relations (from_id, to_id, type)
-			SELECT f.id, t.id, $5 FROM assets f, assets t
-			WHERE f.kind = $1 AND f.key = $2 AND t.kind = $3 AND t.key = $4
-			ON CONFLICT DO NOTHING`, r.FromKind, r.FromKey, r.ToKind, r.ToKey, r.Type)
-	}
-	br := tx.SendBatch(ctx, b)
-	for range rels {
-		if _, err := br.Exec(); err != nil {
-			_ = br.Close()
-			return fmt.Errorf("upsert relation: %w", err)
-		}
-	}
-	return br.Close()
-}
-
 func addEvent(ctx context.Context, q querier, typ, subject string, data map[string]any, at time.Time) error {
 	_, err := q.Exec(ctx, `INSERT INTO events (type, subject, data, at) VALUES ($1, $2, $3, $4)`, typ, subject, orEmpty(data), at)
 	return err
@@ -659,6 +639,9 @@ func (s *Store) ListAssets(ctx context.Context, f store.AssetFilter) ([]model.As
 	if f.Scope != "" {
 		w.add("a.scope = ?", f.Scope)
 	}
+	if f.OpenMinSeverity != "" {
+		w.add("EXISTS (SELECT 1 FROM findings f WHERE f.asset_id = a.id AND f.status = 'open' AND f.severity_rank >= ?)", f.OpenMinSeverity.Rank())
+	}
 	if f.Zone != "" {
 		w.add("a.zone = ?", f.Zone)
 	}
@@ -672,7 +655,12 @@ func (s *Store) ListAssets(ctx context.Context, f store.AssetFilter) ([]model.As
 	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM assets a`+w.sql(), w.args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	q := `SELECT ` + assetCols + ` FROM assets a` + w.sql() + ` ORDER BY a.kind COLLATE "C", a.key COLLATE "C"`
+	order := ` ORDER BY a.kind COLLATE "C", a.key COLLATE "C"`
+	if f.OpenMinSeverity != "" {
+		order = ` ORDER BY (SELECT max(f.severity_rank) FROM findings f WHERE f.asset_id = a.id AND f.status = 'open') DESC,
+			(SELECT count(*) FROM findings f WHERE f.asset_id = a.id AND f.status = 'open') DESC, a.key COLLATE "C", a.id`
+	}
+	q := `SELECT ` + assetCols + ` FROM assets a` + w.sql() + order
 	args := w.args
 	if f.Limit > 0 {
 		args = append(args, f.Limit)
@@ -692,9 +680,11 @@ func (s *Store) ListAssets(ctx context.Context, f store.AssetFilter) ([]model.As
 
 func (s *Store) Edges(ctx context.Context, assetID int64) ([]store.Edge, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT `+assetCols+`, r.type, true FROM relations r JOIN assets a ON a.id = r.to_id WHERE r.from_id = $1
+		SELECT `+assetCols+`, r.type, true FROM relations r JOIN assets a ON a.id = r.to_id
+		WHERE r.from_id = $1 AND a.removed_at IS NULL AND EXISTS (SELECT 1 FROM assets p WHERE p.id = $1 AND p.removed_at IS NULL)
 		UNION ALL
-		SELECT `+assetCols+`, r.type, false FROM relations r JOIN assets a ON a.id = r.from_id WHERE r.to_id = $1
+		SELECT `+assetCols+`, r.type, false FROM relations r JOIN assets a ON a.id = r.from_id
+		WHERE r.to_id = $1 AND a.removed_at IS NULL AND EXISTS (SELECT 1 FROM assets p WHERE p.id = $1 AND p.removed_at IS NULL)
 		ORDER BY 12 DESC, 11, 3`, assetID)
 	if err != nil {
 		return nil, err

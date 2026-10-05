@@ -208,6 +208,46 @@ func resolve(t *testing.T, p string) string {
 	return r
 }
 
+func TestBeforePublishFailureKeepsPreviousReleaseActive(t *testing.T) {
+	ctx := context.Background()
+	var e *env
+	allow := false
+	var recorded []updater.Update
+	e = newEnv(t, func(c *updater.Config) {
+		c.BeforePublish = func(_ context.Context, up updater.Update) error {
+			if len(up.NewTemplates) == 0 {
+				return nil // first install does not trigger scans
+			}
+			st, err := e.u.Status()
+			if err != nil || st.Version != "v10.0.0" {
+				t.Fatalf("release committed before callback: %+v err=%v", st, err)
+			}
+			recorded = append(recorded, up)
+			if !allow {
+				return errors.New("outbox unavailable")
+			}
+			return nil
+		}
+	})
+	e.publish("v10.0.0", release(t))
+	if _, err := e.u.Update(ctx); err != nil {
+		t.Fatal(err)
+	}
+	previous := e.current()
+	e.publish("v10.0.1", release(t, fakenuclei.Template{Path: "http/new.yaml", ID: "new"}))
+	if _, err := e.u.Update(ctx); err == nil || !strings.Contains(err.Error(), "outbox unavailable") {
+		t.Fatalf("publication failure = %v", err)
+	}
+	if e.current() != previous || len(recorded) != 1 {
+		t.Fatalf("failed publication changed active release or lost delta: current=%s recorded=%v", e.current(), recorded)
+	}
+	allow = true
+	up, err := e.u.Update(ctx)
+	if err != nil || !slices.Equal(up.NewTemplates, []string{"http/new.yaml"}) || len(recorded) != 2 {
+		t.Fatalf("retry: update=%+v recorded=%v err=%v", up, recorded, err)
+	}
+}
+
 func TestNewTemplatesFromDiffAndAdditions(t *testing.T) {
 	e := newEnv(t, nil)
 	e.publish("v10.0.0", release(t, fakenuclei.Template{Path: "http/cves/2024/CVE-2024-0001.yaml", ID: "CVE-2024-0001", CVE: "CVE-2024-0001"}))

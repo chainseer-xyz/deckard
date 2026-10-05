@@ -368,12 +368,12 @@ func TestSourcesScansChanges(t *testing.T) {
 		}
 	})
 	e.get("/api/v1/changes").json(t, &l) // default window: 24h
-	if !eq(ids(l), []int{2, 3}) {
+	if !eq(ids(l), []int{3, 2}) {
 		t.Errorf("default window = %v", ids(l))
 	}
 	since := t0.Add(-90 * time.Minute).Format(time.RFC3339)
 	e.get("/api/v1/changes?since="+since+"&limit=1").json(t, &l)
-	if !eq(ids(l), []int{2}) || l.Limit != 1 {
+	if !eq(ids(l), []int{3}) || l.Limit != 1 {
 		t.Errorf("since+limit = %v", ids(l))
 	}
 	e.get("/api/v1/changes?since=2020-01-01T00:00:00Z").json(t, &l)

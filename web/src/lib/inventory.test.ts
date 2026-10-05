@@ -40,6 +40,8 @@ describe('inventory filter URL state', () => {
       zone: 'example.com',
       q: 'www',
       include_removed: true,
+      include_summary: true,
+      open_min_severity: 'medium',
     });
   });
 

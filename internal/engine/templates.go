@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/riverqueue/river"
+	"k8s.io/apimachinery/pkg/util/version"
 
 	"github.com/chainseer-xyz/deckard/internal/check"
 	"github.com/chainseer-xyz/deckard/internal/model"
@@ -331,12 +332,11 @@ func (r *runner) updateAndScan(ctx context.Context, minAge time.Duration) error 
 	if err != nil {
 		return err
 	}
-	if ran && up.Changed {
-		if _, err := r.enqueueNewTemplateScans(ctx, up); err != nil {
-			return fmt.Errorf("enqueue new-template scans: %w", err)
-		}
+	keys, err := r.enqueueTemplateTriggers(ctx, up, ran && up.Changed)
+	if err != nil {
+		return fmt.Errorf("enqueue new-template scans: %w", err)
 	}
-	return nil
+	return r.acknowledgeScanTriggers(ctx, keys)
 }
 
 // enqueueNewTemplateScans queues scan_new_templates jobs for the templates an
@@ -406,28 +406,28 @@ type observationReader interface {
 // hostname assets are scanned at the URL their latest live http.probe saw.
 // The asset must be non-removed, owned, allowed by the scope guard for the
 // active tier (freshly classified) and enabled by its profile.
-func (r *runner) webTarget(ctx context.Context, a model.Asset) (webTarget, bool) {
+func (r *runner) webTarget(ctx context.Context, a model.Asset) (webTarget, bool, error) {
 	if a.Scope != model.ScopeOwned {
-		return webTarget{}, false
+		return webTarget{}, false, nil
 	}
 	if _, _, why := r.scannable(a, model.TierActive); why != "" {
-		return webTarget{}, false
+		return webTarget{}, false, nil
 	}
 	switch a.Kind {
 	case model.KindURL, model.KindService:
 		u, err := nuclei.TargetURL(a)
 		if err != nil {
-			return webTarget{}, false
+			return webTarget{}, false, nil
 		}
-		return webTarget{Asset: a, URL: u}, true
+		return webTarget{Asset: a, URL: u}, true, nil
 	case model.KindHostname:
 		or, ok := r.Store.(observationReader)
 		if !ok {
-			return webTarget{}, false
+			return webTarget{}, false, nil
 		}
 		obs, err := or.LatestObservations(ctx, a.ID)
 		if err != nil {
-			return webTarget{}, false
+			return webTarget{}, false, fmt.Errorf("load web observations for %s: %w", a.Key, err)
 		}
 		for _, o := range obs {
 			if o.Check != "http.probe" {
@@ -437,11 +437,11 @@ func (r *runner) webTarget(ctx context.Context, a model.Asset) (webTarget, bool)
 				continue
 			}
 			if u, _ := o.Data["url"].(string); u != "" {
-				return webTarget{Asset: a, URL: u}, true
+				return webTarget{Asset: a, URL: u}, true, nil
 			}
 		}
 	}
-	return webTarget{}, false
+	return webTarget{}, false, nil
 }
 
 // deltaAssetIDs lists the ids of every eligible web asset: owned URL and
@@ -463,7 +463,10 @@ func (r *runner) deltaAssetIDs(ctx context.Context) ([]int64, error) {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
-			t, ok := r.webTarget(ctx, a)
+			t, ok, err := r.webTarget(ctx, a)
+			if err != nil {
+				return nil, err
+			}
 			if !ok || seen[t.URL] {
 				continue
 			}
@@ -488,6 +491,12 @@ func (r *runner) runDelta(ctx context.Context, j deltaJob) error {
 	if r.Delta == nil {
 		r.log.Debug("template scan skipped: no scanner configured", "kind", j.Kind)
 		return nil
+	}
+	if j.Kind == KindScanNewTemplates && j.Release != "" && r.Templates != nil {
+		st, err := r.Templates.Status()
+		if err != nil || !templateReleaseReached(st.Version, j.Release) {
+			return fmt.Errorf("%w: active release %q has not reached %q", errTemplatesNotReady, st.Version, j.Release)
+		}
 	}
 	rel := j.Templates
 	if j.Kind == KindScanCVEs {
@@ -530,7 +539,11 @@ func (r *runner) runDelta(ctx context.Context, j deltaJob) error {
 			}
 			return fmt.Errorf("load asset %d: %w", id, err)
 		}
-		if t, ok := r.webTarget(ctx, *a); ok {
+		t, ok, err := r.webTarget(ctx, *a)
+		if err != nil {
+			return err
+		}
+		if ok {
 			targets = append(targets, t)
 		}
 	}
@@ -644,21 +657,45 @@ func (r *runner) runDelta(ctx context.Context, j deltaJob) error {
 // queued; repeating the call while the same jobs are pending queues nothing.
 // Findings follow partial-run semantics: opened and refreshed, never resolved.
 func (e *Engine) EnqueueCVEScan(ctx context.Context, cves []string) (queued int, err error) {
-	if e.r.Delta == nil {
+	return e.r.enqueueCVEScans(ctx, cves)
+}
+
+func (r *runner) enqueueCVEScans(ctx context.Context, cves []string) (queued int, err error) {
+	if r.Delta == nil {
 		return 0, ErrNoTemplateScanning
 	}
 	norm, err := nuclei.NormalizeCVEs(cves)
 	if err != nil {
 		return 0, err
 	}
-	ids, err := e.r.deltaAssetIDs(ctx)
+	ids, err := r.deltaAssetIDs(ctx)
 	if err != nil {
 		return 0, err
 	}
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	return e.r.enqueueDeltaBatches(ctx, deltaJob{Kind: KindScanCVEs, CVEs: norm}, ids)
+	return r.enqueueDeltaBatches(ctx, deltaJob{Kind: KindScanCVEs, CVEs: norm}, ids)
+}
+
+// Numeric release comparison handles v10.9 -> v10.10 and permits templates
+// retired by a later official release. Unrecognized versions wait rather than
+// accepting a job against an unproven local tree.
+func templateReleaseReached(current, requested string) bool {
+	if current == requested {
+		return true
+	}
+	if active, err := version.ParseSemantic(current); err == nil {
+		if want, err := version.ParseSemantic(requested); err == nil {
+			return !active.LessThan(want)
+		}
+	}
+	active, err := version.ParseGeneric(current)
+	if err != nil {
+		return false
+	}
+	want, err := version.ParseGeneric(requested)
+	return err == nil && !active.LessThan(want)
 }
 
 // ---- catch-up loop --------------------------------------------------------------------

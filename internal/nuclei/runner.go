@@ -30,6 +30,9 @@ type ExecRunner struct {
 	// afterwards. An error fails the run before the binary starts.
 	Env  func() ([]string, func(), error)
 	Gate *ProcessGate
+	// Policy is mandatory for target scans. It returns the CIDRs the binary
+	// must deny, after a fresh ownership lookup and after acquiring its slot.
+	Policy DestinationPolicy
 }
 
 type capBuffer struct {
@@ -73,6 +76,11 @@ func (r ExecRunner) Run(ctx context.Context, binary string, args []string) ([]by
 		return nil, fmt.Errorf("nuclei: waiting for process slot: %w", err)
 	}
 	defer release()
+	args, cleanupPolicy, err := r.destinationArgs(ctx, args)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanupPolicy()
 	env := minimalEnv()
 	if r.Env != nil {
 		extra, cleanup, err := r.Env()
@@ -81,6 +89,15 @@ func (r ExecRunner) Run(ctx context.Context, binary string, args []string) ([]by
 		}
 		defer cleanup()
 		env = mergeEnv(env, extra)
+	}
+	env = mergeEnv(env, destinationEnv(args))
+	finishRequests := func() error { return nil }
+	if path := requestLogPath(args); path != "" {
+		finishRequests, err = startRequestLog(path)
+		if err != nil {
+			return nil, fmt.Errorf("nuclei: preparing request completeness log: %w", err)
+		}
+		defer func() { _ = finishRequests() }()
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -92,6 +109,7 @@ func (r ExecRunner) Run(ctx context.Context, binary string, args []string) ([]by
 	setProcessGroup(cmd)
 	cmd.WaitDelay = 3 * time.Second
 	err = cmd.Run()
+	err = errors.Join(err, finishRequests())
 	if out.over {
 		return out.buf.Bytes(), fmt.Errorf("nuclei output exceeded %d bytes", maxStdout)
 	}

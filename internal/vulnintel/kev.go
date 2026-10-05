@@ -2,6 +2,8 @@ package vulnintel
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,6 +48,22 @@ type kevFile struct {
 		DueDate        string `json:"dueDate"`
 		Ransomware     string `json:"knownRansomwareCampaignUse"`
 	} `json:"vulnerabilities"`
+}
+
+// kevRevision identifies a validated publication independently of HTTP cache
+// headers. Catalog metadata survives equivalent responses from different
+// replicas; feeds without it fall back to the deterministic body digest.
+func kevRevision(body []byte) string {
+	var meta struct {
+		CatalogVersion string `json:"catalogVersion"`
+		DateReleased   string `json:"dateReleased"`
+	}
+	if json.Unmarshal(body, &meta) == nil && (meta.CatalogVersion != "" || meta.DateReleased != "") {
+		encoded, _ := json.Marshal([2]string{meta.CatalogVersion, meta.DateReleased})
+		return "catalog:" + string(encoded)
+	}
+	digest := sha256.Sum256(body)
+	return "sha256:" + hex.EncodeToString(digest[:])
 }
 
 // ParseKEV parses and validates a KEV catalog body. It rejects invalid JSON,

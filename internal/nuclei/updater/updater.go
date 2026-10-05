@@ -83,6 +83,9 @@ type Config struct {
 	Exec Exec
 	// Logger receives progress; nil discards.
 	Logger *slog.Logger
+	// BeforePublish durably records scan work before switching the active
+	// release. An error leaves the previous release active.
+	BeforePublish func(context.Context, Update) error
 }
 
 // Update is the outcome of one successful update run.
@@ -305,6 +308,13 @@ func (u *Updater) update(ctx context.Context) (Update, error) {
 
 	name := fmt.Sprintf("%s-%s", unsafeName.ReplaceAllString(version, "_"), now.UTC().Format("20060102T150405"))
 	rel := filepath.Join(u.cfg.Dir, "releases", name)
+	if u.cfg.BeforePublish != nil {
+		pending := Update{Version: version, TemplateCount: len(tree.Templates), NewTemplates: newPaths, NewIDs: newIDs,
+			UpdatedAt: now, Changed: true, Dir: rel}
+		if err := u.cfg.BeforePublish(ctx, pending); err != nil {
+			return Update{}, fmt.Errorf("updater: record pending scans before publication: %w", err)
+		}
+	}
 	if err := os.Rename(tpl, rel); err != nil {
 		return Update{}, fmt.Errorf("updater: publish release: %w", err)
 	}

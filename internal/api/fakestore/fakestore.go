@@ -136,6 +136,15 @@ func (s *Store) ListAssets(_ context.Context, f store.AssetFilter) ([]model.Asse
 			!f.IncludeRemoved && a.RemovedAt != nil {
 			continue
 		}
+		if f.OpenMinSeverity != "" {
+			matches := false
+			for _, finding := range s.Findings {
+				matches = matches || finding.AssetID == a.ID && finding.Status == model.StatusOpen && finding.Severity.AtLeast(f.OpenMinSeverity)
+			}
+			if !matches {
+				continue
+			}
+		}
 		out = append(out, a)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -346,15 +355,20 @@ func (s *Store) ListFindings(_ context.Context, f store.FindingFilter) ([]model.
 				continue
 			}
 		}
-		if f.MinSeverity != "" && !x.Severity.AtLeast(f.MinSeverity) || f.Check != "" && x.Check != f.Check ||
+		if f.MinSeverity != "" && !x.Severity.AtLeast(f.MinSeverity) || f.Severity != "" && x.Severity != f.Severity || f.Check != "" && x.Check != f.Check ||
 			f.Zone != "" && x.Zone != f.Zone || f.Source != "" && x.Source != f.Source ||
 			f.AssetID != 0 && x.AssetID != f.AssetID ||
 			f.Query != "" && !strings.Contains(x.Title+" "+x.AssetKey, f.Query) {
 			continue
 		}
+		if f.GroupKey != nil && findingGroupKey(x, f.GroupBy) != *f.GroupKey ||
+			f.AttentionOnly && (x.Status != model.StatusOpen || !x.Severity.AtLeast(model.SeverityHigh) && !findingKEV(x)) ||
+			!f.FirstSeenAfter.IsZero() && x.FirstSeen.Before(f.FirstSeenAfter) {
+			continue
+		}
 		out = append(out, x)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	sort.Slice(out, func(i, j int) bool { return findingLess(out[i], out[j], f) })
 	lo, hi := page(len(out), f.Limit, f.Offset)
 	return out[lo:hi], len(out), nil
 }
@@ -453,7 +467,7 @@ func (s *Store) PruneScans(_ context.Context, olderThan time.Time) (int, error) 
 	return n, nil
 }
 
-// ListEvents returns events strictly newer than since, oldest first.
+// ListEvents returns events at or after since, newest first.
 func (s *Store) ListEvents(_ context.Context, since time.Time, limit int) ([]store.Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -463,11 +477,16 @@ func (s *Store) ListEvents(_ context.Context, since time.Time, limit int) ([]sto
 	}
 	var out []store.Event
 	for _, e := range s.Events {
-		if e.At.After(since) {
+		if !e.At.Before(since) {
 			out = append(out, e)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].At.Equal(out[j].At) {
+			return out[i].At.After(out[j].At)
+		}
+		return out[i].ID > out[j].ID
+	})
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
 	}

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/chainseer-xyz/deckard/internal/plugin"
 )
 
 // Set at build time via -ldflags.
@@ -14,6 +16,10 @@ var (
 )
 
 func main() {
+	if handled, err := plugin.RunSandboxHelper(os.Args[1:]); handled {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 

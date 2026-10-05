@@ -96,8 +96,21 @@ func (s *Store) ListSyncs(ctx context.Context) ([]store.SyncStatus, error) {
 }
 
 func (s *Store) RecordScan(ctx context.Context, r store.ScanRun) error {
-	_, err := s.pool.Exec(ctx, `INSERT INTO scans (asset_id, check_name, tier, started_at, duration_ms, error, findings) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		r.AssetID, r.Check, r.Tier, r.StartedAt, r.DurationMS, r.Error, r.Findings)
+	var success *time.Time
+	if r.Settled() {
+		success = &r.StartedAt
+	}
+	// The history row and durable scheduling state commit together. Out-of-order
+	// completions cannot move either watermark backwards.
+	_, err := s.pool.Exec(ctx, `WITH recorded AS (
+		INSERT INTO scans (asset_id, check_name, tier, started_at, duration_ms, error, findings)
+		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING asset_id, check_name, started_at)
+		INSERT INTO scan_state (asset_id, check_name, last_attempt, last_success)
+		SELECT asset_id, check_name, started_at, $8::timestamptz FROM recorded
+		ON CONFLICT (asset_id, check_name) DO UPDATE
+		SET last_attempt = GREATEST(scan_state.last_attempt, EXCLUDED.last_attempt),
+		    last_success = GREATEST(scan_state.last_success, EXCLUDED.last_success)`,
+		r.AssetID, r.Check, r.Tier, r.StartedAt, r.DurationMS, r.Error, r.Findings, success)
 	return err
 }
 
@@ -126,9 +139,8 @@ func (s *Store) ListScans(ctx context.Context, limit int) ([]store.ScanRun, erro
 
 // LastScans: see store.Store.
 func (s *Store) LastScans(ctx context.Context) ([]store.ScanLast, error) {
-	rows, err := s.pool.Query(ctx, `SELECT asset_id, check_name, max(started_at),
-		max(started_at) FILTER (WHERE error = '' OR starts_with(error, $1))
-		FROM scans GROUP BY asset_id, check_name ORDER BY asset_id, check_name`, store.UnownedDestinationSkip)
+	rows, err := s.pool.Query(ctx, `SELECT asset_id, check_name, last_attempt, last_success
+		FROM scan_state ORDER BY asset_id, check_name`)
 	if err != nil {
 		return nil, err
 	}

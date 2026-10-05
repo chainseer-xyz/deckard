@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,10 @@ import (
 // TestMain doubles as the plugin: when DECKARD_PLUGIN_MODE is set the test
 // binary behaves as an exec plugin instead of running tests.
 func TestMain(m *testing.M) {
+	if handled, err := RunSandboxHelper(os.Args[1:]); handled {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	if mode := os.Getenv("DECKARD_PLUGIN_MODE"); mode != "" {
 		os.Exit(helperPlugin(mode))
 	}
@@ -32,6 +37,27 @@ func helperPlugin(mode string) int {
 	var req map[string]any
 	_ = json.Unmarshal(in, &req)
 	switch mode {
+	case "direct-network":
+		cfg := req["config"].(map[string]any)
+		conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(context.Background(), "tcp", cfg["address"].(string))
+		if conn != nil {
+			_ = conn.Close()
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"observations": []any{map[string]any{"data": map[string]any{"blocked": err != nil}}}})
+	case "broker-network":
+		cfg := req["config"].(map[string]any)
+		channel := req["network"].(map[string]any)
+		requests := os.NewFile(uintptr(channel["request_fd"].(float64)), "network-requests")
+		responses := os.NewFile(uintptr(channel["response_fd"].(float64)), "network-responses")
+		if err := json.NewEncoder(requests).Encode(cfg["request"]); err != nil {
+			return 4
+		}
+		var response networkResponse
+		if err := json.NewDecoder(responses).Decode(&response); err != nil {
+			return 5
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"observations": []any{map[string]any{"data": map[string]any{
+			"status": response.Status, "body": string(response.Body), "answers": response.Answers, "error": response.Error}}}})
 	case "echo":
 		asset, _ := req["asset"].(map[string]any)
 		cwd, _ := os.Getwd()

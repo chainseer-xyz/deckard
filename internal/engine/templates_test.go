@@ -51,6 +51,9 @@ func (f *fakeTemplates) Update(context.Context) (updater.Update, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "update")
+	if f.err == nil && f.up.Version != "" {
+		f.status.Version = f.up.Version
+	}
 	return f.up, f.err
 }
 
@@ -60,6 +63,9 @@ func (f *fakeTemplates) UpdateIfOlderThan(_ context.Context, age time.Duration) 
 	f.calls = append(f.calls, "ifolder:"+age.String())
 	if f.skip {
 		return updater.Update{}, false, nil
+	}
+	if f.err == nil && f.up.Version != "" {
+		f.status.Version = f.up.Version
 	}
 	return f.up, true, f.err
 }
@@ -828,7 +834,8 @@ func TestOutOfScopeTargetsNeverReachTheBinary(t *testing.T) {
 		verified = append(verified, host)
 		return host == "a.example.com"
 	}
-	scanner := nuclei.NewScanner(config.NucleiConfig{TemplatesDir: root, Binary: bin.Path}, verify, nuclei.ExecRunner{}, nil)
+	scanner := nuclei.NewScanner(config.NucleiConfig{TemplatesDir: root, Binary: bin.Path}, verify,
+		nuclei.ExecRunner{Policy: func(context.Context, []string) ([]string, error) { return []string{"192.0.2.0/24"}, nil }}, nil)
 
 	th := newTmplHarness(t, nil, []model.Asset{
 		urlAsset(1, "https://a.example.com/"),

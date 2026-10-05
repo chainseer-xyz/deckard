@@ -12,6 +12,8 @@ func TestErrorReason(t *testing.T) {
 		err  error
 		want string
 	}{
+		{"scope", ErrOutOfScope, "scope-refused"},
+		{"incomplete", errors.New("nuclei: incomplete scan: requests failed or were refused"), "incomplete"},
 		{"no templates", ErrNoTemplates, "no-templates"},
 		{"timeout", context.DeadlineExceeded, "timeout"},
 		{"oom", errors.New("signal: killed (out of memory)"), "oom"},
