@@ -550,10 +550,22 @@ components:
         id: {type: integer, format: int64}
         kind: {$ref: '#/components/schemas/AssetKind'}
         key: {type: string}
-        source: {type: string}
+        source: {type: string, description: Canonical source; not the complete reporting-source list}
         scope: {$ref: '#/components/schemas/ScopeClass'}
         zone: {type: string}
         attrs: {type: object, additionalProperties: true}
+        reporters:
+          type: array
+          items: {type: string}
+          description: Current authoritative inventory sources reporting this identity
+        source_facts:
+          type: object
+          description: Most recent facts per reporting source; a missing entry means metadata is unknown
+          additionalProperties:
+            type: object
+            properties:
+              zone: {type: string}
+              attrs: {type: object, additionalProperties: true}
         first_seen: {type: string, format: date-time}
         last_seen: {type: string, format: date-time}
         removed_at: {type: string, format: date-time, nullable: true}

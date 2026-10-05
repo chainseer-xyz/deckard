@@ -100,8 +100,7 @@ func (*Check) Tier() model.Tier { return model.TierPassive }
 
 // Applies matches owned IPs flagged as an origin behind a proxy.
 func (*Check) Applies(a model.Asset) bool {
-	v, _ := a.Attrs["origin"].(bool)
-	return a.Kind == model.KindIP && a.Scope == model.ScopeOwned && v
+	return a.Kind == model.KindIP && a.Scope == model.ScopeOwned && checkutil.AnyAttributeTrue(a, "origin")
 }
 
 func relatedHostnames(t check.Target, max int) []string {

@@ -132,3 +132,46 @@ func TestPublishHelper(t *testing.T) {
 		t.Errorf("%+v", p)
 	}
 }
+
+func TestSecondarySourceOriginFacts(t *testing.T) {
+	ip := model.Asset{Kind: model.KindIP, Key: "44.55.66.77", Scope: model.ScopeOwned, Source: "aws",
+		Reporters: []string{"aws", "cf"}, SourceFacts: map[string]model.SourceFact{
+			"aws": {Attrs: map[string]any{"owned": true}},
+			"cf":  {Attrs: map[string]any{"origin": true}},
+		}}
+	neighbour := func(name string, proxied bool) check.Neighbour {
+		return check.Neighbour{Relation: model.RelResolvesTo, Asset: model.Asset{
+			Kind: model.KindHostname, Key: name, Source: "cluster", Reporters: []string{"cluster", "cf"},
+			SourceFacts: map[string]model.SourceFact{
+				"cluster": {Attrs: map[string]any{"namespace": "web"}},
+				"cf":      {Zone: "example.com", Attrs: map[string]any{"proxied": proxied}},
+			},
+		}}
+	}
+	ns := []check.Neighbour{neighbour("api.example.com", true), neighbour("dev.example.com", false)}
+	res, err := New().Run(context.Background(), checktest.NewTarget(ip, checktest.WithNeighbours(ns...)))
+	if err != nil || len(res.Findings) != 1 || res.Findings[0].Severity != model.SeverityHigh {
+		t.Fatalf("secondary DNS/AWS facts failed: %+v, %v", res, err)
+	}
+	sources := res.Findings[0].Evidence["sources"].(map[string]string)
+	if sources["api.example.com"] != "cf" || sources["dev.example.com"] != "cf" {
+		t.Fatalf("proxy evidence misattributed to canonical source: %v", sources)
+	}
+	ip.Scope = model.ScopeShared
+	if New().Applies(ip) {
+		t.Fatal("origin evidence must not establish ownership")
+	}
+	ip.Scope, ip.Reporters = model.ScopeOwned, []string{"aws"}
+	if New().Applies(ip) {
+		t.Fatal("retired source must not retain origin evidence")
+	}
+	ns[0].Asset.SourceFacts["cluster"] = model.SourceFact{Attrs: map[string]any{"proxied": false}}
+	if p := Publish(ns); len(p.Proxied) != 0 || len(p.Unproxied) != 1 {
+		t.Fatalf("conflicting proxy claims selected an arbitrary winner: %+v", p)
+	}
+	ip.Reporters = []string{"aws", "cf"}
+	res, err = New().Run(context.Background(), checktest.NewTarget(ip, checktest.WithNeighbours(ns...)))
+	if err != nil || !res.Partial {
+		t.Fatalf("conflicting proxy claims must not produce a clean observation: %+v %v", res, err)
+	}
+}

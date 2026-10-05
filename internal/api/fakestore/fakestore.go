@@ -100,6 +100,7 @@ func (s *Store) GetAsset(_ context.Context, id int64) (*model.Asset, error) {
 	if !ok {
 		return nil, store.ErrNotFound
 	}
+	a = cloneAsset(a)
 	return &a, nil
 }
 
@@ -108,6 +109,7 @@ func (s *Store) GetAssetByKey(_ context.Context, kind model.AssetKind, key strin
 	defer s.mu.Unlock()
 	for _, a := range s.Assets {
 		if a.Kind == kind && a.Key == key {
+			a = cloneAsset(a)
 			return &a, nil
 		}
 	}
@@ -130,7 +132,7 @@ func (s *Store) ListAssets(_ context.Context, f store.AssetFilter) ([]model.Asse
 	defer s.mu.Unlock()
 	var out []model.Asset
 	for _, a := range s.Assets {
-		if f.Kind != "" && a.Kind != f.Kind || f.Source != "" && a.Source != f.Source ||
+		if f.Kind != "" && a.Kind != f.Kind || f.Source != "" && !assetHasSource(a, f.Source) ||
 			f.Scope != "" && a.Scope != f.Scope || f.Zone != "" && a.Zone != f.Zone ||
 			f.Query != "" && !strings.Contains(a.Key, f.Query) ||
 			!f.IncludeRemoved && a.RemovedAt != nil {
@@ -145,7 +147,7 @@ func (s *Store) ListAssets(_ context.Context, f store.AssetFilter) ([]model.Asse
 				continue
 			}
 		}
-		out = append(out, a)
+		out = append(out, cloneAsset(a))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	lo, hi := page(len(out), f.Limit, f.Offset)
@@ -159,9 +161,9 @@ func (s *Store) Edges(_ context.Context, id int64) ([]store.Edge, error) {
 	for _, r := range s.Rels {
 		switch id {
 		case r.FromID:
-			out = append(out, store.Edge{Other: s.Assets[r.ToID], Type: r.Type, Outbound: true})
+			out = append(out, store.Edge{Other: cloneAsset(s.Assets[r.ToID]), Type: r.Type, Outbound: true})
 		case r.ToID:
-			out = append(out, store.Edge{Other: s.Assets[r.FromID], Type: r.Type})
+			out = append(out, store.Edge{Other: cloneAsset(s.Assets[r.FromID]), Type: r.Type})
 		}
 	}
 	return out, nil
