@@ -78,8 +78,9 @@ func New(cfg config.PluginConfig, verify ScopeVerifier) check.Check {
 	return &pluginCheck{cfg: cfg, name: "plugin." + cfg.Name, tier: tier, verify: verify}
 }
 
-func (p *pluginCheck) Name() string     { return p.name }
-func (p *pluginCheck) Tier() model.Tier { return p.tier }
+func (p *pluginCheck) Name() string                    { return p.name }
+func (p *pluginCheck) Tier() model.Tier                { return p.tier }
+func (p *pluginCheck) RequiresOwnedDestinations() bool { return true }
 func (p *pluginCheck) Applies(a model.Asset) bool {
 	return p.cfg.Applies.Kind != "" && string(a.Kind) == p.cfg.Applies.Kind
 }

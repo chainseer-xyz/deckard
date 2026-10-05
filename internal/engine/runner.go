@@ -297,18 +297,24 @@ func (r *runner) runCheck(ctx context.Context, c check.Check, asset model.Asset,
 	class model.ScopeClass, limiter scope.RateLimiter) error {
 
 	tier := c.Tier()
+	networkTier := tier
+	if owned, ok := c.(check.RequiresOwnedDestinations); ok && owned.RequiresOwnedDestinations() && tier == model.TierPassive {
+		// An exec plugin's configured tier controls scheduling, not permission
+		// to probe a third-party address after an owned-hostname DNS change.
+		networkTier = model.TierActive
+	}
 	timeout := r.timeoutFor(c)
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	dialer, refusals := trackRefusals(r.Guard.Dialer(tier, class, limiter))
+	dialer, refusals := trackRefusals(r.Guard.Dialer(networkTier, class, limiter))
 	target := check.Target{
 		Asset:      asset,
 		Neighbours: neigh,
 		Baseline:   map[string]map[string]any{},
 		Dialer:     dialer,
-		Resolver:   r.Guard.Resolver(tier, class, limiter),
-		HTTP:       r.Guard.HTTPClient(tier, class, limiter, scope.WithHTTPTimeout(timeout)),
+		Resolver:   r.Guard.Resolver(networkTier, class, limiter),
+		HTTP:       r.Guard.HTTPClient(networkTier, class, limiter, scope.WithHTTPTimeout(timeout)),
 		Intel:      r.Intel,
 		Lookup:     r.Lookup,
 		Config:     r.Config.Checks[c.Name()],
@@ -318,7 +324,7 @@ func (r *runner) runCheck(ctx context.Context, c check.Check, asset model.Asset,
 	if dg, ok := r.Guard.(interface {
 		DNS(model.Tier, model.ScopeClass, scope.RateLimiter) check.DNSQuerier
 	}); ok {
-		target.DNS = dg.DNS(tier, class, limiter)
+		target.DNS = dg.DNS(networkTier, class, limiter)
 	}
 	start := r.now()
 	var res *check.Result

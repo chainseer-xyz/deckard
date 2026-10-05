@@ -145,6 +145,14 @@ type WantsOpenFindings interface {
 	WantsOpenFindings() bool
 }
 
+// RequiresOwnedDestinations strengthens guarded clients to require owned
+// destination addresses even for a passive check. Scheduling, rate limits and
+// recorded scan tiers remain unchanged. Exec plugins use this boundary because
+// their operator-provided probes must never reach shared or external addresses.
+type RequiresOwnedDestinations interface {
+	RequiresOwnedDestinations() bool
+}
+
 // WantsOwnedZones is an optional Check interface. A check returning true
 // receives Target.OwnedZones; the engine lists the owned zone assets once per
 // run for it and skips the query for every other check.
