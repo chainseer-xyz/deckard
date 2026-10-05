@@ -39,6 +39,31 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 {{- end }}
 
+{{/* Render API defaults explicitly to avoid Gateway API admission/Argo drift.
+     Presence, not truthiness, matters: group: "" is a valid core API reference. */}}
+{{- define "deckard.httpRouteParentRefs" -}}
+{{- $refs := list -}}
+{{- range . -}}
+{{- $ref := deepCopy . -}}
+{{- if not (hasKey $ref "group") -}}
+{{- $_ := set $ref "group" "gateway.networking.k8s.io" -}}
+{{- end -}}
+{{- if not (hasKey $ref "kind") -}}
+{{- $_ := set $ref "kind" "Gateway" -}}
+{{- end -}}
+{{- $refs = append $refs $ref -}}
+{{- end -}}
+{{- toYaml $refs -}}
+{{- end }}
+
+{{- define "deckard.httpRouteBackendRefs" -}}
+- group: ""
+  kind: Service
+  name: {{ include "deckard.fullname" . }}
+  port: {{ .Values.service.port }}
+  weight: 1
+{{- end }}
+
 {{/* Name of the CNPG Cluster (and its generated app secret prefix). */}}
 {{- define "deckard.dbClusterName" -}}
 {{- printf "%s-db" (include "deckard.fullname" .) | trunc 63 | trimSuffix "-" }}

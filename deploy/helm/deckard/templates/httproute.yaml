@@ -15,18 +15,28 @@ metadata:
   annotations: {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  parentRefs: {{- toYaml .Values.httpRoute.parentRefs | nindent 4 }}
+  parentRefs: {{- include "deckard.httpRouteParentRefs" .Values.httpRoute.parentRefs | nindent 4 }}
   {{- with .Values.httpRoute.hostnames }}
   hostnames: {{- toYaml . | nindent 4 }}
   {{- end }}
   rules:
+    {{- if .Values.httpRoute.sse.enabled }}
+    - matches:
+        - path:
+            type: Exact
+            value: "/api/v1/events"
+      timeouts:
+        request: 0s
+        backendRequest: 0s
+      backendRefs:
+        {{- include "deckard.httpRouteBackendRefs" . | nindent 8 }}
+    {{- end }}
     - matches:
         - path:
             type: {{ .Values.httpRoute.path.type }}
             value: {{ .Values.httpRoute.path.value | quote }}
       backendRefs:
-        - name: {{ include "deckard.fullname" . }}
-          port: {{ .Values.service.port }}
+        {{- include "deckard.httpRouteBackendRefs" . | nindent 8 }}
 {{- if .Values.httpRoute.httpRedirect.enabled }}
 {{- if not .Values.httpRoute.httpRedirect.parentRefs }}
 {{- fail "httpRoute.httpRedirect.enabled needs httpRoute.httpRedirect.parentRefs: the gateway's plaintext (http) listener" }}
@@ -42,12 +52,16 @@ metadata:
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
-  parentRefs: {{- toYaml .Values.httpRoute.httpRedirect.parentRefs | nindent 4 }}
+  parentRefs: {{- include "deckard.httpRouteParentRefs" .Values.httpRoute.httpRedirect.parentRefs | nindent 4 }}
   {{- with .Values.httpRoute.hostnames }}
   hostnames: {{- toYaml . | nindent 4 }}
   {{- end }}
   rules:
-    - filters:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: "/"
+      filters:
         - type: RequestRedirect
           requestRedirect:
             scheme: https
