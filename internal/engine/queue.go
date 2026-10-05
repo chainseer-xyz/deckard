@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 
 	"github.com/chainseer-xyz/deckard/internal/model"
@@ -21,6 +22,8 @@ type queue interface {
 	enqueueSync(ctx context.Context, source string) (bool, error)
 	// enqueueExpand queues a discovery expansion of one zone asset, to run after
 	// delay (jitter, so zones do not all hit crt.sh at once). Unique per zone.
+	// An immediate duplicate removes fresh jitter, never an attempted job's
+	// retry or snooze backoff. It still reports false: no new job was queued.
 	enqueueExpand(ctx context.Context, zoneAssetID int64, delay time.Duration) (bool, error)
 }
 
@@ -36,7 +39,8 @@ func (j scanJob) key() string { return fmt.Sprintf("%d|%s|%s", j.AssetID, j.Tier
 // (see jobs.go) make a second insert for the same (asset, tier, check) a no-op
 // while one is queued, scheduled, retrying or running.
 type riverQueue struct {
-	c *river.Client[pgx.Tx]
+	c    *river.Client[pgx.Tx]
+	pool *pgxpool.Pool // conditional promotion must check current row state atomically
 	// route picks the queue of a scan job (runner.scanQueue).
 	route func(scanJob) string
 }
@@ -58,6 +62,17 @@ func (q riverQueue) enqueueSync(ctx context.Context, src string) (bool, error) {
 	return !res.UniqueSkippedAsDuplicate, nil
 }
 
+// A periodic tick may enqueue jitter between committing a new zone and its
+// immediate expansion. Promote only that unattempted job. River snoozes restore
+// attempt to zero, so attempted_at, errors and snooze metadata also protect
+// backoff. The UPDATE rechecks the locked row, never reviving a job that ran
+// after Insert returned its snapshot. State stays scheduled; River's scheduler
+// makes it available on its next pass (the default interval is five seconds).
+const promoteFreshExpansionSQL = `UPDATE river_job SET scheduled_at = now()
+	WHERE id = $1 AND kind = $2 AND state = 'scheduled'
+		AND scheduled_at > now() AND attempt = 0 AND attempted_at IS NULL
+		AND coalesce(cardinality(errors), 0) = 0 AND NOT (metadata ? 'snoozes')`
+
 func (q riverQueue) enqueueExpand(ctx context.Context, id int64, delay time.Duration) (bool, error) {
 	opts := &river.InsertOpts{}
 	if delay > 0 {
@@ -66,6 +81,11 @@ func (q riverQueue) enqueueExpand(ctx context.Context, id int64, delay time.Dura
 	res, err := q.c.Insert(ctx, ExpandZoneArgs{AssetID: id}, opts)
 	if err != nil {
 		return false, err
+	}
+	if res.UniqueSkippedAsDuplicate && delay <= 0 {
+		if _, err := q.pool.Exec(ctx, promoteFreshExpansionSQL, res.Job.ID, KindExpandZone); err != nil {
+			return false, fmt.Errorf("promote fresh expansion: %w", err)
+		}
 	}
 	return !res.UniqueSkippedAsDuplicate, nil
 }

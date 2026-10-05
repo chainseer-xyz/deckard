@@ -68,6 +68,14 @@ Linux ARM64 plugin fixtures verify the actual sandbox and guarded channel. Local
 
 This review did not deploy Deckard or scan the user's estate. Network plugins must migrate to the [guarded channel](../../plugins.md#guarded-network-channel).
 
+### Release follow-up: immediate expansion scheduling
+
+Main CI exposed a race after inventory commits a new zone. A periodic expansion tick could insert a delayed job before the immediate expansion.
+River deduplicated the immediate request without removing the delay, postponing discovery by up to five minutes.
+
+Immediate requests now advance only fresh, unattempted scheduled expansion jobs. The atomic update preserves running jobs, retries, and CT snooze backoff.
+Regression tests force the delayed-before-immediate order and cover concurrent requests, protected job states, and completion during promotion.
+
 ### Remaining operator work
 
 Deploy a chosen release through the normal environment workflow. Let Deckard apply the three migrations before starting workers.

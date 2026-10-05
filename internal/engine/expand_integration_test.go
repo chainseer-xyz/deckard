@@ -171,7 +171,12 @@ func TestIntegrationExpandSnoozesWhileCTIsDown(t *testing.T) {
 		t.Fatalf("snoozed for %v, want about 5m", j.scheduledIn)
 	}
 	zones, _, _ := st.ListAssets(ctx, store.AssetFilter{Kind: model.KindZone})
+	id, _, _ := expansionJob(t, pool)
+	before := expansionJobSnapshot(t, pool, id)
 	if ok, err := e.r.q.enqueueExpand(ctx, zones[0].ID, 0); err != nil || ok {
 		t.Fatalf("a snoozed zone must keep its single job: inserted=%v err=%v", ok, err)
+	}
+	if after := expansionJobSnapshot(t, pool, id); after != before {
+		t.Fatalf("immediate duplicate changed CT backoff:\nbefore %s\nafter  %s", before, after)
 	}
 }
