@@ -51,6 +51,9 @@ func (f *fakeTemplates) Update(context.Context) (updater.Update, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "update")
+	if f.err == nil && f.up.Version != "" {
+		f.status.Version = f.up.Version
+	}
 	return f.up, f.err
 }
 
@@ -60,6 +63,9 @@ func (f *fakeTemplates) UpdateIfOlderThan(_ context.Context, age time.Duration) 
 	f.calls = append(f.calls, "ifolder:"+age.String())
 	if f.skip {
 		return updater.Update{}, false, nil
+	}
+	if f.err == nil && f.up.Version != "" {
+		f.status.Version = f.up.Version
 	}
 	return f.up, true, f.err
 }

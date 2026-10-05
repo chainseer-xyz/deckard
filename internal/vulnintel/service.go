@@ -43,6 +43,9 @@ type Options struct {
 	// batch gap); mostly for tests.
 	KEVOptions  []ClientOption
 	EPSSOptions []ClientOption
+	// BeforePublish durably records new KEV scan work before activating or
+	// persisting the new catalog. It is not called on first load or a 304.
+	BeforePublish func(context.Context, Delta) error
 }
 
 // Delta describes what a Refresh changed.
@@ -51,9 +54,10 @@ type Delta struct {
 	// sorted. It is empty on the very first load (no previous copy), so a
 	// fresh deployment does not fire a storm.
 	NewKEV      []string
-	Entries     int  // catalog size after the refresh
-	NotModified bool // server answered 304; the copy is unchanged
-	FirstLoad   bool // there was no previous copy
+	Revision    string // stable catalog publication identity, including after a 304 or reload
+	Entries     int    // catalog size after the refresh
+	NotModified bool   // server answered 304; the copy is unchanged
+	FirstLoad   bool   // there was no previous copy
 }
 
 // Status is a point-in-time summary for metrics.
@@ -66,6 +70,7 @@ type Status struct {
 
 type kevSnapshot struct {
 	byCVE     map[string]KEVEntry
+	revision  string
 	etag      string
 	lastMod   string
 	fetchedAt time.Time
@@ -215,7 +220,7 @@ func (s *Service) Refresh(ctx context.Context) (Delta, error) {
 		next.fetchedAt = now
 		s.kev.Store(&next)
 		s.persistKEVMeta(&next)
-		return Delta{Entries: len(prev.byCVE), NotModified: true}, nil
+		return Delta{Revision: prev.revision, Entries: len(prev.byCVE), NotModified: true}, nil
 	}
 	if res.NotModified { // 304 with nothing loaded cannot happen on a sane server
 		return Delta{}, errors.New("kev: unexpected 304 with no local copy")
@@ -227,7 +232,7 @@ func (s *Service) Refresh(ctx context.Context) (Delta, error) {
 	if err := ValidateShrink(prevCount, len(res.Entries)); err != nil {
 		return Delta{}, err
 	}
-	next := &kevSnapshot{byCVE: make(map[string]KEVEntry, len(res.Entries)), etag: res.ETag, lastMod: res.LastModified, fetchedAt: now}
+	next := &kevSnapshot{byCVE: make(map[string]KEVEntry, len(res.Entries)), revision: kevRevision(res.Body), etag: res.ETag, lastMod: res.LastModified, fetchedAt: now}
 	var added []string
 	for _, e := range res.Entries {
 		next.byCVE[e.CVE] = e
@@ -238,11 +243,17 @@ func (s *Service) Refresh(ctx context.Context) (Delta, error) {
 		}
 	}
 	sort.Strings(added)
+	delta := Delta{NewKEV: added, Revision: next.revision, Entries: len(next.byCVE), FirstLoad: prev == nil}
+	if len(added) > 0 && s.opts.BeforePublish != nil {
+		if err := s.opts.BeforePublish(ctx, delta); err != nil {
+			return Delta{}, fmt.Errorf("kev: record pending scans before publication: %w", err)
+		}
+	}
 	s.kev.Store(next)
 	if err := s.persistKEV(res.Body, next); err != nil {
 		s.log.Warn("vulnintel: persisting KEV copy failed (in-memory copy is active)", "err", err)
 	}
-	return Delta{NewKEV: added, Entries: len(next.byCVE), FirstLoad: prev == nil}, nil
+	return delta, nil
 }
 
 // RefreshEPSS fetches scores for cves (plus any CVEs previously looked up and
@@ -367,7 +378,7 @@ func (s *Service) load() {
 		if perr != nil {
 			s.log.Warn("vulnintel: ignoring invalid persisted KEV copy", "err", perr)
 		} else {
-			snap := &kevSnapshot{byCVE: make(map[string]KEVEntry, len(entries))}
+			snap := &kevSnapshot{byCVE: make(map[string]KEVEntry, len(entries)), revision: kevRevision(body)}
 			for _, e := range entries {
 				snap.byCVE[e.CVE] = e
 			}

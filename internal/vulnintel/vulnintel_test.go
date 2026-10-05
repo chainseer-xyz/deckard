@@ -3,6 +3,7 @@ package vulnintel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -84,6 +85,26 @@ func TestParseKEVRejects(t *testing.T) {
 		if _, err := ParseKEV([]byte(body)); err == nil {
 			t.Errorf("%s: want error", name)
 		}
+	}
+}
+
+func TestKEVRevisionUsesCatalogMetadataOrStableBodyDigest(t *testing.T) {
+	first := []byte(`{"catalogVersion":"2026.10.01","dateReleased":"2026-10-01","vulnerabilities":[]}`)
+	equivalent := []byte(`{ "dateReleased":"2026-10-01", "catalogVersion":"2026.10.01", "vulnerabilities":[{}] }`)
+	if got := kevRevision(first); got != kevRevision(equivalent) || !strings.HasPrefix(got, "catalog:") {
+		t.Fatalf("catalog metadata did not give a stable revision: %q != %q", got, kevRevision(equivalent))
+	}
+	for _, changed := range []string{
+		`{"catalogVersion":"2026.10.02","dateReleased":"2026-10-01","vulnerabilities":[]}`,
+		`{"catalogVersion":"2026.10.01","dateReleased":"2026-10-02","vulnerabilities":[]}`,
+	} {
+		if kevRevision(first) == kevRevision([]byte(changed)) {
+			t.Fatalf("different catalog publication reused a revision: %s", changed)
+		}
+	}
+	body := kevBody("CVE-2024-00001")
+	if got := kevRevision(body); !strings.HasPrefix(got, "sha256:") || got != kevRevision(append([]byte(nil), body...)) || got == kevRevision(kevBody("CVE-2024-00002")) {
+		t.Fatalf("body digest fallback is not stable and distinct: %q", got)
 	}
 }
 
@@ -285,6 +306,98 @@ func TestServiceFirstLoadNoDeltaThenDelta(t *testing.T) {
 	f.etag.Store(`"e3"`)
 	if d, err = s.Refresh(ctx); err != nil || len(d.NewKEV) != 0 {
 		t.Fatalf("repeat: %+v %v", d, err)
+	}
+}
+
+func TestServiceBeforePublishFailureKeepsPreviousCatalog(t *testing.T) {
+	f := newFeed(t, kevBody("CVE-2024-00001"))
+	dir := t.TempDir()
+	var recorded []Delta
+	allow := false
+	opts := Options{Dir: dir, KEVURL: f.kevSrv.URL, EPSSURL: f.epssSrv.URL, HTTPClient: f.kevSrv.Client(),
+		KEVOptions: fastOpts(), EPSSOptions: fastOpts(), BeforePublish: func(_ context.Context, delta Delta) error {
+			recorded = append(recorded, delta)
+			if !allow {
+				return errors.New("outbox unavailable")
+			}
+			return nil
+		}}
+	s, err := NewService(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if delta, err := s.Refresh(ctx); err != nil || !delta.FirstLoad || len(recorded) != 0 {
+		t.Fatalf("first load: %+v recorded=%v err=%v", delta, recorded, err)
+	}
+	f.kev.Store(kevBody("CVE-2024-00001", "CVE-2025-00002"))
+	f.etag.Store(`"e2"`)
+	if _, err := s.Refresh(ctx); err == nil || !strings.Contains(err.Error(), "outbox unavailable") {
+		t.Fatalf("publication failure = %v", err)
+	}
+	if _, found := s.KEV("CVE-2025-00002"); found {
+		t.Fatal("failed publication activated the new catalog")
+	}
+	restored := f.service(t, dir, nil)
+	if _, found := restored.KEV("CVE-2025-00002"); found {
+		t.Fatal("failed publication persisted the new catalog")
+	}
+	allow = true
+	delta, err := s.Refresh(ctx)
+	if err != nil || strings.Join(delta.NewKEV, ",") != "CVE-2025-00002" {
+		t.Fatalf("retry: %+v err=%v", delta, err)
+	}
+	if delta.Revision == "" || len(recorded) != 2 || recorded[0].Revision != delta.Revision || recorded[1].Revision != delta.Revision || strings.Join(recorded[1].NewKEV, ",") != "CVE-2025-00002" {
+		t.Fatalf("publication retry changed identity: delta=%+v recorded=%+v", delta, recorded)
+	}
+	if unchanged, err := s.Refresh(ctx); err != nil || !unchanged.NotModified || unchanged.Revision != delta.Revision || len(recorded) != 2 {
+		t.Fatalf("304 changed identity or retriggered scans: %+v recorded=%v err=%v", unchanged, recorded, err)
+	}
+	if restoredDelta, err := f.service(t, dir, nil).Refresh(ctx); err != nil || !restoredDelta.NotModified || restoredDelta.Revision != delta.Revision {
+		t.Fatalf("reload changed revision: %+v err=%v", restoredDelta, err)
+	}
+}
+
+func TestServiceKEVReadditionHasANewCatalogRevision(t *testing.T) {
+	body := func(version string, ids ...string) []byte {
+		var catalog map[string]any
+		if err := json.Unmarshal(kevBody(ids...), &catalog); err != nil {
+			t.Fatal(err)
+		}
+		catalog["catalogVersion"], catalog["dateReleased"] = version, "2026-10-04"
+		encoded, err := json.Marshal(catalog)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return encoded
+	}
+	f := newFeed(t, body("v1", "CVE-2024-00001"))
+	var recorded []Delta
+	s, err := NewService(Options{KEVURL: f.kevSrv.URL, EPSSURL: f.epssSrv.URL, HTTPClient: f.kevSrv.Client(),
+		BeforePublish: func(_ context.Context, delta Delta) error { recorded = append(recorded, delta); return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := s.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []string{"v2", "v3", "v4"} {
+		ids := []string{"CVE-2024-00001", "CVE-2025-00002"}
+		if version == "v3" {
+			ids = ids[:1]
+		}
+		f.kev.Store(body(version, ids...))
+		f.etag.Store(version)
+		if _, err := s.Refresh(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(recorded) != 2 || strings.Join(recorded[0].NewKEV, ",") != "CVE-2025-00002" || strings.Join(recorded[1].NewKEV, ",") != "CVE-2025-00002" || recorded[0].Revision == recorded[1].Revision {
+		t.Fatalf("re-added CVEs must have a new publication identity: %+v", recorded)
+	}
+	if delta, err := s.Refresh(ctx); err != nil || !delta.NotModified || len(recorded) != 2 || delta.Revision != recorded[1].Revision {
+		t.Fatalf("304 retriggered scans: %+v recorded=%v err=%v", delta, recorded, err)
 	}
 }
 

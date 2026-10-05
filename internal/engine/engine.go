@@ -474,7 +474,7 @@ func (e *Engine) RunOnceWith(ctx context.Context, opts RunOnceOptions) error {
 	// Exploit intel first so this pass's findings are enriched from fresh
 	// feeds. Failures (e.g. offline) are logged by the job and never fail
 	// the pass: enrichment is best-effort.
-	_ = e.refreshVulnintel(ctx)
+	kevBatches, kevKeys := e.refreshVulnintelOnce(ctx)
 	for _, s := range e.d.Sources {
 		if err := r.runSync(ctx, s.Name()); err != nil {
 			errs = append(errs, err)
@@ -528,15 +528,32 @@ func (e *Engine) RunOnceWith(ctx context.Context, opts RunOnceOptions) error {
 	// Brand-new templates run against every eligible web asset, whatever its
 	// technology tags, once the regular pass (which creates and refreshes the
 	// assets and their findings) is done.
-	if updated && upd.Changed && ctx.Err() == nil {
-		if _, err := r.enqueueNewTemplateScans(ctx, upd); err != nil {
+	if ctx.Err() == nil {
+		keys, err := r.enqueueTemplateTriggers(ctx, upd, updated && upd.Changed)
+		if err != nil {
 			errs = append(errs, err)
 		}
+		completed := err == nil
+		for _, batch := range kevBatches {
+			if _, err := r.enqueueCVEScans(ctx, batch); err != nil {
+				completed = false
+				errs = append(errs, err)
+			}
+		}
+		keys = append(keys, kevKeys...)
 		for _, j := range mq.takeDeltas() {
 			if ctx.Err() != nil {
+				completed = false
 				break
 			}
 			if err := r.runDelta(ctx, j); err != nil {
+				completed = false
+				errs = append(errs, err)
+			}
+		}
+		// This queue is in memory: acknowledge only after the scans ran.
+		if completed {
+			if err := r.acknowledgeScanTriggers(ctx, keys); err != nil {
 				errs = append(errs, err)
 			}
 		}

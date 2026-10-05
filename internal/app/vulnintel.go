@@ -8,6 +8,7 @@ import (
 	"github.com/chainseer-xyz/deckard/internal/engine"
 	"github.com/chainseer-xyz/deckard/internal/finding"
 	"github.com/chainseer-xyz/deckard/internal/model"
+	"github.com/chainseer-xyz/deckard/internal/store"
 	"github.com/chainseer-xyz/deckard/internal/vulnintel"
 )
 
@@ -26,6 +27,12 @@ func (a *App) buildVulnintel() ([]finding.Option, []engine.Option, error) {
 		HTTPClient: &http.Client{Timeout: v.Timeout},
 		UserAgent:  "deckard/" + a.opts.Version + " (defensive attack-surface monitor; +https://github.com/chainseer-xyz/deckard)",
 		Logger:     a.log,
+		BeforePublish: func(ctx context.Context, delta vulnintel.Delta) error {
+			if a.nuclei().scanner == nil {
+				return nil
+			}
+			return a.st.PutScanTrigger(ctx, store.NewScanTrigger(store.ScanTriggerKEV, delta.Revision, nil, delta.NewKEV))
+		},
 	}
 	if a.opts.VulnintelOptions != nil {
 		a.opts.VulnintelOptions(&vo)
