@@ -81,27 +81,29 @@ export default function AssetDetail() {
           {edges.length === 0 ? (
             <Empty>No relations.</Empty>
           ) : (
-            <table className="w-full text-sm">
-              <thead className="border-b border-line">
-                <tr><th className="th">Direction</th><th className="th">Relation</th><th className="th">Asset</th><th className="th">Scope</th></tr>
-              </thead>
-              <tbody>
-                {edges.map((e, i) => (
-                  <tr key={`${e.other.id}-${e.type}-${i}`} className="border-b border-line/60">
-                    <td className="td">
-                      {e.outbound ? <ArrowRight size={14} aria-label="outbound" /> : <ArrowLeft size={14} aria-label="inbound" />}
-                    </td>
-                    <td className="td font-mono text-xs">{e.type}</td>
-                    <td className="td font-mono text-xs">
-                      <KindBadge kind={e.other.kind} />{' '}
-                      <Link className="text-accent hover:underline" to={`/assets/${e.other.id}`}>{e.other.key}</Link>
-                      {e.other.removed_at && <span className="ml-2 rounded-sm border border-line px-1 text-[10px] uppercase">removed</span>}
-                    </td>
-                    <td className="td"><ScopeBadge scope={e.other.scope} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div role="region" aria-label="Asset relations table" tabIndex={0} className="overflow-x-auto">
+              <table className="w-full min-w-[36rem] text-sm">
+                <thead className="border-b border-line">
+                  <tr><th className="th">Direction</th><th className="th">Relation</th><th className="th">Asset</th><th className="th">Scope</th></tr>
+                </thead>
+                <tbody>
+                  {edges.map((e, i) => (
+                    <tr key={`${e.other.id}-${e.type}-${i}`} className="border-b border-line/60">
+                      <td className="td">
+                        {e.outbound ? <ArrowRight size={14} aria-label="outbound" /> : <ArrowLeft size={14} aria-label="inbound" />}
+                      </td>
+                      <td className="td font-mono text-xs">{e.type}</td>
+                      <td className="td font-mono text-xs">
+                        <KindBadge kind={e.other.kind} />{' '}
+                        <Link className="break-all text-accent hover:underline" to={`/assets/${e.other.id}`}>{e.other.key}</Link>
+                        {e.other.removed_at && <span className="ml-2 rounded-sm border border-line px-1 text-[10px] uppercase">removed</span>}
+                      </td>
+                      <td className="td"><ScopeBadge scope={e.other.scope} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </Card>
       </div>
