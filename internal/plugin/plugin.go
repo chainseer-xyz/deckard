@@ -14,7 +14,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -36,8 +35,8 @@ const (
 )
 
 // ScopeVerifier reports whether host is owned and resolves only to owned
-// addresses; plugins run their own network stack, so the name alone is not
-// enough (see scope.Guard.VerifyOwnedTarget).
+// addresses. Plugin processes cannot open sockets; their broker uses guarded
+// clients and repeats this check for every request.
 type ScopeVerifier func(ctx context.Context, host string) bool
 
 // Checks builds one check per configured plugin. Plugins with no exec
@@ -91,6 +90,7 @@ type request struct {
 	Asset      model.Asset     `json:"asset"`
 	Neighbours []neighbourJSON `json:"neighbours"`
 	Config     map[string]any  `json:"config"`
+	Network    networkChannel  `json:"network"`
 }
 
 type neighbourJSON struct {
@@ -133,7 +133,8 @@ func (p *pluginCheck) Run(ctx context.Context, t check.Target) (*check.Result, e
 	if host == "" || p.verify == nil || !p.verify(ctx, host) {
 		return nil, fmt.Errorf("%s: asset %s is not in scope for plugins", p.name, t.Asset.Key)
 	}
-	req := request{Version: ProtocolVersion, Check: p.name, Asset: t.Asset, Neighbours: []neighbourJSON{}, Config: p.cfg.Config}
+	req := request{Version: ProtocolVersion, Check: p.name, Asset: t.Asset, Neighbours: []neighbourJSON{}, Config: p.cfg.Config,
+		Network: networkChannel{RequestFD: 4, ResponseFD: 3}}
 	if req.Config == nil {
 		req.Config = map[string]any{}
 	}
@@ -146,7 +147,7 @@ func (p *pluginCheck) Run(ctx context.Context, t check.Target) (*check.Result, e
 	if err != nil {
 		return nil, fmt.Errorf("%s: encode request: %w", p.name, err)
 	}
-	out, err := p.exec(ctx, stdin)
+	out, err := p.exec(ctx, stdin, t)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +224,7 @@ func (l *truncWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func (p *pluginCheck) exec(ctx context.Context, stdin []byte) ([]byte, error) {
+func (p *pluginCheck) exec(ctx context.Context, stdin []byte, target check.Target) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, p.timeout())
 	defer cancel()
 	dir, err := os.MkdirTemp("", "deckard-plugin-*")
@@ -232,7 +233,16 @@ func (p *pluginCheck) exec(ctx context.Context, stdin []byte) ([]byte, error) {
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 
-	cmd := exec.CommandContext(ctx, p.cfg.Exec[0], p.cfg.Exec[1:]...) // #nosec G204 -- operator-configured plugin, argv only, never a shell
+	cmd, err := sandboxCommand(ctx, p.cfg.Exec)
+	if err != nil {
+		return nil, fmt.Errorf("%s: network sandbox: %w", p.name, err)
+	}
+	channel, err := newBroker(p, target)
+	if err != nil {
+		return nil, err
+	}
+	defer channel.close()
+	cmd.ExtraFiles = []*os.File{channel.responsesRead, channel.requestsWrite}
 	cmd.Dir = dir
 	cmd.Env = p.env()
 	cmd.Stdin = bytes.NewReader(stdin)
@@ -242,7 +252,23 @@ func (p *pluginCheck) exec(ctx context.Context, stdin []byte) ([]byte, error) {
 	setProcessGroup(cmd)
 	cmd.WaitDelay = 2 * time.Second
 
-	runErr := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("%s: start: %w", p.name, err)
+	}
+	// Only the child owns these ends after Start. EOF now tracks child exit.
+	_ = channel.responsesRead.Close()
+	_ = channel.requestsWrite.Close()
+	brokerCtx, stopBroker := context.WithCancel(ctx)
+	defer stopBroker()
+	done := make(chan error, 1)
+	go func() { done <- channel.serve(brokerCtx) }()
+	runErr := cmd.Wait()
+	stopBroker()
+	// A plugin need not read its response. Closing both ends also releases a
+	// broker blocked by a malformed or abandoned request when the child exits.
+	_ = channel.requestsRead.Close()
+	_ = channel.responsesWrite.Close()
+	brokerErr := <-done
 	if s := strings.TrimSpace(stderr.buf.String()); s != "" {
 		if len(s) > logStderrMax {
 			s = s[:logStderrMax] + "...(truncated)"
@@ -256,6 +282,8 @@ func (p *pluginCheck) exec(ctx context.Context, stdin []byte) ([]byte, error) {
 		return nil, fmt.Errorf("%s: %w", p.name, ctx.Err())
 	case runErr != nil:
 		return nil, fmt.Errorf("%s: %w", p.name, runErr)
+	case brokerErr != nil:
+		return nil, fmt.Errorf("%s: guarded network request failed: %w", p.name, brokerErr)
 	}
 	return stdout.buf.Bytes(), nil
 }

@@ -36,10 +36,15 @@ intrusive profile is enabled for the asset.
 - Only in-scope targets are sent. The asset (and every neighbour) must pass
   the scope verifier (`scope.Guard.VerifyOwnedTarget`): the name must be owned
   and must resolve (through the guard's resolver) only to owned addresses,
-  because plugins run their own network stack. A name whose DNS points at a
+  before execution and again before each guarded network request. A name whose DNS points at a
   third party, a mixed answer, an excluded/special address or a resolution
   error is refused (fail closed); out-of-scope assets are never given to the
   plugin.
+- Plugins cannot open network sockets directly. Linux uses an inherited seccomp
+  filter; macOS uses Seatbelt. Unsupported platforms refuse execution.
+- HTTP, TCP and DNS requests use Deckard's guarded clients through inherited pipes.
+  A failed or refused request fails the run, even if the plugin prints a clean response.
+- This network boundary is not a filesystem sandbox. Only install trusted plugins.
 
 ## Protocol v1
 
@@ -55,7 +60,8 @@ Request (one JSON object on stdin):
   "neighbours": [
     {"asset": {"kind": "hostname", "key": "app.example.com", "...": "..."}, "relation": "serves", "outbound": false}
   ],
-  "config": {"threshold": 3}
+  "config": {"threshold": 3},
+  "network": {"request_fd": 4, "response_fd": 3}
 }
 ```
 
@@ -98,10 +104,41 @@ Rules enforced by deckard:
 
 - `examples/plugins/example.py` (Python 3, stdlib only)
 - `examples/plugins/example.sh` (bash + jq)
+- `examples/plugins/guarded-http.py` (Python 3, guarded HTTP channel)
 
 Try one by hand:
 
 ```sh
 echo '{"version":1,"check":"plugin.demo","asset":{"kind":"url","key":"http://example.com/"},"neighbours":[],"config":{}}' \
   | python3 examples/plugins/example.py
+```
+
+## Guarded network channel
+
+Existing plugins that use `curl`, `requests`, raw sockets or their own DNS clients
+must migrate to this channel. Offline protocol-v1 plugins need no changes.
+The distroless images do not include Python or a shell; install your plugin runtime separately.
+
+Open the file descriptors from `network` without opening sockets.
+Write one JSON line to `request_fd`, then read one response line from `response_fd`.
+Requests run sequentially. Each request has a `10s` deadline.
+
+| Operation | Request fields | Response fields |
+| --- | --- | --- |
+| `http` | `url`, optional `method`, `headers`, `body` | `status`, `headers`, `body` |
+| `tcp` | `address` as `host:port`, optional `body`, `read_limit`, `tls` | `body` from one bounded read |
+| `dns` | `name`, optional `record`: `A`, `AAAA`, `TXT`, `NS`, `CNAME` | `answers` (`A` and `AAAA` return the combined address set) |
+
+`body` uses JSON's base64 byte encoding. TLS requests verify certificates and use the destination hostname as SNI.
+Destinations must match the target or a currently owned neighbour. The guard checks each dial's address.
+HTTP redirects also pass through the guarded client. Plugins cannot override `Host` or `Proxy-Authorization`.
+
+Each run allows `1000` requests. Request lines must fit `256 KiB`; HTTP response bodies must fit `4 MiB`.
+TCP reads default to `64 KiB` and cannot exceed `4 MiB`.
+Errors return `{"error":"..."}` and prevent the run from resolving existing findings.
+
+Example request:
+
+```json
+{"operation":"http","url":"https://app.example.com/","method":"GET"}
 ```
