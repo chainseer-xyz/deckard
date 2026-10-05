@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assetSources, assetTags, baselineView, isStaleObservation, severityCounts } from './assetView';
+import { assetSources, assetSourceViews, assetTags, baselineView, isStaleObservation, severityCounts } from './assetView';
 import type { Baseline, Finding, Observation } from '../api/types';
 
 const NOW = Date.parse('2026-10-02T12:00:00Z');
@@ -31,6 +31,31 @@ describe('asset tags and sources from attrs', () => {
   it('lists the primary source first, then any extras', () => {
     expect(assetSources({ source: 'aws', attrs: { sources: ['cloudflare', 'aws'] } })).toEqual(['aws', 'cloudflare']);
     expect(assetSources({ source: 'aws' })).toEqual(['aws']);
+  });
+  it('prefers explicit reporters over legacy hints and deduplicates facts and sources', () => {
+    expect(assetSources({ source: 'cloudflare', reporters: ['aws', 'cloudflare', 'aws'], source_facts: { kubernetes: {} }, attrs: { sources: ['unverified'] } }))
+      .toEqual(['cloudflare', 'aws', 'kubernetes']);
+  });
+  it('keeps conflicting source metadata separate from the canonical projection', () => {
+    const asset = {
+      source: 'cloudflare', zone: 'example.com', attrs: { region: 'canonical' }, reporters: ['cloudflare', 'aws'],
+      source_facts: { cloudflare: { zone: 'example.com', attrs: { region: 'cf' } }, aws: { attrs: { region: 'us-east-1', instance_id: 'i-123' } } },
+    };
+    expect(assetSourceViews(asset)).toEqual([
+      { source: 'cloudflare', canonical: true, recorded: true, zone: 'example.com', attrs: { region: 'cf' } },
+      { source: 'aws', canonical: false, recorded: true, attrs: { region: 'us-east-1', instance_id: 'i-123' } },
+    ]);
+    expect(asset.attrs).toEqual({ region: 'canonical' });
+  });
+  it('marks legacy metadata without copying it into another reporter', () => {
+    expect(assetSourceViews({ source: 'cloudflare', zone: 'example.com', attrs: { proxied: false }, reporters: ['aws'] })).toEqual([
+      { source: 'cloudflare', canonical: true, recorded: false, zone: 'example.com', attrs: { proxied: false } },
+      { source: 'aws', canonical: false, recorded: false },
+    ]);
+  });
+  it('treats an explicit empty source fact as recorded, not missing legacy metadata', () => {
+    expect(assetSourceViews({ source: 'aws', source_facts: { aws: {} }, attrs: { instance_id: 'legacy' } }))
+      .toEqual([{ source: 'aws', canonical: true, recorded: true }]);
   });
 });
 

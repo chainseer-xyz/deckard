@@ -42,11 +42,20 @@ export const STATUSES: FindingStatus[] = [
 
 export type RelationType = string;
 
+/** Facts from one inventory source, before canonical projection. */
+export interface SourceFact {
+  zone?: string;
+  attrs?: Record<string, unknown>;
+}
+
 export interface Asset {
   id: number;
   kind: AssetKind;
   key: string;
   source: string;
+  /** All sources reporting this identity; source remains the canonical source. */
+  reporters?: string[];
+  source_facts?: Record<string, SourceFact>;
   scope: ScopeClass;
   zone?: string;
   attrs?: Record<string, unknown>;

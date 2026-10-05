@@ -1,11 +1,12 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { List, Network } from 'lucide-react';
-import { useAssets, useGraph, useStats } from '../api/hooks';
+import { useAssets, useGraph, useSources, useStats } from '../api/hooks';
 import { ASSET_KINDS, SCOPES } from '../api/types';
 import type { AssetKind, ScopeClass } from '../api/types';
 import { Card, Empty, ErrorBox, KindBadge, Loading, PageHeader, Pagination, ScopeBadge, SeverityBadge } from '../components/ui';
 import { relTime, absTime } from '../lib/format';
+import { assetSources } from '../lib/assetView';
 import {
   INVENTORY_PAGE_SIZE,
   parseInventory,
@@ -79,6 +80,7 @@ function MapView({ assetId, depth, onPick, onDepth }: { assetId?: number; depth:
 export default function Inventory() {
   const [sp, setSp] = useSearchParams();
   const stats = useStats();
+  const sourceStatuses = useSources();
   const view = sp.get('view') === 'map' ? 'map' : 'table';
   const filter = useMemo(() => parseInventory(sp), [sp]);
   const { query: q, rows, total } = useInventoryData(filter, view === 'table');
@@ -108,7 +110,12 @@ export default function Inventory() {
     return () => clearTimeout(t);
   }, [text, filter.q]);
 
-  const sources = Object.keys(stats.data?.assets_by_source ?? {});
+  // Canonical counts omit sources that only overlap another source's assets.
+  const sources = [...new Set([
+    ...Object.keys(stats.data?.assets_by_source ?? {}),
+    ...(sourceStatuses.data?.items.map((source) => source.source) ?? []),
+    ...rows.flatMap(assetSources),
+  ])].sort();
   const zones = useMemo(
     () => [...new Set(rows.map((a) => a.zone).filter((z): z is string => !!z))].sort(),
     [rows],
@@ -165,7 +172,7 @@ export default function Inventory() {
               </div>
               <div>
                 <label htmlFor="i-src" className="mb-1 block text-xs text-muted">Source</label>
-                <select id="i-src" className="input" value={filter.source} onChange={(e) => set({ source: e.target.value })}>
+                <select id="i-src" className="input" value={filter.source} onChange={(e) => set({ source: e.target.value })} title="Matches any reporting source, not just the canonical source">
                   <option value="">Any</option>
                   {filter.source && !sources.includes(filter.source) && <option>{filter.source}</option>}
                   {sources.map((k) => <option key={k}>{k}</option>)}
@@ -213,8 +220,8 @@ export default function Inventory() {
                           <th className="th">Kind</th>
                           <th className="th">Key</th>
                           <th className="th">Scope</th>
-                          <th className="th">Source</th>
-                          <th className="th">Zone</th>
+                          <th className="th">Reported by</th>
+                          <th className="th">Canonical zone</th>
                           <th className="th">Open findings</th>
                           <th className="th">Last scanned</th>
                           <th className="th">Last seen</th>
@@ -232,7 +239,7 @@ export default function Inventory() {
                                 {a.removed_at && <span className="ml-2 rounded-sm border border-line px-1 text-[10px] uppercase">removed</span>}
                               </td>
                               <td className="td"><ScopeBadge scope={a.scope} /></td>
-                              <td className="td text-xs">{a.source}</td>
+                              <td className="td text-xs" title={`Canonical source: ${a.source}`}>{assetSources(a).join(', ')}</td>
                               <td className="td text-xs">{a.zone ?? '-'}</td>
                               <td className="td min-w-28 text-xs">
                                 {(a.open_findings ?? 0) > 0 && a.top_severity ? (

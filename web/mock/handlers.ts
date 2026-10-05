@@ -52,7 +52,7 @@ export function makeHandlers(state: MockState = { findings: d.makeFindings(), ca
       const g = (k: string) => u.searchParams.get(k);
       let items = (state.assets ?? d.assets).filter((a) => u.searchParams.get('include_removed') === 'true' || !a.removed_at);
       if (g('kind')) items = items.filter((a) => a.kind === g('kind'));
-      if (g('source')) items = items.filter((a) => a.source === g('source'));
+      if (g('source')) items = items.filter((a) => a.source === g('source') || a.reporters?.includes(g('source') as string));
       if (g('scope')) items = items.filter((a) => a.scope === g('scope'));
       if (g('zone')) items = items.filter((a) => a.zone === g('zone'));
       if (g('q')) items = items.filter((a) => a.key.includes(g('q') as string));
