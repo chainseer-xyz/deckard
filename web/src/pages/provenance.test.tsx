@@ -61,6 +61,23 @@ describe('shared asset provenance', () => {
       .toHaveAttribute('href', '/assets/77');
   });
 
+  it('keeps long resource relations in a labelled keyboard-scrollable region', async () => {
+    const longResource = { ...resource, key: `arn:aws:elasticloadbalancing:us-west-2:123456789012:loadbalancer/app/${'gateway-'.repeat(24)}` };
+    server.use(http.get('*/api/v1/assets/5', () => HttpResponse.json({
+      asset: sharedIP, edges: [{ direction: 'in', type: 'has_public_ip', asset: longResource }],
+      observations: [], baselines: [], findings: [],
+    })));
+    renderRoute(<AssetDetail />, '/assets/:id', '/assets/5');
+
+    const viewport = await screen.findByRole('region', { name: 'Asset relations table' });
+    expect(viewport).toHaveAttribute('tabindex', '0');
+    expect(viewport).toHaveClass('overflow-x-auto');
+    const table = within(viewport).getByRole('table');
+    expect(table).toHaveClass('min-w-[36rem]');
+    expect(within(table).getByRole('link', { name: longResource.key })).toHaveClass('break-all');
+    expect(within(table).getByRole('columnheader', { name: 'Scope' })).toBeInTheDocument();
+  });
+
   it('labels missing legacy source facts without assigning canonical attributes to AWS', async () => {
     state.assets = [{ ...sharedIP, reporters: ['cloudflare', 'aws'], source_facts: undefined }];
     renderRoute(<AssetDetail />, '/assets/:id', '/assets/5');

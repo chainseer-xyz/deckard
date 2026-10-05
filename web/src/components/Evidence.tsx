@@ -10,9 +10,9 @@ const MAX_ITEMS = 8;
 
 function Collapsible({ text, label }: { text: string; label: string }) {
   const [open, setOpen] = useState(false);
-  if (text.length <= MAX_TEXT) return <span className="break-words">{text}</span>;
+  if (text.length <= MAX_TEXT) return <span className="[overflow-wrap:anywhere]">{text}</span>;
   return (
-    <span className="break-words">
+    <span className="[overflow-wrap:anywhere]">
       {open ? text : `${text.slice(0, MAX_TEXT)}…`}{' '}
       <button
         type="button"
@@ -31,7 +31,7 @@ export function PortChips({ ports }: { ports: number[] }) {
   return (
     <ul className="flex flex-wrap gap-1" aria-label="Ports">
       {ports.map((p) => (
-        <li key={p} className="rounded-sm border border-line bg-surface2 px-1.5 py-0.5 font-mono text-xs">
+        <li key={p} className="min-w-0 max-w-full rounded-sm border border-line bg-surface2 px-1.5 py-0.5 font-mono text-xs [overflow-wrap:anywhere]">
           {p}
         </li>
       ))}
@@ -56,10 +56,10 @@ export function ChainPath({ hops, endLabel, endBad }: { hops: string[]; endLabel
       {hops.map((h, i) => {
         const last = i === hops.length - 1;
         return (
-          <li key={`${h}-${i}`} className="flex items-center gap-1">
-            {i > 0 && <ArrowRight size={12} aria-hidden="true" className="text-muted" />}
+          <li key={`${h}-${i}`} className="flex min-w-0 max-w-full items-center gap-1">
+            {i > 0 && <ArrowRight size={12} aria-hidden="true" className="shrink-0 text-muted" />}
             <span
-              className={`rounded-sm border px-1.5 py-0.5 font-mono text-xs ${
+              className={`min-w-0 rounded-sm border px-1.5 py-0.5 font-mono text-xs [overflow-wrap:anywhere] ${
                 last && endBad ? 'border-bad bg-bad/10 font-semibold text-bad' : 'border-line bg-surface2'
               }`}
             >
@@ -107,11 +107,11 @@ function ListValue({ items, label }: { items: string[]; label: string }) {
   const [all, setAll] = useState(false);
   const shown = all ? items : items.slice(0, MAX_ITEMS);
   return (
-    <div>
+    <div className="min-w-0 max-w-full">
       <ul className="flex flex-wrap gap-1">
         {shown.map((x, i) => (
-          <li key={`${x}-${i}`} className="rounded-sm border border-line bg-surface2 px-1.5 py-0.5 font-mono text-xs">
-            {x.length > MAX_TEXT ? `${x.slice(0, MAX_TEXT)}…` : x}
+          <li key={`${x}-${i}`} className="min-w-0 max-w-full rounded-sm border border-line bg-surface2 px-1.5 py-0.5 font-mono text-xs [overflow-wrap:anywhere]">
+            <Collapsible text={x} label={`${label} item ${i + 1}`} />
           </li>
         ))}
       </ul>
@@ -166,15 +166,15 @@ export function EvidenceTable({
   const rows = evidenceRows(data);
   if (rows.length === 0) return <p className="text-sm text-muted">No evidence recorded.</p>;
   return (
-    <div>
-      <table className="w-full text-sm" aria-label={label}>
+    <div className="min-w-0 max-w-full">
+      <table className="w-full table-fixed text-sm" aria-label={label}>
         <tbody>
           {rows.map((r) => (
             <tr key={r.key} className="border-b border-line/60 last:border-b-0">
-              <th scope="row" className="w-1/3 min-w-28 py-1.5 pr-3 align-top text-xs font-medium text-muted">
+              <th scope="row" className="w-1/3 py-1.5 pr-3 align-top text-xs font-medium text-muted [overflow-wrap:anywhere]">
                 {r.label}
               </th>
-              <td className="py-1.5 align-top">
+              <td className="py-1.5 align-top [overflow-wrap:anywhere]">
                 <EvidenceValue row={r} now={now} />
                 {changes?.get(r.key) && <ChangeMark change={changes.get(r.key) as DataChange} />}
               </td>
