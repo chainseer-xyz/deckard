@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useAllFindings, useFindingTotal, useStats } from '../api/hooks';
+import { useStats } from '../api/hooks';
 import { SEVERITIES, STATUSES } from '../api/types';
 import type { Finding, FindingStatus, Severity } from '../api/types';
 import { FindingDrawer } from '../components/FindingDrawer';
@@ -9,20 +9,15 @@ import { FindingsTable } from '../components/FindingsTable';
 import { Card, ErrorBox, Loading, PageHeader, Pagination } from '../components/ui';
 import {
   PAGE_SIZE,
-  applyExactSeverity,
-  pageOf,
   parseFilter,
-  sortFindings,
-  toApiParams,
   toSearchParams,
-  withoutSeverity,
 } from '../lib/findingsFilter';
 import type { FindingsFilter, SortKey } from '../lib/findingsFilter';
 import { titleCase } from '../lib/format';
-import { GROUP_BYS, groupFindings } from '../lib/triage';
+import { GROUP_BYS } from '../lib/triage';
 import type { GroupBy } from '../lib/triage';
+import { GROUP_PAGE_SIZE, useFindingsData } from './useFindingsData';
 
-const GROUP_PAGE_SIZE = 25;
 const DRAWER_PARAM = 'finding';
 
 export default function Findings() {
@@ -30,9 +25,7 @@ export default function Findings() {
   const filter = useMemo(() => parseFilter(sp), [sp]);
   const drawerId = Number(sp.get(DRAWER_PARAM)) || undefined;
   const stats = useStats();
-  const apiParams = useMemo(() => toApiParams(filter), [filter]);
-  const q = useAllFindings(apiParams);
-  const total = useFindingTotal(withoutSeverity(apiParams));
+  const { params: apiParams, findings, groups, query: q, total, matchingTotal } = useFindingsData(filter);
 
   // Filters live in the URL; the open drawer (`finding`) is carried along.
   const writeUrl = (next: FindingsFilter) => {
@@ -57,13 +50,15 @@ export default function Findings() {
 
   // search box is debounced into the URL
   const [text, setText] = useState(filter.q);
+  const updateSearch = useRef(update);
+  useEffect(() => { updateSearch.current = update; });
   useEffect(() => setText(filter.q), [filter.q]);
   useEffect(() => {
     if (text === filter.q) return;
-    const t = setTimeout(() => update({ q: text }), 300);
+    // Use the current URL filters if another control changes during the delay.
+    const t = setTimeout(() => updateSearch.current({ q: text }), 300);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text]);
+  }, [text, filter.q]);
 
   const toggleStatus = (s: FindingStatus) =>
     update({ status: filter.status.includes(s) ? filter.status.filter((x) => x !== s) : [...filter.status, s] });
@@ -71,17 +66,10 @@ export default function Findings() {
   const setSort = (key: SortKey) =>
     update(filter.sort === key ? { dir: filter.dir === 'desc' ? 'asc' : 'desc' } : { sort: key, dir: 'desc' }, true);
 
-  const sorted = useMemo(
-    () => (q.data ? sortFindings(applyExactSeverity(q.data, filter), filter.sort, filter.dir) : []),
-    [q.data, filter],
-  );
-  const groups = useMemo(
-    () => (filter.groupBy === 'none' ? [] : groupFindings(sorted, filter.groupBy)),
-    [sorted, filter.groupBy],
-  );
+  const rows = findings.data?.items ?? [];
   const checks = Object.keys(stats.data?.findings_by_check ?? {});
   const sources = Object.keys(stats.data?.assets_by_source ?? {});
-  const seed = drawerId ? q.data?.find((f) => f.id === drawerId) : undefined;
+  const seed = drawerId ? rows.find((f) => f.id === drawerId) : undefined;
   const showingAll = filter.minSeverity === 'info' && !filter.severity;
 
   return (
@@ -171,12 +159,12 @@ export default function Findings() {
           {q.data ? (
             <span>
               {filter.severity ? (
-                <>Showing {sorted.length} {filter.severity} findings.</>
-              ) : showingAll ? (
-                <>Showing all {sorted.length} findings.</>
+                <>Showing {matchingTotal ?? '…'} {filter.severity} findings.</>
+              ) : showingAll && filter.groupBy === 'none' && rows.length === matchingTotal ? (
+                <>Showing all {matchingTotal} findings.</>
               ) : (
                 <>
-                  Showing {sorted.length} of {total.data ?? '…'} findings
+                  Showing {matchingTotal ?? '…'} of {total.data ?? '…'} findings
                   {filter.minSeverity !== 'info' ? ` (${filter.minSeverity} and above)` : ''}.
                 </>
               )}
@@ -200,28 +188,29 @@ export default function Findings() {
           (filter.groupBy === 'none' ? (
             <>
               <FindingsTable
-                items={pageOf(sorted, filter.page)}
+                items={rows}
                 onOpen={open}
                 selectedId={drawerId}
                 sort={filter.sort}
                 dir={filter.dir}
                 onSort={setSort}
               />
-              <Pagination total={sorted.length} limit={PAGE_SIZE} offset={(filter.page - 1) * PAGE_SIZE} onPage={(p) => update({ page: p }, true)} />
+              <Pagination total={findings.data?.total ?? 0} limit={PAGE_SIZE} offset={(filter.page - 1) * PAGE_SIZE} onPage={(p) => update({ page: p }, true)} />
             </>
           ) : (
             <>
               <FindingGroups
                 key={filter.groupBy}
-                groups={pageOf(groups, filter.page, GROUP_PAGE_SIZE)}
+                groups={groups.data?.items ?? []}
                 by={filter.groupBy}
+                params={apiParams}
                 onOpen={open}
                 selectedId={drawerId}
                 sort={filter.sort}
                 dir={filter.dir}
                 onSort={setSort}
               />
-              <Pagination total={groups.length} limit={GROUP_PAGE_SIZE} offset={(filter.page - 1) * GROUP_PAGE_SIZE} onPage={(p) => update({ page: p }, true)} />
+              <Pagination total={groups.data?.total ?? 0} limit={GROUP_PAGE_SIZE} offset={(filter.page - 1) * GROUP_PAGE_SIZE} onPage={(p) => update({ page: p }, true)} />
             </>
           ))}
       </Card>

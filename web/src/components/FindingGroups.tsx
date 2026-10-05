@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import type { Finding } from '../api/types';
+import type { Finding, FindingGroup } from '../api/types';
+import type { FindingsParams } from '../api/client';
+import { useFindings } from '../api/hooks';
 import { SEVERITIES } from '../api/types';
 import type { SortDir, SortKey } from '../lib/findingsFilter';
-import type { FindingGroup, GroupBy } from '../lib/triage';
+import type { GroupBy } from '../lib/triage';
 import { FindingsTable } from './FindingsTable';
-import { SeverityBadge } from './ui';
+import { ErrorBox, Loading, Pagination, SeverityBadge } from './ui';
 
 const BY_LABEL: Record<Exclude<GroupBy, 'none'>, string> = { asset: 'asset', check: 'check', zone: 'zone' };
 
@@ -13,6 +15,7 @@ const BY_LABEL: Record<Exclude<GroupBy, 'none'>, string> = { asset: 'asset', che
 export function FindingGroups({
   groups,
   by,
+  params,
   onOpen,
   selectedId,
   sort,
@@ -21,6 +24,7 @@ export function FindingGroups({
 }: {
   groups: FindingGroup[];
   by: Exclude<GroupBy, 'none'>;
+  params: FindingsParams;
   onOpen: (f: Finding) => void;
   selectedId?: number;
   sort: SortKey;
@@ -54,19 +58,19 @@ export function FindingGroups({
             <li key={g.key}>
               <button
                 className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-left hover:bg-surface2/50"
-                aria-label={`${g.label}, ${g.items.length} finding${g.items.length === 1 ? '' : 's'}: ${[...SEVERITIES]
+                aria-label={`${g.label}, ${g.total} finding${g.total === 1 ? '' : 's'}: ${[...SEVERITIES]
                   .reverse()
                   .filter((s) => g.counts[s] > 0)
                   .map((s) => `${g.counts[s]} ${s}`)
                   .join(', ')}`}
                 aria-expanded={expanded}
-                aria-controls={`group-${by}-${g.key}`}
+                aria-controls={`group-${by}-${encodeURIComponent(g.key)}`}
                 onClick={() => toggle(g.key)}
               >
                 {expanded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
                 <span className="min-w-0 flex-1 truncate font-mono text-sm font-medium">{g.label}</span>
                 <span className="text-xs tabular-nums text-muted">
-                  {g.items.length} finding{g.items.length === 1 ? '' : 's'}
+                  {g.total} finding{g.total === 1 ? '' : 's'}
                 </span>
                 <span className="flex flex-wrap gap-1">
                   {[...SEVERITIES]
@@ -81,9 +85,10 @@ export function FindingGroups({
                 </span>
               </button>
               {expanded && (
-                <div id={`group-${by}-${g.key}`} className="border-t border-line bg-surface2/20">
-                  <FindingsTable
-                    items={g.items}
+                <div id={`group-${by}-${encodeURIComponent(g.key)}`} className="border-t border-line bg-surface2/20">
+                  <GroupMembers
+                    key={JSON.stringify(params)}
+                    params={{ ...params, group_by: by, group_key: g.key }}
                     onOpen={onOpen}
                     selectedId={selectedId}
                     compact={by === 'asset'}
@@ -98,5 +103,23 @@ export function FindingGroups({
         })}
       </ul>
     </div>
+  );
+}
+
+function GroupMembers({ params, ...table }: { params: FindingsParams } & Omit<Parameters<typeof FindingsTable>[0], 'items'>) {
+  const [page, setPage] = useState(1);
+  const limit = 50;
+  const query = useFindings({ ...params, limit, offset: (page - 1) * limit });
+  return (
+    <>
+      {query.isLoading && <Loading />}
+      {query.isError && <ErrorBox error={query.error} onRetry={() => void query.refetch()} />}
+      {query.data && (
+        <>
+          <FindingsTable {...table} items={query.data.items} />
+          <Pagination total={query.data.total} limit={limit} offset={(page - 1) * limit} onPage={setPage} />
+        </>
+      )}
+    </>
   );
 }

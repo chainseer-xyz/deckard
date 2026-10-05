@@ -1,11 +1,18 @@
 import { http, HttpResponse } from 'msw';
-import type { Finding, FindingStatus, Stats } from '../src/api/types';
+import type { Asset, Finding, FindingStatus, ScanRun, Stats } from '../src/api/types';
 import { severityRank } from '../src/api/types';
+import { groupFindings, needsAttention } from '../src/lib/triage';
+import type { GroupBy } from '../src/lib/triage';
+import { sortFindings } from '../src/lib/findingsFilter';
+import type { SortKey } from '../src/lib/findingsFilter';
+import { assetFindingStats, lastScanByAsset, sortByFindings } from '../src/lib/inventory';
 import * as d from './data';
 
 export interface MockState {
   findings: Finding[];
   canWrite: boolean;
+  assets?: Asset[];
+  scans?: ScanRun[];
 }
 
 const page = <T,>(items: T[], url: URL) => {
@@ -14,10 +21,10 @@ const page = <T,>(items: T[], url: URL) => {
   return { items: items.slice(offset, offset + limit), total: items.length, limit, offset };
 };
 
-export function computeStats(findings: Finding[]): Stats {
+export function computeStats(findings: Finding[], assets = d.assets): Stats {
   const count = (xs: string[]) => xs.reduce<Record<string, number>>((m, x) => ({ ...m, [x]: (m[x] ?? 0) + 1 }), {});
   const open = findings.filter((f) => f.status === 'open');
-  const live = d.assets.filter((a) => !a.removed_at);
+  const live = assets.filter((a) => !a.removed_at);
   return {
     assets_by_kind: count(live.map((a) => a.kind)),
     assets_by_source: count(live.map((a) => a.source)),
@@ -39,16 +46,25 @@ export function makeHandlers(state: MockState = { findings: d.makeFindings(), ca
   const B = '*/api/v1';
   return [
     http.get(`${B}/me`, () => HttpResponse.json({ identity: 'mock@example.com', can_write: state.canWrite, csrf_token: d.mockCsrfToken })),
-    http.get(`${B}/stats`, () => HttpResponse.json(computeStats(state.findings))),
+    http.get(`${B}/stats`, () => HttpResponse.json(computeStats(state.findings, state.assets))),
     http.get(`${B}/assets`, ({ request }) => {
       const u = new URL(request.url);
       const g = (k: string) => u.searchParams.get(k);
-      let items = d.assets.filter((a) => u.searchParams.get('include_removed') === 'true' || !a.removed_at);
+      let items = (state.assets ?? d.assets).filter((a) => u.searchParams.get('include_removed') === 'true' || !a.removed_at);
       if (g('kind')) items = items.filter((a) => a.kind === g('kind'));
       if (g('source')) items = items.filter((a) => a.source === g('source'));
       if (g('scope')) items = items.filter((a) => a.scope === g('scope'));
       if (g('zone')) items = items.filter((a) => a.zone === g('zone'));
       if (g('q')) items = items.filter((a) => a.key.includes(g('q') as string));
+      const summaries = assetFindingStats(state.findings);
+      if (g('open_min_severity')) {
+        items = items.filter((a) => severityRank(summaries.get(a.id)?.top ?? '') >= severityRank(g('open_min_severity') as string));
+        items = sortByFindings(items, summaries);
+      }
+      if (g('include_summary') === 'true') {
+        const scans = lastScanByAsset(state.scans ?? d.scans);
+        items = items.map((a) => ({ ...a, open_findings: summaries.get(a.id)?.total ?? 0, top_severity: summaries.get(a.id)?.top ?? 'info', last_scan: scans.get(a.id) ?? null }));
+      }
       return HttpResponse.json(page(items, u));
     }),
     http.get(`${B}/assets/:id/graph`, ({ params, request }) =>
@@ -56,7 +72,7 @@ export function makeHandlers(state: MockState = { findings: d.makeFindings(), ca
     ),
     http.get(`${B}/assets/:id`, ({ params }) => {
       const id = Number(params.id);
-      const asset = d.assets.find((a) => a.id === id);
+      const asset = (state.assets ?? d.assets).find((a) => a.id === id);
       if (!asset) return HttpResponse.json({ error: { code: 'not_found', message: 'asset not found' } }, { status: 404 });
       return HttpResponse.json({
         asset,
@@ -73,11 +89,27 @@ export function makeHandlers(state: MockState = { findings: d.makeFindings(), ca
       const statuses = u.searchParams.getAll('status');
       let items = state.findings.filter((f) => statuses.length === 0 || statuses.includes(f.status));
       if (g('min_severity')) items = items.filter((f) => severityRank(f.severity) >= severityRank(g('min_severity') as string));
+      if (g('severity')) items = items.filter((f) => f.severity === g('severity'));
       if (g('check')) items = items.filter((f) => f.check === g('check'));
       if (g('zone')) items = items.filter((f) => f.zone === g('zone'));
       if (g('source')) items = items.filter((f) => f.source === g('source'));
       if (g('asset_id')) items = items.filter((f) => f.asset_id === Number(g('asset_id')));
       if (g('q')) items = items.filter((f) => `${f.title} ${f.asset_key}`.toLowerCase().includes((g('q') as string).toLowerCase()));
+      if (g('first_seen_after')) items = items.filter((f) => Date.parse(f.first_seen) >= Date.parse(g('first_seen_after') as string));
+      if (g('attention') === 'true') items = needsAttention(items);
+      if (g('sort') && g('sort') !== 'attention' && g('sort') !== 'count') {
+        items = sortFindings(items, g('sort') as SortKey, g('direction') === 'asc' ? 'asc' : 'desc');
+      }
+      if (g('group_by')) {
+        const by = g('group_by') as Exclude<GroupBy, 'none'>;
+        let groups = groupFindings(items, by);
+        if (u.searchParams.has('group_key')) {
+          items = groups.find((group) => group.key === g('group_key'))?.items ?? [];
+        } else {
+          if (g('sort') === 'count') groups = groups.sort((a, b) => b.items.length - a.items.length || a.key.localeCompare(b.key));
+          return HttpResponse.json(page(groups.map(({ items: members, ...group }) => ({ ...group, total: members.length })), u));
+        }
+      }
       return HttpResponse.json(page(items, u));
     }),
     http.get(`${B}/findings/:id`, ({ params }) => {
@@ -96,7 +128,7 @@ export function makeHandlers(state: MockState = { findings: d.makeFindings(), ca
     }),
     http.get(`${B}/sources`, () => HttpResponse.json({ items: d.sources, total: d.sources.length, limit: 100, offset: 0 })),
     http.post(`${B}/sources/:name/sync`, () => HttpResponse.json({ started: true }, { status: 202 })),
-    http.get(`${B}/scans`, ({ request }) => HttpResponse.json(page(d.scans, new URL(request.url)))),
+    http.get(`${B}/scans`, ({ request }) => HttpResponse.json(page(state.scans ?? d.scans, new URL(request.url)))),
     http.get(`${B}/changes`, ({ request }) => {
       const u = new URL(request.url);
       // like the server: default window is the last 24h

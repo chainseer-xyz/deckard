@@ -1,14 +1,14 @@
 import { Link } from 'react-router-dom';
-import { useAllFindings, useChanges, useScans, useSources, useStats } from '../api/hooks';
+import { useChanges, useScans, useSources, useStats } from '../api/hooks';
 import { SEVERITIES } from '../api/types';
-import type { Finding, Severity, SyncStatus } from '../api/types';
+import type { Severity, SyncStatus } from '../api/types';
 import { NeedsAttentionList } from '../components/NeedsAttention';
 import { SourceStatus } from '../components/SourceHealth';
 import { Card, Empty, ErrorBox, PageHeader, SeverityBadge } from '../components/ui';
-import { changeSummary, newBySeverity, scanSummary } from '../lib/dashboard';
+import { changeSummary, scanSummary } from '../lib/dashboard';
 import { absTime, fmtDuration, isPartialSync, relTime, syncHealth, titleCase } from '../lib/format';
-import { needsAttention, topBy } from '../lib/triage';
 import type { Tally } from '../lib/triage';
+import { useDashboardFindings } from './useDashboardFindings';
 
 const EVENT_LABEL: Record<string, string> = {
   asset_added: 'Asset added',
@@ -141,14 +141,11 @@ const SCAN_WINDOW = 500;
 export default function Dashboard() {
   const now = Date.now();
   const stats = useStats();
-  const open = useAllFindings({ status: ['open'], min_severity: 'medium' });
+  const { attention: open, zones, checks, freshCounts: fresh, zoneTallies, checkTallies } = useDashboardFindings(now);
   const changes = useChanges(500);
   const sources = useSources();
   const scans = useScans(SCAN_WINDOW, 0);
 
-  const items: Finding[] = open.data ?? [];
-  const attention = needsAttention(items);
-  const fresh = open.data ? newBySeverity(items, now) : undefined;
   const feed = changes.data ? changeSummary(changes.data.items) : undefined;
   const scan = scans.data ? scanSummary(scans.data.items, SCAN_WINDOW, now) : undefined;
 
@@ -166,7 +163,7 @@ export default function Dashboard() {
         >
           {open.isLoading && <Skeleton rows={3} rowClass="h-[4.5rem]" />}
           {open.isError && <ErrorBox error={open.error} onRetry={() => void open.refetch()} />}
-          {open.data && <NeedsAttentionList items={attention} now={now} />}
+          {open.data && <NeedsAttentionList items={open.data.items} total={open.data.total} now={now} />}
         </Card>
 
         {stats.isError ? (
@@ -194,22 +191,26 @@ export default function Dashboard() {
 
         <div className="grid gap-4 lg:grid-cols-2">
           <Card title="Top zones by open findings above low">
-            {open.isLoading ? (
+            {zones.isLoading ? (
               <Skeleton rows={4} rowClass="h-9" />
+            ) : zones.isError ? (
+              <ErrorBox error={zones.error} onRetry={() => void zones.refetch()} />
             ) : (
               <BarList
-                data={topBy(items, 'zone')}
+                data={zoneTallies}
                 hrefFor={(k) => `/findings?zone=${encodeURIComponent(k)}`}
                 empty="No open findings above low severity."
               />
             )}
           </Card>
           <Card title="Top checks by open findings above low">
-            {open.isLoading ? (
+            {checks.isLoading ? (
               <Skeleton rows={4} rowClass="h-9" />
+            ) : checks.isError ? (
+              <ErrorBox error={checks.error} onRetry={() => void checks.refetch()} />
             ) : (
               <BarList
-                data={topBy(items, 'check')}
+                data={checkTallies}
                 hrefFor={(k) => `/findings?check=${encodeURIComponent(k)}`}
                 empty="No open findings above low severity."
               />

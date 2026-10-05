@@ -101,26 +101,29 @@ export function toSearchParams(f: FindingsFilter): URLSearchParams {
 /** The effective severity floor sent to the server. */
 export const severityFloor = (f: FindingsFilter): Severity => f.severity ?? f.minSeverity;
 
-/** Server-side filters. Paging, sorting and grouping happen over the full result. */
+/** The server applies filters and sort order before selecting a page. */
 export function toApiParams(f: FindingsFilter): Omit<FindingsParams, 'limit' | 'offset'> {
   const floor = severityFloor(f);
   return {
     status: f.status.length ? f.status : undefined,
     min_severity: floor === 'info' ? undefined : floor,
+    severity: f.severity,
     check: f.check || undefined,
     zone: f.zone || undefined,
     source: f.source || undefined,
     asset_id: f.assetId,
     q: f.q || undefined,
+    sort: f.sort,
+    direction: f.dir,
   };
 }
 
 /** The same filters with the severity floor lifted: "M" in "Showing N of M". */
 export function withoutSeverity(p: ReturnType<typeof toApiParams>): ReturnType<typeof toApiParams> {
-  return { ...p, min_severity: undefined };
+  return { ...p, min_severity: undefined, severity: undefined };
 }
 
-/** The API only has a severity floor, so an exact severity is applied here. */
+/** Local helper for mock data and exported finding collections. */
 export function applyExactSeverity(items: Finding[], f: FindingsFilter): Finding[] {
   return f.severity ? items.filter((x) => x.severity === f.severity) : items;
 }
@@ -129,7 +132,7 @@ export function pageOf<T>(items: T[], page: number, size = PAGE_SIZE): T[] {
   return items.slice((page - 1) * size, page * size);
 }
 
-/** The API has no sort parameter, so order the fetched set client-side. */
+/** Local helper mirroring the server's allowed sort orders. */
 export function sortFindings(items: Finding[], key: SortKey, dir: SortDir): Finding[] {
   const sign = dir === 'asc' ? 1 : -1;
   const sev = (a: Finding, b: Finding) => severityRank(a.severity) - severityRank(b.severity);

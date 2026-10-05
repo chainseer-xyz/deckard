@@ -1,26 +1,20 @@
-import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { List, Network } from 'lucide-react';
-import { useAllAssets, useAllFindings, useAssets, useGraph, useScans, useStats } from '../api/hooks';
+import { useAssets, useGraph, useStats } from '../api/hooks';
 import { ASSET_KINDS, SCOPES } from '../api/types';
 import type { AssetKind, ScopeClass } from '../api/types';
 import { Card, Empty, ErrorBox, KindBadge, Loading, PageHeader, Pagination, ScopeBadge, SeverityBadge } from '../components/ui';
 import { relTime, absTime } from '../lib/format';
 import {
   INVENTORY_PAGE_SIZE,
-  assetFindingStats,
-  hasNeedle,
-  lastScanByAsset,
   parseInventory,
-  sortByFindings,
-  toAssetsApi,
   toInventoryParams,
 } from '../lib/inventory';
 import type { InventoryFilter } from '../lib/inventory';
-import { pageOf } from '../lib/findingsFilter';
+import { useInventoryData } from './useInventoryData';
 
 const AssetGraph = lazy(() => import('../components/AssetGraph'));
-const SCAN_WINDOW = 500;
 
 function MapView({ assetId, depth, onPick, onDepth }: { assetId?: number; depth: number; onPick: (id: number) => void; onDepth: (d: number) => void }) {
   const [text, setText] = useState('');
@@ -55,7 +49,7 @@ function MapView({ assetId, depth, onPick, onDepth }: { assetId?: number; depth:
           <div>
             <label htmlFor="depth" className="mr-2 text-xs text-muted">Depth</label>
             <select id="depth" className="input" value={depth} onChange={(e) => onDepth(Number(e.target.value))}>
-              {[1, 2, 3, 4].map((d) => <option key={d}>{d}</option>)}
+              {[1, 2, 3].map((d) => <option key={d}>{d}</option>)}
             </select>
           </div>
         </div>
@@ -67,6 +61,7 @@ function MapView({ assetId, depth, onPick, onDepth }: { assetId?: number; depth:
           {graph.isError && <ErrorBox error={graph.error} />}
           {graph.data && (
             <>
+              {graph.data.truncated && <p role="status" className="mb-2 text-sm text-warn">This graph reached the node limit. Select a nearby asset or reduce depth to explore the omitted connections.</p>}
               <Suspense fallback={<Loading label="Loading graph" />}>
                 <AssetGraph graph={graph.data} focusId={assetId} />
               </Suspense>
@@ -86,30 +81,7 @@ export default function Inventory() {
   const stats = useStats();
   const view = sp.get('view') === 'map' ? 'map' : 'table';
   const filter = useMemo(() => parseInventory(sp), [sp]);
-  const apiParams = useMemo(() => toAssetsApi(filter), [filter]);
-
-  // Open findings and recent scan runs feed the findings and last-scanned
-  // columns; the API has neither per asset.
-  const openFindings = useAllFindings({ status: ['open'] }, view === 'table');
-  const scans = useScans(SCAN_WINDOW, 0);
-  const findingStats = useMemo(() => assetFindingStats(openFindings.data ?? []), [openFindings.data]);
-  const lastScan = useMemo(() => lastScanByAsset(scans.data?.items ?? []), [scans.data]);
-
-  // Plain browsing pages on the server; the "findings >= medium" toggle needs
-  // every matching asset to intersect with the findings, so it pages locally.
-  const paged = useAssets({ ...apiParams, limit: INVENTORY_PAGE_SIZE, offset: (filter.page - 1) * INVENTORY_PAGE_SIZE });
-  const all = useAllAssets(apiParams, filter.needles && view === 'table');
-  const needleAssets = useMemo(
-    () => (all.data ? sortByFindings(all.data.filter((a) => hasNeedle(findingStats.get(a.id))), findingStats) : []),
-    [all.data, findingStats],
-  );
-  const q = filter.needles ? all : paged;
-  const rows = useMemo(
-    () => (filter.needles ? pageOf(needleAssets, filter.page, INVENTORY_PAGE_SIZE) : (paged.data?.items ?? [])),
-    [filter.needles, filter.page, needleAssets, paged.data],
-  );
-  const total = filter.needles ? needleAssets.length : (paged.data?.total ?? 0);
-  const waitingOnFindings = filter.needles && openFindings.isLoading;
+  const { query: q, rows, total } = useInventoryData(filter, view === 'table');
 
   const set = (patch: Partial<InventoryFilter>, keepPage = false) =>
     setSp(toInventoryParams({ ...filter, ...patch, page: keepPage ? (patch.page ?? filter.page) : 1 }, sp), { replace: true });
@@ -126,18 +98,20 @@ export default function Inventory() {
   };
 
   const [text, setText] = useState(filter.q);
+  const updateSearch = useRef(set);
+  useEffect(() => { updateSearch.current = set; });
   useEffect(() => setText(filter.q), [filter.q]);
   useEffect(() => {
     if (text === filter.q) return;
-    const t = setTimeout(() => set({ q: text }), 300);
+    // Use the current URL filters if another control changes during the delay.
+    const t = setTimeout(() => updateSearch.current({ q: text }), 300);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text]);
+  }, [text, filter.q]);
 
   const sources = Object.keys(stats.data?.assets_by_source ?? {});
   const zones = useMemo(
-    () => [...new Set([...(openFindings.data ?? []).map((f) => f.zone), ...rows.map((a) => a.zone)].filter((z): z is string => !!z))].sort(),
-    [openFindings.data, rows],
+    () => [...new Set(rows.map((a) => a.zone).filter((z): z is string => !!z))].sort(),
+    [rows],
   );
   const assetParam = Number(sp.get('asset')) || undefined;
 
@@ -221,9 +195,9 @@ export default function Inventory() {
             </form>
           </Card>
           <Card>
-            {(q.isLoading || waitingOnFindings) && <Loading />}
+            {q.isLoading && <Loading />}
             {q.isError && <ErrorBox error={q.error} onRetry={() => void q.refetch()} />}
-            {q.data && !waitingOnFindings && (
+            {q.data && (
               <>
                 {rows.length === 0 ? (
                   <Empty>
@@ -249,8 +223,7 @@ export default function Inventory() {
                       </thead>
                       <tbody>
                         {rows.map((a) => {
-                          const fs = findingStats.get(a.id);
-                          const scanned = lastScan.get(a.id);
+                          const scanned = a.last_scan;
                           return (
                             <tr key={a.id} className={`border-b border-line/60 hover:bg-surface2/50 ${a.removed_at ? 'opacity-60' : ''}`}>
                               <td className="td"><KindBadge kind={a.kind} /></td>
@@ -262,22 +235,20 @@ export default function Inventory() {
                               <td className="td text-xs">{a.source}</td>
                               <td className="td text-xs">{a.zone ?? '-'}</td>
                               <td className="td min-w-28 text-xs">
-                                {openFindings.isLoading ? (
-                                  <span className="text-muted">…</span>
-                                ) : fs ? (
+                                {(a.open_findings ?? 0) > 0 && a.top_severity ? (
                                   <Link
                                     to={`/findings?asset_id=${a.id}&min_severity=info`}
                                     className="inline-flex items-center gap-1.5 hover:underline"
-                                    aria-label={`${fs.total} open findings on ${a.key}, worst ${fs.top}`}
+                                    aria-label={`${a.open_findings} open findings on ${a.key}, worst ${a.top_severity}`}
                                   >
-                                    <SeverityBadge severity={fs.top} />
-                                    <span className="tabular-nums">{fs.total}</span>
+                                    <SeverityBadge severity={a.top_severity} />
+                                    <span className="tabular-nums">{a.open_findings}</span>
                                   </Link>
                                 ) : (
                                   <span className="text-muted">0</span>
                                 )}
                               </td>
-                              <td className="td whitespace-nowrap text-xs text-muted" title={scanned ? absTime(scanned) : 'No scan in the most recent runs'}>
+                              <td className="td whitespace-nowrap text-xs text-muted" title={scanned ? absTime(scanned) : 'No scan recorded'}>
                                 {scanned ? relTime(scanned) : '-'}
                               </td>
                               <td className="td whitespace-nowrap text-xs text-muted" title={absTime(a.last_seen)}>{relTime(a.last_seen)}</td>

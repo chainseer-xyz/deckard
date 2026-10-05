@@ -66,6 +66,8 @@ export function toAssetsApi(f: InventoryFilter): Omit<AssetsParams, 'limit' | 'o
     zone: f.zone || undefined,
     q: f.q || undefined,
     include_removed: f.includeRemoved,
+    include_summary: true,
+    open_min_severity: f.needles ? 'medium' : undefined,
   };
 }
 

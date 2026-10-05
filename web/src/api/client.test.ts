@@ -20,6 +20,9 @@ beforeEach(() => {
 });
 
 describe('api client', () => {
+  it('preserves an empty group key for the no-zone member page', () => {
+    expect(buildQuery({ group_by: 'zone', group_key: '', q: '' })).toBe('?group_by=zone&group_key=');
+  });
   it('sends the bearer token and no CSRF header on GET', async () => {
     setToken('s3cret');
     let auth: string | null = null;

@@ -233,10 +233,10 @@ describe('Findings', () => {
     expect(screen.queryByText(/TLS certificate on shop/)).not.toBeInTheDocument();
     await userEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText(/TLS certificate on shop.example.org/)).toBeInTheDocument();
+    expect(await screen.findByText(/TLS certificate on shop.example.org/)).toBeInTheDocument();
     expect(screen.getByText('7 check groups')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Expand all' }));
-    expect(screen.getByText('SSH exposed to the internet')).toBeInTheDocument();
+    expect(await screen.findByText('SSH exposed to the internet')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Collapse all' }));
     expect(screen.queryByText('SSH exposed to the internet')).not.toBeInTheDocument();
   });

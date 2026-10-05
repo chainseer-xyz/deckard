@@ -53,6 +53,18 @@ export interface Asset {
   first_seen: string;
   last_seen: string;
   removed_at?: string | null;
+  /** Included in asset-list responses when include_summary is true. */
+  open_findings?: number;
+  top_severity?: Severity;
+  last_scan?: string | null;
+}
+
+export interface FindingGroup {
+  key: string;
+  label: string;
+  total: number;
+  counts: Record<Severity, number>;
+  top: Severity;
 }
 
 export interface Finding {
@@ -124,6 +136,7 @@ export interface GraphEdge {
 export interface Graph {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  truncated?: boolean;
 }
 
 export interface ChangeEvent {
