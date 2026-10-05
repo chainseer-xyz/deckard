@@ -15,13 +15,28 @@ import (
 	"github.com/chainseer-xyz/deckard/internal/store"
 )
 
-const assetCols = `a.id, a.kind, a.key, a.source, a.scope, a.zone, a.attrs, a.first_seen, a.last_seen, a.removed_at`
+const assetCols = `a.id, a.kind, a.key, a.source, a.scope, a.zone, a.attrs, a.first_seen, a.last_seen, a.removed_at, a.reporters, a.source_facts`
+
+func assetScanTargets(a *model.Asset) []any {
+	return []any{&a.ID, &a.Kind, &a.Key, &a.Source, &a.Scope, &a.Zone, &a.Attrs, &a.FirstSeen, &a.LastSeen, &a.RemovedAt, &a.Reporters, &a.SourceFacts}
+}
+
+func normalizeAsset(a *model.Asset) {
+	a.Attrs = nilIfEmpty(a.Attrs)
+	sort.Strings(a.Reporters)
+	for source, fact := range a.SourceFacts {
+		fact.Attrs = nilIfEmpty(fact.Attrs)
+		a.SourceFacts[source] = fact
+	}
+	if len(a.SourceFacts) == 0 {
+		a.SourceFacts = nil
+	}
+}
 
 func scanAsset(row pgx.Row) (model.Asset, error) {
 	var a model.Asset
-	var attrs map[string]any
-	err := row.Scan(&a.ID, &a.Kind, &a.Key, &a.Source, &a.Scope, &a.Zone, &attrs, &a.FirstSeen, &a.LastSeen, &a.RemovedAt)
-	a.Attrs = nilIfEmpty(attrs)
+	err := row.Scan(assetScanTargets(&a)...)
+	normalizeAsset(&a)
 	return a, err
 }
 
@@ -52,7 +67,7 @@ func (s *Store) UpsertSnapshot(ctx context.Context, source string, assets []stor
 func (s *Store) applySnapshot(ctx context.Context, source string, assets []store.AssetUpsert, rels []model.RelationInput, now time.Time, remove bool) (store.InventoryDiff, error) {
 	var diff store.InventoryDiff
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		d, seen, err := upsertAssets(ctx, tx, modeSnapshot, source, assets, now)
+		d, seen, err := upsertAssets(ctx, tx, modeSnapshot, source, assets, now, remove)
 		if err != nil {
 			return err
 		}
@@ -60,58 +75,40 @@ func (s *Store) applySnapshot(ctx context.Context, source string, assets []store
 		if err := syncRelations(ctx, tx, relationReporter{name: "source:" + source}, rels, remove); err != nil {
 			return err
 		}
-		// Heal findings left behind by older versions that classified an asset
-		// out of scope without resolving its findings. Partial snapshots retain
-		// earlier ownership registrations before classification, so an asset that
-		// is still owned cannot enter this set just because discovery was partial.
+		if !remove {
+			// Present facts and classification change immediately, but no partial
+			// source observation may resolve findings, even on repeated syncs.
+			return nil
+		}
+		// A complete snapshot can heal findings left by older versions that
+		// classified an asset out of scope without resolving its findings.
 		if err := resolveOutOfScopeFindings(ctx, tx, seen, now); err != nil {
 			return err
-		}
-		if !remove {
-			return nil
 		}
 		// Sources that stop reporting an asset drop out of its reporter set.
 		// It is removed only when no source reports it any more; if the owner
 		// stopped but another source still reports it, ownership moves to that
-		// source (its next sync refreshes attrs).
-		rows, err := tx.Query(ctx, `SELECT `+assetCols+`, a.reporters FROM assets a
+		// source, projecting only that source's retained facts.
+		rows, err := tx.Query(ctx, `SELECT `+assetCols+` FROM assets a
 			WHERE $1 = ANY(a.reporters) AND a.removed_at IS NULL AND a.id <> ALL($2::bigint[]) ORDER BY a.id FOR UPDATE`, source, seen)
 		if err != nil {
 			return err
 		}
-		var stale []model.Asset
-		var staleRep [][]string
-		for rows.Next() {
-			var reps []string
-			var attrs map[string]any
-			var a model.Asset
-			if err := rows.Scan(&a.ID, &a.Kind, &a.Key, &a.Source, &a.Scope, &a.Zone, &attrs, &a.FirstSeen, &a.LastSeen, &a.RemovedAt, &reps); err != nil {
-				rows.Close()
-				return err
-			}
-			a.Attrs = nilIfEmpty(attrs)
-			stale = append(stale, a)
-			staleRep = append(staleRep, reps)
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
+		stale, err := collectAssets(rows)
+		if err != nil {
 			return err
 		}
 		var gone []model.Asset
-		for i, a := range stale {
-			rest := withoutString(staleRep[i], source)
-			if len(rest) == 0 {
+		for _, a := range stale {
+			if len(a.Reporters) == 1 {
 				gone = append(gone, a)
 				continue
 			}
-			sort.Strings(rest)
-			newSource := a.Source
-			if newSource == source {
-				newSource = rest[0]
-			}
-			if _, err := tx.Exec(ctx, `UPDATE assets SET reporters = $2, source = $3 WHERE id = $1`, a.ID, rest, newSource); err != nil {
+			updated, err := dropSourceFacts(ctx, tx, a, source, now)
+			if err != nil {
 				return err
 			}
+			diff.Changed = append(diff.Changed, updated)
 		}
 		removed, err := removeAssets(ctx, tx, gone, now)
 		if err != nil {
@@ -126,7 +123,7 @@ func (s *Store) applySnapshot(ctx context.Context, source string, assets []store
 func (s *Store) AddDiscovered(ctx context.Context, assets []store.AssetUpsert, rels []model.RelationInput, now time.Time) (store.InventoryDiff, error) {
 	var diff store.InventoryDiff
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		d, _, err := upsertAssets(ctx, tx, modeDiscover, "", assets, now)
+		d, _, err := upsertAssets(ctx, tx, modeDiscover, "", assets, now, true)
 		if err != nil {
 			return err
 		}
@@ -148,7 +145,7 @@ func removeAssets(ctx context.Context, tx pgx.Tx, in []model.Asset, now time.Tim
 	for i, a := range in {
 		ids[i] = a.ID
 	}
-	rows, err := tx.Query(ctx, `UPDATE assets a SET removed_at = $2, reporters = '{}' WHERE a.id = ANY($1::bigint[]) AND a.removed_at IS NULL
+	rows, err := tx.Query(ctx, `UPDATE assets a SET removed_at = $2, reporters = '{}', source_facts = '{}' WHERE a.id = ANY($1::bigint[]) AND a.removed_at IS NULL
 		RETURNING `+assetCols, ids, now)
 	if err != nil {
 		return nil, err
@@ -324,7 +321,7 @@ func (s *Store) ReplaceDerived(ctx context.Context, assetID int64, origin string
 			}
 			ups[i] = a
 		}
-		d, seen, err := upsertAssets(ctx, tx, modeDiscover, "", ups, now)
+		d, seen, err := upsertAssets(ctx, tx, modeDiscover, "", ups, now, true)
 		if err != nil {
 			return err
 		}
@@ -413,7 +410,7 @@ func (s *Store) PruneRelations(ctx context.Context, olderThan time.Time) (int, e
 }
 
 func assetEventData(a model.Asset) map[string]any {
-	return map[string]any{"kind": string(a.Kind), "source": a.Source, "scope": string(a.Scope), "zone": a.Zone}
+	return map[string]any{"kind": string(a.Kind), "source": a.Source, "scope": string(a.Scope), "zone": a.Zone, "reporters": a.Reporters}
 }
 
 // normalizeAttrs round-trips through JSON so comparisons match what Postgres
@@ -470,19 +467,19 @@ func mergeAttrs(old, in map[string]any) map[string]any {
 }
 
 // upsertAssets writes assets inside tx and returns the diff (without
-// removals) plus every touched asset id. Assets are processed in (kind,key)
-// order to give concurrent writers a consistent lock order.
+// removals) plus every touched asset id. Partial source snapshots disable
+// scope-transition resolution without keeping stale owned
+// classification. Assets are processed in (kind,key) order for consistent locks.
 //
 // Ownership rules (see store.IsDerivedSource):
 //   - snapshot of source S: inserts are owned by S; S claims a derived asset
 //     (taking source and attrs) and revives removed ones; the owner replaces
-//     attrs; another source's asset is left alone and S is only recorded as an
-//     additional reporter.
+//     attrs; every source retains its own separate facts and reporter entry.
 //   - discovery by writer W: inserts are owned by W; a derived asset merges
 //     attrs per key and keeps its source; a source-owned asset is never taken
 //     over or changed (except by its own source), and a source-owned asset
 //     that was removed is not revived (counted in diff.Ignored).
-func upsertAssets(ctx context.Context, tx pgx.Tx, mode upsertMode, snap string, in []store.AssetUpsert, now time.Time) (store.InventoryDiff, []int64, error) {
+func upsertAssets(ctx context.Context, tx pgx.Tx, mode upsertMode, snap string, in []store.AssetUpsert, now time.Time, resolveScopeTransitions bool) (store.InventoryDiff, []int64, error) {
 	var diff store.InventoryDiff
 	type key struct {
 		kind model.AssetKind
@@ -520,11 +517,15 @@ func upsertAssets(ctx context.Context, tx pgx.Tx, mode upsertMode, snap string, 
 		if reports {
 			insReps = []string{writer}
 		}
+		insFacts := map[string]model.SourceFact{}
+		if mode == modeSnapshot {
+			insFacts[writer] = model.SourceFact{Zone: it.Zone, Attrs: nilIfEmpty(attrs)}
+		}
 
-		cur, err := scanAsset(tx.QueryRow(ctx, `INSERT INTO assets AS a (kind, key, source, scope, zone, attrs, first_seen, last_seen, reporters)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8)
+		cur, err := scanAsset(tx.QueryRow(ctx, `INSERT INTO assets AS a (kind, key, source, scope, zone, attrs, first_seen, last_seen, reporters, source_facts)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9)
 			ON CONFLICT (kind, key) DO NOTHING RETURNING `+assetCols,
-			it.Kind, it.Key, writer, it.Scope, it.Zone, attrs, now, insReps))
+			it.Kind, it.Key, writer, it.Scope, it.Zone, attrs, now, insReps, insFacts))
 		if err == nil {
 			seen = append(seen, cur.ID)
 			diff.Added = append(diff.Added, cur)
@@ -537,29 +538,28 @@ func upsertAssets(ctx context.Context, tx pgx.Tx, mode upsertMode, snap string, 
 			return diff, nil, fmt.Errorf("insert asset %s: %w", it.Key, err)
 		}
 
-		var oldReps []string
-		var oldAttrs map[string]any
-		var old model.Asset
-		if err := tx.QueryRow(ctx, `SELECT `+assetCols+`, a.reporters FROM assets a WHERE a.kind = $1 AND a.key = $2 FOR UPDATE`, it.Kind, it.Key).
-			Scan(&old.ID, &old.Kind, &old.Key, &old.Source, &old.Scope, &old.Zone, &oldAttrs, &old.FirstSeen, &old.LastSeen, &old.RemovedAt, &oldReps); err != nil {
+		old, err := scanAsset(tx.QueryRow(ctx, `SELECT `+assetCols+` FROM assets a WHERE a.kind = $1 AND a.key = $2 FOR UPDATE`, it.Kind, it.Key))
+		if err != nil {
 			return diff, nil, fmt.Errorf("lock asset %s: %w", it.Key, err)
 		}
-		old.Attrs = nilIfEmpty(oldAttrs)
 
 		revived := old.RemovedAt != nil
 		oldDerived := store.IsDerivedSource(old.Source)
-		newSource, newZone, newAttrs, reps := old.Source, old.Zone, orEmpty(old.Attrs), oldReps
+		newSource, newZone, newAttrs, reps := old.Source, old.Zone, orEmpty(old.Attrs), append([]string{}, old.Reporters...)
+		facts := copySourceFacts(old.SourceFacts)
 		take := func() { newSource, newZone, newAttrs, reps = writer, it.Zone, attrs, []string{writer} }
 		switch mode {
 		case modeSnapshot:
 			switch {
 			case revived || oldDerived: // nobody owns it, or a source claims a derived asset
 				take()
+				facts = map[string]model.SourceFact{}
 			case old.Source == writer:
 				newZone, newAttrs, reps = it.Zone, attrs, withString(reps, writer)
 			default:
 				reps = withString(reps, writer)
 			}
+			facts[writer] = model.SourceFact{Zone: it.Zone, Attrs: nilIfEmpty(attrs)}
 		case modeDiscover:
 			switch {
 			case revived && !oldDerived:
@@ -576,13 +576,16 @@ func upsertAssets(ctx context.Context, tx pgx.Tx, mode upsertMode, snap string, 
 				newZone, newAttrs, reps = it.Zone, attrs, withString(reps, writer)
 			}
 		}
-		if reps == nil {
-			reps = []string{}
+		sort.Strings(reps)
+		var comparedFacts map[string]model.SourceFact
+		if len(facts) > 0 {
+			comparedFacts = facts
 		}
-		changed := !revived && (old.Scope != it.Scope || newSource != old.Source || !reflect.DeepEqual(orEmpty(old.Attrs), newAttrs))
+		changed := !revived && (old.Scope != it.Scope || newSource != old.Source || newZone != old.Zone ||
+			!reflect.DeepEqual(orEmpty(old.Attrs), newAttrs) || !reflect.DeepEqual(old.Reporters, reps) || !reflect.DeepEqual(old.SourceFacts, comparedFacts))
 
-		upd, err := scanAsset(tx.QueryRow(ctx, `UPDATE assets a SET source = $2, scope = $3, zone = $4, attrs = $5, last_seen = $6, removed_at = NULL, reporters = $7
-			WHERE a.id = $1 RETURNING `+assetCols, old.ID, newSource, it.Scope, newZone, newAttrs, now, reps))
+		upd, err := scanAsset(tx.QueryRow(ctx, `UPDATE assets a SET source = $2, scope = $3, zone = $4, attrs = $5, last_seen = $6, removed_at = NULL, reporters = $7, source_facts = $8
+			WHERE a.id = $1 RETURNING `+assetCols, old.ID, newSource, it.Scope, newZone, newAttrs, now, reps, facts))
 		if err != nil {
 			return diff, nil, fmt.Errorf("update asset %s: %w", it.Key, err)
 		}
@@ -598,7 +601,7 @@ func upsertAssets(ctx context.Context, tx pgx.Tx, mode upsertMode, snap string, 
 		if err != nil {
 			return diff, nil, err
 		}
-		if old.Scope == model.ScopeOwned && it.Scope != model.ScopeOwned {
+		if resolveScopeTransitions && old.Scope == model.ScopeOwned && it.Scope != model.ScopeOwned {
 			if err := resolveFindings(ctx, tx, []int64{upd.ID}, now); err != nil {
 				return diff, nil, fmt.Errorf("resolve out-of-scope findings for %s: %w", it.Key, err)
 			}
@@ -634,7 +637,7 @@ func (s *Store) ListAssets(ctx context.Context, f store.AssetFilter) ([]model.As
 		w.add("a.kind = ?", f.Kind)
 	}
 	if f.Source != "" {
-		w.add("a.source = ?", f.Source)
+		w.add("(a.source = ? OR ? = ANY(a.reporters))", f.Source, f.Source)
 	}
 	if f.Scope != "" {
 		w.add("a.scope = ?", f.Scope)
@@ -680,12 +683,12 @@ func (s *Store) ListAssets(ctx context.Context, f store.AssetFilter) ([]model.As
 
 func (s *Store) Edges(ctx context.Context, assetID int64) ([]store.Edge, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT `+assetCols+`, r.type, true FROM relations r JOIN assets a ON a.id = r.to_id
+		SELECT `+assetCols+`, r.type AS relation_type, true AS outbound FROM relations r JOIN assets a ON a.id = r.to_id
 		WHERE r.from_id = $1 AND a.removed_at IS NULL AND EXISTS (SELECT 1 FROM assets p WHERE p.id = $1 AND p.removed_at IS NULL)
 		UNION ALL
 		SELECT `+assetCols+`, r.type, false FROM relations r JOIN assets a ON a.id = r.from_id
 		WHERE r.to_id = $1 AND a.removed_at IS NULL AND EXISTS (SELECT 1 FROM assets p WHERE p.id = $1 AND p.removed_at IS NULL)
-		ORDER BY 12 DESC, 11, 3`, assetID)
+		ORDER BY outbound DESC, relation_type, key`, assetID)
 	if err != nil {
 		return nil, err
 	}
@@ -693,12 +696,11 @@ func (s *Store) Edges(ctx context.Context, assetID int64) ([]store.Edge, error) 
 	var out []store.Edge
 	for rows.Next() {
 		var e store.Edge
-		var attrs map[string]any
 		a := &e.Other
-		if err := rows.Scan(&a.ID, &a.Kind, &a.Key, &a.Source, &a.Scope, &a.Zone, &attrs, &a.FirstSeen, &a.LastSeen, &a.RemovedAt, &e.Type, &e.Outbound); err != nil {
+		if err := rows.Scan(append(assetScanTargets(a), &e.Type, &e.Outbound)...); err != nil {
 			return nil, err
 		}
-		a.Attrs = nilIfEmpty(attrs)
+		normalizeAsset(a)
 		out = append(out, e)
 	}
 	return out, rows.Err()

@@ -2,6 +2,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Network, RefreshCw } from 'lucide-react';
 import { useAsset, useMe, useRescan } from '../api/hooks';
 import { AssetProperties } from '../components/AssetProperties';
+import { AssetSourceFacts } from '../components/AssetSourceFacts';
 import { DnsChainView } from '../components/DnsChainView';
 import { FindingDrawer } from '../components/FindingDrawer';
 import { FindingsTable } from '../components/FindingsTable';
@@ -58,6 +59,8 @@ export default function AssetDetail() {
 
       <div className="space-y-4">
         <AssetProperties d={d} />
+
+        <AssetSourceFacts asset={asset} />
 
         {chain && <DnsChainView chain={chain} />}
 

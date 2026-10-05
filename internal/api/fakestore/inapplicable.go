@@ -14,7 +14,9 @@ func (s *Store) ResolveInapplicableFindings(_ context.Context, asset model.Asset
 	defer s.mu.Unlock()
 	current, ok := s.Assets[asset.ID]
 	if !ok || current.RemovedAt != nil || current.Scope != model.ScopeOwned || current.Kind != asset.Kind ||
-		current.Key != asset.Key || current.Source != asset.Source || !reflect.DeepEqual(current.Attrs, asset.Attrs) {
+		current.Key != asset.Key || current.Source != asset.Source || current.Zone != asset.Zone ||
+		!reflect.DeepEqual(current.Attrs, asset.Attrs) || !reflect.DeepEqual(current.Reporters, asset.Reporters) ||
+		!reflect.DeepEqual(current.SourceFacts, asset.SourceFacts) {
 		return 0, nil
 	}
 	n := 0

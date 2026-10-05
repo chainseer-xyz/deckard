@@ -83,8 +83,8 @@ func testOwnershipRules(t *testing.T, f Factory) {
 		cf := au(model.KindHostname, "x.x.io", "cf", model.ScopeOwned, map[string]any{"from": "cf"})
 		r53 := au(model.KindHostname, "x.x.io", "r53", model.ScopeOwned, map[string]any{"from": "r53"})
 		e.snapshot("cf", []store.AssetUpsert{cf}, nil, at(0))
-		// Second source does not flap the asset: first owner keeps it.
-		if d := e.snapshot("r53", []store.AssetUpsert{r53}, nil, at(1)); !d.Empty() {
+		// The first owner keeps canonical metadata; provenance gains a reporter.
+		if d := e.snapshot("r53", []store.AssetUpsert{r53}, nil, at(1)); len(d.Changed) != 1 {
 			t.Errorf("second source diff = %+v", d)
 		}
 		if d := e.snapshot("cf", []store.AssetUpsert{cf}, nil, at(2)); !d.Empty() {

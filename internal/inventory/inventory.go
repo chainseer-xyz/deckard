@@ -108,8 +108,8 @@ func New(st store.Store, cls Classifier, log *slog.Logger, opts ...Option) *Serv
 // discovery is Partial, recorded as a SyncStatus warning, and when the
 // shrink guard trips, recorded as a SyncStatus error and returned wrapped in
 // ErrSuspiciousShrink together with the diff of what was applied. In both
-// cases the classifier keeps the union of the previous and new zones/prefixes
-// so assets that were not re-reported stay in scope.
+// cases the classifier retains previous zones and unreported IP claims. A
+// present IP's current ownership evidence replaces its previous claim.
 func (s *Service) Sync(ctx context.Context, src source.Source) (store.InventoryDiff, error) {
 	s.syncMu.RLock()
 	defer s.syncMu.RUnlock()
@@ -161,7 +161,8 @@ func (s *Service) Sync(ctx context.Context, src source.Source) (store.InventoryD
 	oldZones, hadZones := s.zones[name]
 	oldPfx, hadPfx := s.prefixes[name]
 	if !removals {
-		zones, pfx = unionStrings(oldZones, zones), unionPrefixes(oldPfx, pfx)
+		zones = unionStrings(oldZones, zones)
+		pfx = unionPrefixes(unreportedPrefixes(oldPfx, d.Assets), pfx)
 	}
 	s.zones[name] = zones
 	s.cls.SetZones(s.zoneUnionLocked())
@@ -270,6 +271,26 @@ func unionPrefixes(a, b []netip.Prefix) []netip.Prefix {
 	return out
 }
 
+// unreportedPrefixes retains claims for identities absent from a partial
+// result. A re-reported IP may explicitly retract its earlier owned flag.
+func unreportedPrefixes(previous []netip.Prefix, assets []model.AssetInput) []netip.Prefix {
+	reported := make(map[netip.Prefix]bool)
+	for _, a := range assets {
+		if a.Kind == model.KindIP {
+			if prefix, ok := parsePrefix(a.Key); ok {
+				reported[prefix] = true
+			}
+		}
+	}
+	var out []netip.Prefix
+	for _, prefix := range previous {
+		if !reported[prefix] {
+			out = append(out, prefix)
+		}
+	}
+	return out
+}
+
 // AddDiscovered adds assets/relations found by checks or expansion. Only
 // assets that classify as owned (which includes scope.include matches) are
 // added; everything else is dropped, counted and logged. It never removes.
@@ -342,10 +363,11 @@ func (s *Service) scopeFilter(origin string, in []model.AssetInput) []store.Asse
 
 // Rehydrate rebuilds the classifier's owned zones and owned IP prefixes from
 // the database without calling any source: zones are the non-removed zone
-// assets per source, prefixes the non-removed IP assets whose source claims
-// them (owned attrs, or any IP of a kubernetes source), minus IPs the
-// classifier calls shared or excluded. It seeds the per-source bookkeeping so
-// later Syncs shrink it correctly. Call it at startup and periodically
+// assets per authoritative reporter. IP claims use each reporter's own
+// facts (owned attrs, or any IP of a kubernetes source), never another source's
+// canonical attrs. Explicit ownership can override shared ranges but not
+// exclusions. It seeds per-source bookkeeping so later Syncs shrink it
+// correctly. Call it at startup and periodically
 // (RunRefresh) so replicas that did not sync still follow dropped zones.
 // It is idempotent and never writes to the store.
 func (s *Service) Rehydrate(ctx context.Context) error {
@@ -371,7 +393,9 @@ func (s *Service) Rehydrate(ctx context.Context) error {
 
 	bySourceZones := map[string][]source.Zone{}
 	for _, a := range zoneAssets {
-		bySourceZones[a.Source] = append(bySourceZones[a.Source], source.Zone{Name: a.Key, Source: a.Source})
+		for _, src := range authoritativeReporters(a) {
+			bySourceZones[src] = append(bySourceZones[src], source.Zone{Name: a.Key, Source: src})
+		}
 	}
 	zones := map[string][]string{}
 	for src, zs := range bySourceZones {
@@ -379,7 +403,15 @@ func (s *Service) Rehydrate(ctx context.Context) error {
 	}
 	bySourceIPs := map[string][]model.AssetInput{}
 	for _, a := range ipAssets {
-		bySourceIPs[a.Source] = append(bySourceIPs[a.Source], model.AssetInput{Kind: a.Kind, Key: a.Key, Source: a.Source, Attrs: a.Attrs})
+		for _, src := range authoritativeReporters(a) {
+			fact, ok := a.SourceFacts[src]
+			if !ok && src == a.Source {
+				// Legacy canonical metadata belongs only to that authority.
+				// A missing secondary fact remains unknown, never copied.
+				fact = model.SourceFact{Zone: a.Zone, Attrs: a.Attrs}
+			}
+			bySourceIPs[src] = append(bySourceIPs[src], model.AssetInput{Kind: a.Kind, Key: a.Key, Source: src, Zone: fact.Zone, Attrs: fact.Attrs})
+		}
 	}
 
 	s.mu.Lock()
@@ -396,6 +428,26 @@ func (s *Service) Rehydrate(ctx context.Context) error {
 	s.prefixes = pfx
 	s.cls.SetOwnedPrefixes(s.prefixUnionLocked())
 	return nil
+}
+
+// authoritativeReporters uses current membership, not arbitrary fact keys.
+// Legacy rows have only a canonical source. Derived and external-scanner
+// metadata cannot establish inventory ownership.
+func authoritativeReporters(a model.Asset) []string {
+	reporters := a.Reporters
+	if len(reporters) == 0 {
+		reporters = []string{a.Source}
+	}
+	seen := make(map[string]bool, len(reporters))
+	var out []string
+	for _, src := range reporters {
+		if store.IsDerivedSource(src) || model.IsIngestSource(src) || seen[src] {
+			continue
+		}
+		seen[src] = true
+		out = append(out, src)
+	}
+	return out
 }
 
 // RunRefresh calls Rehydrate every interval (5 minutes when interval <= 0)

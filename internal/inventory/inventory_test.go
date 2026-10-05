@@ -400,7 +400,7 @@ func TestOutOfScopeTransitionResolvesFindingsButPartialSyncDoesNot(t *testing.T)
 	}
 }
 
-func TestPartialSyncHealsFindingsAlreadyOutOfScope(t *testing.T) {
+func TestPartialSyncRetainsOutOfScopeFindingsUntilComplete(t *testing.T) {
 	ctx := context.Background()
 	st := pgtest.New(t)
 	cls := &fakeCls{sharedPfx: pfx("198.51.100.0/24")}
@@ -426,12 +426,23 @@ func TestPartialSyncHealsFindingsAlreadyOutOfScope(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	for run := range 3 {
+		if _, err := svc.Sync(ctx, src); err != nil {
+			t.Fatal(err)
+		}
+		fs, _, err := st.ListFindings(ctx, store.FindingFilter{AssetID: a.ID, Check: "intel.internetdb"})
+		if err != nil || len(fs) != 1 || fs[0].Status != model.StatusOpen {
+			t.Fatalf("partial out-of-scope sync %d findings = %+v err=%v, want open", run+1, fs, err)
+		}
+	}
+	src.d.Partial = false
+	src.d.PartialReasons = nil
 	if _, err := svc.Sync(ctx, src); err != nil {
 		t.Fatal(err)
 	}
 	fs, _, err := st.ListFindings(ctx, store.FindingFilter{AssetID: a.ID, Check: "intel.internetdb"})
 	if err != nil || len(fs) != 1 || fs[0].Status != model.StatusResolved {
-		t.Fatalf("partial out-of-scope sync findings = %+v err=%v, want resolved", fs, err)
+		t.Fatalf("complete out-of-scope sync findings = %+v err=%v, want resolved", fs, err)
 	}
 }
 

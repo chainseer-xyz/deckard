@@ -13,6 +13,12 @@ fullnameOverride: ""
 roles: [api, scheduler, worker]
 replicaCount: 1
 
+# -- Optional strategy for both Deployments. Empty uses Kubernetes' RollingUpdate
+# default. Use {type: Recreate} for a single-Deployment source-facts upgrade:
+# old writers must stop before migration. Split deployments need coordinated
+# writer shutdown; Recreate alone does not serialize different Deployments.
+deploymentStrategy: {}
+
 # -- Dedicated scan-worker Deployment. Enable it to scale scanning separately
 # from the API/UI. When enabled, remove "worker" from `roles` above.
 worker:

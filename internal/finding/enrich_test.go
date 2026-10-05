@@ -113,6 +113,32 @@ func TestDispatcherEnricherOptOut(t *testing.T) {
 	}
 }
 
+func TestEnricherIncludesSecondarySourceFacts(t *testing.T) {
+	g := newGStore()
+	a := g.assets[3]
+	a.Reporters = []string{"cloudflare", "aws", "cluster", "legacy"}
+	a.SourceFacts = map[string]model.SourceFact{
+		"cloudflare": {Zone: "example.com", Attrs: map[string]any{"zone_id": "cf-zone"}},
+		"aws":        {Attrs: map[string]any{"account_id": "123456789012", "region": "us-west-2", "resource_id": "i-owned"}},
+		"cluster":    {Attrs: map[string]any{"cluster": "staging", "namespace": "web", "name": "api"}},
+		"retired":    {Attrs: map[string]any{"account_id": "must-not-appear"}},
+	}
+	g.assets[3] = a
+	result := finding.NewEnricher(g).Enrich(context.Background(), []model.Finding{{AssetID: 3, AssetKey: a.Key}})
+	owner, _ := result[0].Context["owner"].(string)
+	for _, expected := range []string{"aws account_id=123456789012", "cluster cluster=staging", "cloudflare zone=example.com", "legacy"} {
+		if !strings.Contains(owner, expected) {
+			t.Errorf("missing %q from %q", expected, owner)
+		}
+	}
+	if strings.Contains(owner, "must-not-appear") || strings.Contains(owner, "retired") {
+		t.Errorf("withdrawn source facts leaked: %q", owner)
+	}
+	if g.assets[3].Attrs["account_id"] != nil {
+		t.Fatal("enrichment mutated canonical attributes")
+	}
+}
+
 func TestEnricherSurvivesStoreFailure(t *testing.T) {
 	// dstore panics on Edges/GetAsset (nil embedded Store); enrichment must
 	// degrade to the plain finding, never break notification.

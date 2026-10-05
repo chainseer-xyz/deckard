@@ -1,5 +1,23 @@
 # Operations
 
+## Upgrading source-attributed inventory facts
+
+Migration 12 adds source-attributed facts. Stop old inventory writers before
+applying it: older Deckard versions can write canonical metadata without updating
+the new facts ledger. An additive schema does not make mixed-version writers safe.
+
+For a single Deployment running every role, set Helm
+`deploymentStrategy: {type: Recreate}` for the upgrade. Expect a brief API outage
+while Kubernetes stops the old pod and starts the new pod. Keep active and
+intrusive tiers disabled until every authoritative source resyncs under the new
+version. Source facts from historical secondary reporters remain unknown until
+their next sync.
+
+For separate API/scheduler/worker Deployments, stop all old inventory writers
+before migration. Recreate serializes each Deployment separately, not the entire
+installation. A rollback to an old writer requires the same scan pause and fresh
+source reconciliation before a later upgrade resumes active checks.
+
 ## Staying current
 
 deckard is meant to run unattended for months. Four things go stale if nobody

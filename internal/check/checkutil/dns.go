@@ -23,8 +23,10 @@ func OwnedZones(t check.Target) []string {
 	if t.Asset.Kind == model.KindZone {
 		zones = append(zones, Norm(t.Asset.Key))
 	}
-	if t.Asset.Zone != "" {
-		zones = append(zones, Norm(t.Asset.Zone))
+	for _, fact := range assetFacts(t.Asset) {
+		if fact.Zone != "" {
+			zones = append(zones, Norm(fact.Zone))
+		}
 	}
 	for _, z := range Strings(t.Config, "owned_zones", nil) {
 		zones = append(zones, Norm(z))

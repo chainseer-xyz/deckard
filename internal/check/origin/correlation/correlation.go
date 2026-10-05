@@ -33,6 +33,7 @@ import (
 	"strings"
 
 	"github.com/chainseer-xyz/deckard/internal/check"
+	"github.com/chainseer-xyz/deckard/internal/check/checkutil"
 	"github.com/chainseer-xyz/deckard/internal/model"
 )
 
@@ -47,6 +48,8 @@ type Host struct {
 // Set is the hostnames pointing at an IP, split by proxy state.
 type Set struct {
 	Proxied, Unproxied, Discovered []Host
+	// Conflicting proxy evidence forbids absence-based finding resolution.
+	Conflicting []Host
 }
 
 // Names returns the sorted hostname names of hs.
@@ -73,11 +76,16 @@ func Publish(ns []check.Neighbour) Set {
 			continue
 		}
 		seen[name] = true
-		h := Host{Name: name, Zone: strings.ToLower(n.Asset.Zone), Source: n.Asset.Source}
+		h := Host{Name: name, Zone: checkutil.AssetZone(n.Asset), Source: n.Asset.Source}
 		if d, _ := n.Asset.Attrs["discovered_by"].(string); d != "" {
 			p.Discovered = append(p.Discovered, h)
 		}
-		if v, ok := n.Asset.Attrs["proxied"].(bool); ok {
+		v, source, ok, conflict := checkutil.BoolAttribute(n.Asset, "proxied")
+		if conflict {
+			p.Conflicting = append(p.Conflicting, h)
+		}
+		if ok {
+			h.Source = source
 			if v {
 				p.Proxied = append(p.Proxied, h)
 			} else {
@@ -85,7 +93,7 @@ func Publish(ns []check.Neighbour) Set {
 			}
 		}
 	}
-	for _, s := range [][]Host{p.Proxied, p.Unproxied, p.Discovered} {
+	for _, s := range [][]Host{p.Proxied, p.Unproxied, p.Discovered, p.Conflicting} {
 		sort.Slice(s, func(i, j int) bool { return s[i].Name < s[j].Name })
 	}
 	return p
@@ -105,8 +113,7 @@ func (*Check) Tier() model.Tier { return model.TierPassive }
 
 // Applies matches owned IPs flagged as an origin behind a proxy.
 func (*Check) Applies(a model.Asset) bool {
-	v, _ := a.Attrs["origin"].(bool)
-	return a.Kind == model.KindIP && a.Scope == model.ScopeOwned && v
+	return a.Kind == model.KindIP && a.Scope == model.ScopeOwned && checkutil.AnyAttributeTrue(a, "origin")
 }
 
 // Run applies the rules in the package documentation.
@@ -117,6 +124,7 @@ func (c *Check) Run(_ context.Context, t check.Target) (*check.Result, error) {
 	}
 	ip := t.Asset.Key
 	p := Publish(t.Neighbours)
+	res.Partial = len(p.Conflicting) > 0
 	pzones := map[string]bool{}
 	for _, h := range p.Proxied {
 		pzones[h.Zone] = true

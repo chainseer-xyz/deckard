@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -177,7 +178,7 @@ func summarise(v any) string {
 // service, aws account/region/resource, cloudflare zone.
 func ownersOf(chain []model.Asset, asset model.Asset) []map[string]any {
 	by := map[string]map[string]any{}
-	add := func(a model.Asset) {
+	addFact := func(a model.Asset) {
 		if a.Source == "" {
 			return
 		}
@@ -212,6 +213,16 @@ func ownersOf(chain []model.Asset, asset model.Asset) []map[string]any {
 			set("zone", a.Zone)
 		} else if a.Kind == model.KindZone {
 			set("zone", a.Key)
+		}
+	}
+	add := func(a model.Asset) {
+		for _, source := range a.Reporters {
+			fact := a.SourceFacts[source]
+			addFact(model.Asset{Kind: a.Kind, Key: a.Key, Source: source, Zone: fact.Zone, Attrs: fact.Attrs})
+		}
+		_, known := a.SourceFacts[a.Source]
+		if !known && (len(a.Reporters) == 0 || slices.Contains(a.Reporters, a.Source)) {
+			addFact(a)
 		}
 	}
 	for _, a := range chain {

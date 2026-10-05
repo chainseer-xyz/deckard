@@ -1,9 +1,35 @@
 package model
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
+
+func TestAssetSourceFactsJSON(t *testing.T) {
+	a := Asset{Source: "cf", Reporters: []string{"aws", "cf"}, SourceFacts: map[string]SourceFact{
+		"cf":  {Zone: "example.com", Attrs: map[string]any{"proxied": true}},
+		"aws": {},
+	}}
+	b, err := json.Marshal(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(b, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if string(wire["reporters"]) != `["aws","cf"]` || string(wire["source_facts"]) != `{"aws":{},"cf":{"zone":"example.com","attrs":{"proxied":true}}}` {
+		t.Fatalf("source fact JSON contract: %s", b)
+	}
+	var roundtrip Asset
+	if err := json.Unmarshal(b, &roundtrip); err != nil {
+		t.Fatal(err)
+	}
+	if _, known := roundtrip.SourceFacts["aws"]; !known || roundtrip.SourceFacts["cf"].Attrs["proxied"] != true {
+		t.Fatalf("known empty facts lost during JSON roundtrip: %+v", roundtrip)
+	}
+}
 
 func TestSeverityOrdering(t *testing.T) {
 	tests := []struct {

@@ -28,6 +28,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		{"Assets", testAssets},
 		{"Ownership", testOwnership},
 		{"OwnershipRules", testOwnershipRules},
+		{"SourceFacts", testSourceFacts},
 		{"DerivedAttrs", testDerivedAttrs},
 		{"UpsertSnapshot", testUpsertSnapshot},
 		{"SyncWarning", testSyncWarning},

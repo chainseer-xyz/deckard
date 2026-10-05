@@ -3,7 +3,6 @@ import type { AssetDetail } from '../api/types';
 import { SEVERITIES } from '../api/types';
 import { SCOPE_INFO, assetSources, assetTags, hasFindings, isStaleObservation, severityCounts } from '../lib/assetView';
 import { absTime, relTime } from '../lib/format';
-import { EvidenceTable } from './Evidence';
 import { Card, Field, KindBadge, ScopeBadge, SeverityBadge } from './ui';
 
 /** Everything you want to know about an asset before reading its findings. */
@@ -29,8 +28,22 @@ export function AssetProperties({ d, now }: { d: AssetDetail; now?: number }) {
             {scope && <p className="mt-1 text-xs text-muted">{scope.probing}</p>}
           </dd>
         </div>
-        <Field label={sources.length > 1 ? 'Sources' : 'Source'}>{sources.join(', ') || '-'}</Field>
-        <Field label="Zone">
+        <Field label="Canonical source">{asset.source || '-'}</Field>
+        <div className="col-span-2 md:col-span-4">
+          <dt className="text-xs text-muted">Reported by</dt>
+          <dd className="mt-1">
+            <ul className="flex flex-wrap gap-1" aria-label="Reporting sources">
+              {sources.map((source) => (
+                <li key={source}>
+                  <Link className="inline-flex rounded-sm border border-line bg-surface2 px-1.5 py-0.5 text-xs text-accent hover:underline" to={`/inventory?source=${encodeURIComponent(source)}`}>
+                    {source}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </dd>
+        </div>
+        <Field label="Canonical zone">
           {asset.zone ? (
             <Link className="text-accent hover:underline" to={`/inventory?zone=${encodeURIComponent(asset.zone)}`}>
               {asset.zone}
@@ -120,14 +133,6 @@ export function AssetProperties({ d, now }: { d: AssetDetail; now?: number }) {
           </dd>
         </div>
       </dl>
-      {asset.attrs && Object.keys(asset.attrs).length > 0 && (
-        <details className="border-t border-line px-3 py-2">
-          <summary className="cursor-pointer text-sm text-muted">Attributes</summary>
-          <div className="mt-2">
-            <EvidenceTable data={asset.attrs} label="Asset attributes" />
-          </div>
-        </details>
-      )}
     </Card>
   );
 }

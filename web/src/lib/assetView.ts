@@ -1,4 +1,4 @@
-import type { Asset, Baseline, Finding, Observation, ScopeClass, Severity } from '../api/types';
+import type { Asset, Baseline, Finding, Observation, ScopeClass, Severity, SourceFact } from '../api/types';
 import { SEVERITIES } from '../api/types';
 import { diffData, evidenceRows } from './evidence';
 import type { DataChange, EvidenceRow } from './evidence';
@@ -49,9 +49,27 @@ export function assetTags(a: Pick<Asset, 'attrs'>): string[] {
   return [...new Set([...strings(a.attrs?.tags), ...strings(a.attrs?.tech)])];
 }
 
-/** The asset's source, plus any extra sources a plugin recorded in attrs. */
-export function assetSources(a: Pick<Asset, 'source' | 'attrs'>): string[] {
-  return [...new Set([a.source, ...strings(a.attrs?.sources)].filter(Boolean))];
+/** Canonical source first, then reporters; legacy plugin hints remain readable. */
+export function assetSources(a: Pick<Asset, 'source' | 'attrs' | 'reporters' | 'source_facts'>): string[] {
+  const reporters = a.reporters ?? strings(a.attrs?.sources);
+  return [...new Set([a.source, ...reporters, ...Object.keys(a.source_facts ?? {})].filter(Boolean))];
+}
+
+export interface AssetSourceView extends SourceFact {
+  source: string;
+  canonical: boolean;
+  /** False means only legacy canonical metadata (or no metadata) is available. */
+  recorded: boolean;
+}
+
+/** Keep source facts separate: never copy canonical attributes to another reporter. */
+export function assetSourceViews(a: Pick<Asset, 'source' | 'zone' | 'attrs' | 'reporters' | 'source_facts'>): AssetSourceView[] {
+  return assetSources(a).map((source) => {
+    const canonical = source === a.source;
+    const recorded = Object.prototype.hasOwnProperty.call(a.source_facts ?? {}, source);
+    const fact = recorded ? a.source_facts?.[source] : canonical ? { zone: a.zone, attrs: a.attrs } : undefined;
+    return { source, canonical, recorded, ...fact };
+  });
 }
 
 export interface BaselineRow {

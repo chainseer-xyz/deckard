@@ -259,6 +259,36 @@ Balancers:Read, Account Settings:Read, Cloudflare Tunnel:Read.
 Features your plan does not include (Spectrum, Load Balancing) are skipped with
 a warning rather than failing the sync.
 
+### Overlapping inventory and discovery
+
+Sources and discovery share asset identities by `(kind, key)`. The same hostname
+or IP has one asset ID, even when Cloudflare, Kubernetes, AWS and Route 53 report
+it. Hostnames, IPs and cloud resources remain separate nodes connected by
+relationships. Sharing an address does not merge distinct resources.
+
+The canonical `source`, `zone` and `attrs` preserve the first authoritative
+source's view. `reporters` lists every current reporting source. `source_facts`
+retains each source's own zone and attributes without overwriting conflicting
+values. Source-filtered inventory includes secondary reporters. Global
+`assets_by_source` statistics still count canonical sources, so totals count
+unique assets rather than source observations.
+
+A complete source snapshot withdraws only that source's facts and relationships.
+Other reporters keep the asset alive. Partial snapshots cannot withdraw unseen
+assets. When the canonical source withdraws, a remaining reporter supplies the
+canonical view. Historical secondary metadata cannot be recovered during upgrade;
+it stays unknown until that source reports the asset again.
+
+An explicit ownership withdrawal in a partial snapshot blocks probes immediately.
+Partial snapshots never resolve findings through scope changes or scope healing;
+complete snapshots provide that confirmation. Stored scope labels can lag after source removal until another source
+resyncs; the live scope guard still withdraws network permission immediately.
+
+Ownership refresh reads source-attributed evidence, not another source's
+attributes. Origin checks combine positive origin evidence across reporters and
+treat conflicting proxy values as unknown. Finding context includes each source's
+identifying facts. `scope.exclude` still overrides ownership claims.
+
 ### AWS resource inventory (`type: aws`)
 
 Inventories public EC2/EIP/ENI addresses, internet-facing ELBv2 load
@@ -273,6 +303,17 @@ Multiple accounts are multiple entries, one `role_arn` each. See
 ```
 
 A source that fails never causes its assets to be marked removed.
+
+AWS resource discovery does not include DNS zones. Configure a separate
+`type: route53` source for public hosted zones and records. With EKS IRSA, leave
+`profile` and `role_arn` unset: the SDK uses the service account's web identity
+credentials directly. Explicit `regions` control resource discovery; pod
+`AWS_REGION` does not replace this source setting.
+
+Read-only IAM limits AWS API access, not network probes. Public IPs reported as
+owned can become eligible for configured active checks, including through existing
+hostnames. Disable the active tier globally for a passive-only first discovery;
+source-specific groups do not isolate overlapping assets.
 
 ### Google Cloud DNS (`type: gcpdns`)
 

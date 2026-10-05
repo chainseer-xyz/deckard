@@ -24,9 +24,12 @@ func (s *Store) ResolveInapplicableFindings(ctx context.Context, asset model.Ass
 		err := tx.QueryRow(ctx, `SELECT key FROM assets
 			WHERE id = $1 AND kind = $2 AND key = $3 AND attrs = $4::jsonb
 			  AND source = $5 AND scope = 'owned' AND removed_at IS NULL
+			  AND zone = $8 AND reporters @> $9::text[] AND reporters <@ $9::text[]
+			  AND source_facts = $10::jsonb
 			  AND EXISTS (SELECT 1 FROM findings f WHERE f.asset_id = $1
 			      AND f.check_name IN ($6, $7) AND f.status <> 'resolved')
-			FOR UPDATE`, asset.ID, asset.Kind, asset.Key, orEmpty(asset.Attrs), asset.Source, check, "drift."+check).Scan(&key)
+			FOR UPDATE`, asset.ID, asset.Kind, asset.Key, orEmpty(asset.Attrs), asset.Source, check, "drift."+check,
+			asset.Zone, append([]string{}, asset.Reporters...), copySourceFacts(asset.SourceFacts)).Scan(&key)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
