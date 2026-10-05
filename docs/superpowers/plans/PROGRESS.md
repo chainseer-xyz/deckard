@@ -26,3 +26,4 @@ All planned tasks are complete and verified. See `review-findings.md` for the in
 - [x] Upkeep CI: Dependabot, daily govulncheck, weekly nuclei bump and image rebuild, signed images + SBOM + provenance (actions pinned by SHA)
 - [x] End-to-end proof of the React2Shell-style scenario (KEV addition -> targeted scan -> critical finding -> alert -> correct resolve)
 - [x] Review round 2: graph-guided review, durable fan-out, scanner containment, lifecycle corrections, complete API/UI queries, and regression coverage
+- [x] Release follow-up: immediate expansion advances fresh jitter without bypassing retry or CT snooze backoff

@@ -183,7 +183,7 @@ func New(d Deps, opts ...Option) (*Engine, error) {
 			return nil, err
 		}
 		e.client = c
-		e.r.q = riverQueue{c: c, route: e.r.scanQueue}
+		e.r.q = riverQueue{c: c, pool: d.Pool, route: e.r.scanQueue}
 	}
 	return e, nil
 }
