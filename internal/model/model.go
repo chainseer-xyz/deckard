@@ -94,18 +94,28 @@ const (
 	RelInZone     RelationType = "in_zone"
 )
 
-// Asset is a node in the inventory graph.
+// SourceFact is the most recent metadata one inventory source reported.
+// A missing entry means that source's metadata is unknown, not empty.
+type SourceFact struct {
+	Zone  string         `json:"zone,omitempty"`
+	Attrs map[string]any `json:"attrs,omitempty"`
+}
+
+// Asset is a node in the inventory graph. Source, Zone and Attrs project the
+// canonical authority; SourceFacts retains each reporter's separate metadata.
 type Asset struct {
-	ID        int64          `json:"id"`
-	Kind      AssetKind      `json:"kind"`
-	Key       string         `json:"key"`
-	Source    string         `json:"source"`
-	Scope     ScopeClass     `json:"scope"`
-	Zone      string         `json:"zone,omitempty"`
-	Attrs     map[string]any `json:"attrs,omitempty"`
-	FirstSeen time.Time      `json:"first_seen"`
-	LastSeen  time.Time      `json:"last_seen"`
-	RemovedAt *time.Time     `json:"removed_at,omitempty"`
+	ID          int64                 `json:"id"`
+	Kind        AssetKind             `json:"kind"`
+	Key         string                `json:"key"`
+	Source      string                `json:"source"`
+	Scope       ScopeClass            `json:"scope"`
+	Zone        string                `json:"zone,omitempty"`
+	Attrs       map[string]any        `json:"attrs,omitempty"`
+	Reporters   []string              `json:"reporters,omitempty"`
+	SourceFacts map[string]SourceFact `json:"source_facts,omitempty"`
+	FirstSeen   time.Time             `json:"first_seen"`
+	LastSeen    time.Time             `json:"last_seen"`
+	RemovedAt   *time.Time            `json:"removed_at,omitempty"`
 }
 
 // AssetInput is what sources and checks hand to the inventory.

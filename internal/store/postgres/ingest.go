@@ -195,7 +195,7 @@ func ingestAssets(ctx context.Context, tx pgx.Tx, in store.IngestInput) (map[int
 				a, found = old, true
 				switch {
 				case old.RemovedAt != nil:
-					a, err = scanAsset(tx.QueryRow(ctx, `UPDATE assets a SET source = $2, scope = $3, last_seen = $4, removed_at = NULL, reporters = $5
+					a, err = scanAsset(tx.QueryRow(ctx, `UPDATE assets a SET source = $2, scope = $3, last_seen = $4, removed_at = NULL, reporters = $5, source_facts = '{}'
 						WHERE a.id = $1 RETURNING `+assetCols, old.ID, in.Source, in.AssetScope, in.Now, reps))
 					if err == nil {
 						err = addEvent(ctx, tx, "asset_revived", a.Key, assetEventData(a), in.Now)

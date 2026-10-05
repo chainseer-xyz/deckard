@@ -24,7 +24,7 @@ type AssetUpsert struct {
 // InventoryDiff reports what an inventory write changed.
 type InventoryDiff struct {
 	Added   []model.Asset
-	Changed []model.Asset // attrs or scope class changed
+	Changed []model.Asset // canonical metadata, scope or source provenance changed
 	Removed []model.Asset
 	Revived []model.Asset // previously removed, seen again
 	// Ignored counts discoveries refused because the asset was removed by the
