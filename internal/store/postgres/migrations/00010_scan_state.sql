@@ -1,5 +1,9 @@
 -- +goose Up
 -- Scheduling survives scan-history retention and process/replica changes.
+-- Drain row-locking inventory writers before adding/backfilling the foreign key.
+-- Their parent FOR UPDATE -> asset INSERT order otherwise deadlocks with the
+-- weaker lock taken by FK creation. EXCLUSIVE still allows ordinary reads.
+LOCK TABLE assets IN EXCLUSIVE MODE;
 CREATE TABLE scan_state (
     asset_id     bigint NOT NULL REFERENCES assets (id) ON DELETE CASCADE,
     check_name   text NOT NULL,

@@ -1,5 +1,9 @@
 -- +goose Up
 -- Relationships may disappear while their endpoints remain live.
+-- Drain row-locking inventory writers before adding/backfilling foreign keys.
+-- Their parent FOR UPDATE -> asset INSERT order otherwise deadlocks with the
+-- weaker lock taken by FK creation. EXCLUSIVE still allows ordinary reads.
+LOCK TABLE assets IN EXCLUSIVE MODE;
 CREATE TABLE relation_reporters (
     from_id  bigint NOT NULL,
     to_id    bigint NOT NULL,

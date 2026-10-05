@@ -15,6 +15,27 @@ expect_error() { # name, expected message, args...
   elif print -r -- "$out" | grep -qF -- "$msg"; then print "ok   $name"; else print "FAIL $name (wrong error: $out)"; fail=1; fi
 }
 
+# Inspect individual route documents/rules so another resource cannot make an
+# assertion pass. Keep this dependency-free for the Helm CI job.
+http_route() { # rendered, metadata.name
+  print -r -- "$1" | awk -v name="$2" '
+    function emit() { if (d ~ /kind: HTTPRoute/ && index(d, "\n  name: " name "\n")) print d }
+    /^---/ { emit(); d=""; next } { d = d $0 "\n" } END { emit() }'
+}
+http_route_rule() { # route document, one-based rule index
+  print -r -- "$1" | awk -v wanted="$2" '
+    /^    - matches:/ { rule++ } rule == wanted { print }'
+}
+http_route_parents() { # route document
+  print -r -- "$1" | awk '
+    /^  parentRefs:/ { parents=1; next } /^  [a-zA-Z]/ { parents=0 } parents { print }'
+}
+check_count() { # name, line regex, expected count, rendered
+  local count
+  count=$(print -r -- "$4" | awk -v pattern="$2" '$0 ~ pattern { n++ } END { print n+0 }')
+  if [[ $count == "$3" ]]; then print "ok   $1"; else print "FAIL $1 (count: $count, expected: $3)"; fail=1; fi
+}
+
 cnpg=$(helm template t deckard --set database.cnpg.enabled=true)
 check "cnpg cluster rendered"        "postgresql.cnpg.io/v1" "$cnpg"
 check "db url from cnpg secret"      "t-deckard-db-app" "$cnpg"
@@ -117,6 +138,18 @@ check "httproute backend port"        "port: 80" "$gw"
 check "httproute annotations"         "external-dns.alpha.kubernetes.io/hostname: deckard.example.com" "$gw"
 check "netpol admits the gateway ns"  'kubernetes.io/metadata.name: "gateway-system"' "$gw"
 absent "no redirect route by default" "-redirect" "$gw"
+gwroute=$(http_route "$gw" t-deckard)
+gwparents=$(http_route_parents "$gwroute")
+check "parent group defaults explicitly" "group: gateway.networking.k8s.io" "$gwparents"
+check "parent kind defaults explicitly" "kind: Gateway" "$gwparents"
+check "parent namespace preserved" "namespace: gateway-system" "$gwparents"
+check "parent listener preserved" "sectionName: https" "$gwparents"
+check "backend core group explicit" 'group: ""' "$gwroute"
+check "backend service kind explicit" "kind: Service" "$gwroute"
+check "backend weight explicit" "weight: 1" "$gwroute"
+check_count "one normal route rule by default" '^    - matches:' 1 "$gwroute"
+absent "SSE route opt-in by default" "/api/v1/events" "$gwroute"
+absent "normal route keeps default timeouts" "timeouts:" "$gwroute"
 expect_error "redirect without parentRefs rejected" "httpRedirect.enabled needs httpRoute.httpRedirect.parentRefs" \
   "${gwargs[@]}" --set httpRoute.httpRedirect.enabled=true
 gwr=$(helm template t deckard "${gwargs[@]}" --set httpRoute.httpRedirect.enabled=true \
@@ -124,6 +157,64 @@ gwr=$(helm template t deckard "${gwargs[@]}" --set httpRoute.httpRedirect.enable
 check "redirect route rendered"       "name: t-deckard-redirect" "$gwr"
 check "redirect is to https"          "scheme: https" "$gwr"
 check "redirect status"               "statusCode: 301" "$gwr"
+gwredirect=$(http_route "$gwr" t-deckard-redirect)
+check "redirect parent group explicit" "group: gateway.networking.k8s.io" "$gwredirect"
+check "redirect parent kind explicit" "kind: Gateway" "$gwredirect"
+check "redirect listener preserved" "sectionName: http" "$gwredirect"
+check "redirect default match explicit" 'type: PathPrefix
+            value: "/"' "$gwredirect"
+absent "redirect keeps default timeouts" "timeouts:" "$gwredirect"
+
+# Only the exact events endpoint may disable request timeouts; ordinary API
+# routes and the plaintext redirect must retain the controller's defaults.
+gwsse=$(helm template t deckard "${gwargs[@]}" --set httpRoute.sse.enabled=true \
+  --set httpRoute.httpRedirect.enabled=true --set 'httpRoute.httpRedirect.parentRefs[0].name=gw')
+gwsseroute=$(http_route "$gwsse" t-deckard)
+gwssefirst=$(http_route_rule "$gwsseroute" 1)
+gwsseother=$(http_route_rule "$gwsseroute" 2)
+check_count "SSE adds exactly one rule" '^    - matches:' 2 "$gwsseroute"
+check "SSE exact events rule comes first" 'type: Exact
+            value: "/api/v1/events"' "$gwssefirst"
+check "SSE request timeout disabled" "request: 0s" "$gwssefirst"
+check "SSE backend request timeout disabled" "backendRequest: 0s" "$gwssefirst"
+check "SSE backend core group explicit" 'group: ""' "$gwssefirst"
+check "SSE backend service kind explicit" "kind: Service" "$gwssefirst"
+check "SSE backend weight explicit" "weight: 1" "$gwssefirst"
+check "normal rule follows SSE" 'type: PathPrefix
+            value: "/"' "$gwsseother"
+absent "non-SSE rule keeps default timeouts" "timeouts:" "$gwsseother"
+absent "events endpoint not repeated in normal rule" "/api/v1/events" "$gwsseother"
+gwsseredirect=$(http_route "$gwsse" t-deckard-redirect)
+absent "SSE opt-in leaves redirect timeouts alone" "timeouts:" "$gwsseredirect"
+absent "SSE opt-in leaves redirect matches alone" "/api/v1/events" "$gwsseredirect"
+
+gwcustom=$(helm template t deckard "${gwargs[@]}" --set httpRoute.sse.enabled=true \
+  --set service.port=8088 --set httpRoute.path.type=Exact --set httpRoute.path.value=/api/v1/stats \
+  --set-json 'httpRoute.parentRefs=[{"name":"core-parent","group":"","kind":"Service","namespace":"core-ns","sectionName":"https","port":443},{"name":"custom-parent","group":"example.net","kind":"CustomGateway","namespace":"custom-ns","sectionName":"blue","port":8443}]' \
+  --set httpRoute.httpRedirect.enabled=true \
+  --set-json 'httpRoute.httpRedirect.parentRefs=[{"name":"core-redirect","group":"","kind":"Service","namespace":"redirect-ns","sectionName":"http","port":80}]')
+gwcustomroute=$(http_route "$gwcustom" t-deckard)
+gwcustomparents=$(http_route_parents "$gwcustomroute")
+check "explicit empty parent group preserved" 'group: ""' "$gwcustomparents"
+check "explicit core parent kind preserved" "kind: Service" "$gwcustomparents"
+check "explicit custom parent group preserved" "group: example.net" "$gwcustomparents"
+check "explicit custom parent kind preserved" "kind: CustomGateway" "$gwcustomparents"
+check "custom parent namespace preserved" "namespace: custom-ns" "$gwcustomparents"
+check "custom parent section preserved" "sectionName: blue" "$gwcustomparents"
+check "custom parent port preserved" "port: 8443" "$gwcustomparents"
+absent "explicit parent group not overwritten" "group: gateway.networking.k8s.io" "$gwcustomparents"
+check_count "both SSE and normal backends keep the custom port" 'port: 8088' 2 "$gwcustomroute"
+gwcustomother=$(http_route_rule "$gwcustomroute" 2)
+check "custom normal route match preserved" 'type: Exact
+            value: "/api/v1/stats"' "$gwcustomother"
+absent "custom normal route keeps default timeouts" "timeouts:" "$gwcustomother"
+gwcustomredirect=$(http_route "$gwcustom" t-deckard-redirect)
+gwcustomredirectparents=$(http_route_parents "$gwcustomredirect")
+check "redirect explicit empty parent group preserved" 'group: ""' "$gwcustomredirectparents"
+check "redirect explicit parent kind preserved" "kind: Service" "$gwcustomredirectparents"
+check "redirect explicit parent namespace preserved" "namespace: redirect-ns" "$gwcustomredirectparents"
+check "redirect explicit parent port preserved" "port: 80" "$gwcustomredirectparents"
+absent "custom redirect keeps default timeouts" "timeouts:" "$gwcustomredirect"
 
 # Refreshed reference data lives under /var/lib/deckard: a volume is always mounted
 # (emptyDir without persistence, the PVC with it) so the root FS can stay read-only.

@@ -162,6 +162,8 @@ httpRoute:
   labels: {}
   # -- Gateway listeners the route attaches to (required when enabled), e.g.
   #   - { name: public-gateway, namespace: gateway-system, sectionName: https }
+  # Omitted group/kind render as gateway.networking.k8s.io/Gateway. Explicit
+  # references (including group: "" for the core API) stay unchanged.
   # The namespaces named here are admitted by the NetworkPolicy automatically.
   parentRefs: []
   # -- Hostnames the route answers for. Leave empty to match every hostname on the listener.
@@ -169,6 +171,12 @@ httpRoute:
   path:
     type: PathPrefix
     value: /
+  # -- Opt in when the Gateway controller supports HTTPRoute rule timeouts.
+  # The exact /api/v1/events route disables request/backendRequest timeouts
+  # (0s) so the UI's SSE connection stays open. All other paths keep the
+  # controller's default timeouts. Proxy idle timeouts may need separate tuning.
+  sse:
+    enabled: false
   # -- A second route that redirects plain HTTP to HTTPS. Attach it to the gateway's
   # plaintext listener, for example
   #   parentRefs: [{ name: public-gateway, namespace: gateway-system, sectionName: http }]
