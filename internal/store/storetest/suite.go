@@ -47,6 +47,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		{"Events", testEvents},
 		{"SyncsScans", testSyncsScans},
 		{"RemovedAssetFindings", testRemovedAssetFindings},
+		{"InapplicableFindings", testInapplicableFindings},
 		{"ScanHistory", testScanHistory},
 		{"Stats", testStats},
 		{"NotFound", testNotFound},

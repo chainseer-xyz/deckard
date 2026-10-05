@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"sort"
 	"sync"
@@ -109,10 +110,33 @@ func (s *fakeStore) ListFindings(_ context.Context, f store.FindingFilter) ([]mo
 		}
 		out = append(out, x)
 	}
+	total := len(out)
 	if f.Limit > 0 && len(out) > f.Limit {
 		out = out[:f.Limit]
 	}
-	return out, len(out), nil
+	return out, total, nil
+}
+
+func (s *fakeStore) ResolveInapplicableFindings(_ context.Context, asset model.Asset, name string, now time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.findingsErr != nil {
+		return 0, s.findingsErr
+	}
+	current, ok := s.assets[asset.ID]
+	if !ok || current.RemovedAt != nil || current.Scope != model.ScopeOwned || current.Source != asset.Source ||
+		!reflect.DeepEqual(current.Attrs, asset.Attrs) {
+		return 0, nil
+	}
+	n := 0
+	for i := range s.findings {
+		f := &s.findings[i]
+		if f.AssetID == asset.ID && (f.Check == name || f.Check == "drift."+name) && f.Status != model.StatusResolved {
+			f.Status, f.ResolvedAt, f.SuppressedUntil = model.StatusResolved, &now, nil
+			n++
+		}
+	}
+	return n, nil
 }
 
 // LastScans derives one row per (asset, check) from the recorded runs: a

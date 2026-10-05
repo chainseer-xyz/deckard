@@ -338,6 +338,10 @@ type Store interface {
 	SaveBaseline(ctx context.Context, b Baseline) error
 
 	ReconcileFindings(ctx context.Context, in ReconcileInput) (ReconcileResult, error)
+	// ResolveInapplicableFindings closes findings for a check that no longer
+	// applies to a live owned asset. The asset snapshot must still match the
+	// stored asset, so a concurrent inventory change cannot settle findings.
+	ResolveInapplicableFindings(ctx context.Context, asset model.Asset, check string, now time.Time) (int, error)
 	// IngestFindings applies one externally reported run for (Tool, Scope)
 	// with the same lifecycle rules as ReconcileFindings; see IngestInput.
 	IngestFindings(ctx context.Context, in IngestInput) (IngestResult, error)

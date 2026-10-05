@@ -185,6 +185,9 @@ func (r *runner) runScan(ctx context.Context, j scanJob) error {
 		r.log.Warn("scan: invalid tier", "tier", j.Tier)
 		return nil
 	}
+	if err := r.resolveInapplicable(ctx, *asset, j.Tier, j.Check); err != nil {
+		return err
+	}
 	checks := r.checksFor(*asset, j.Tier, j.Check)
 	if len(checks) == 0 {
 		return nil
@@ -659,6 +662,13 @@ func (r *runner) scheduleTier(ctx context.Context, tier model.Tier) (int, error)
 		} else {
 			for _, c := range tierChecks {
 				if !c.Applies(a) {
+					// Only previously attempted pairs need cleanup. Durable state
+					// avoids probing every never-applicable (asset, check) pair.
+					if _, known := last[ScanKey{a.ID, c.Name()}]; known {
+						if err := r.resolveInapplicable(ctx, a, tier, c.Name()); err != nil {
+							return queued, err
+						}
+					}
 					continue
 				}
 				interval := resolveFor(r.Config, a, tier, c).Interval
