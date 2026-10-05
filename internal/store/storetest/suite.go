@@ -34,6 +34,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		{"ReplaceDerived", testReplaceDerived},
 		{"DerivedGCOnRemoval", testDerivedGCOnRemoval},
 		{"Relations", testRelations},
+		{"RelationReporters", testRelationReporters},
 		{"ListAssets", testListAssets},
 		{"Observations", testObservations},
 		{"Baselines", testBaselines},

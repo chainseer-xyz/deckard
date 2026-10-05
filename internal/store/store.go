@@ -299,7 +299,7 @@ type Store interface {
 	Close()
 
 	// ApplySnapshot writes a complete, successful sync of one source: upserts
-	// assets/relations and marks that source's unseen assets removed.
+	// assets, replaces that source's reported relations, and removes unseen assets.
 	ApplySnapshot(ctx context.Context, source string, assets []AssetUpsert, rels []model.RelationInput, now time.Time) (InventoryDiff, error)
 	// UpsertSnapshot is ApplySnapshot without the removal step: it upserts the
 	// source's assets and relations (same ownership rules, reporter sets kept
@@ -314,8 +314,11 @@ type Store interface {
 	// (assetID, origin) that are absent now lose that registration; a derived
 	// child no (parent, origin) observes any more is marked removed, its
 	// relations are deleted and its findings resolved. Source-owned (claimed)
-	// children are never removed here. A removed parent is a no-op (a scan
-	// that finished after the removal). Engine contract: for checks whose
+	// children are never removed here.
+	// Relationships replace the (assetID, origin) set even when both endpoints
+	// remain live through another reporter.
+	// A removed parent is a no-op (a scan that finished after removal).
+	// Engine contract: for checks whose
 	// Result.Discovered are children of the scanned asset (net.ports,
 	// http.probe, ...) call ReplaceDerived with assetID = the scanned asset and
 	// origin = the check name on every successful run, even when nothing was

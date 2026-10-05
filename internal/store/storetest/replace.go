@@ -167,14 +167,14 @@ func testReplaceDerived(t *testing.T, f Factory) {
 		rel := func(to string) model.RelationInput {
 			return model.RelationInput{FromKind: model.KindHostname, FromKey: "a.x.io", ToKind: model.KindIP, ToKey: to, Type: model.RelResolvesTo}
 		}
-		e.snapshot("cf", []store.AssetUpsert{host("a.x.io", "cf"), ipa("1.1.1.1"), ipa("2.2.2.2")},
-			[]model.RelationInput{rel("1.1.1.1"), rel("2.2.2.2")}, at(0))
+		e.snapshot("cf", []store.AssetUpsert{host("a.x.io", "cf"), ipa("1.1.1.1"), ipa("2.2.2.2")}, nil, at(0))
+		e.discover(nil, []model.RelationInput{rel("1.1.1.1"), rel("2.2.2.2")}, at(0))
 		e.snapshot("cf", []store.AssetUpsert{host("a.x.io", "cf"), ipa("2.2.2.2")}, nil, at(5))
 		a := e.asset(model.KindHostname, "a.x.io")
 		if n, err := e.s.PruneRelations(e.ctx, at(4)); err != nil || n != 0 {
 			t.Fatalf("early prune = %d, %v", n, err)
 		}
-		if got := edgeKeys(e, a.ID); len(got) != 2 {
+		if got := edgeKeys(e, a.ID); !equalStrings(got, []string{"2.2.2.2"}) {
 			t.Fatalf("edges = %v", got)
 		}
 		if n, err := e.s.PruneRelations(e.ctx, at(6)); err != nil || n != 1 {
