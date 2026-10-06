@@ -34,6 +34,7 @@
   --muted: 82 94 112;
   --accent: 14 116 144;
   --accent-fg: 255 255 255;
+  --brand-mark: 164 75 43;
   --sev-critical: 159 18 57;
   --sev-high: 180 40 10;
   --sev-medium: 146 84 0;
@@ -61,6 +62,7 @@
   --muted: 154 167 186;
   --accent: 45 190 215;
   --accent-fg: 6 20 28;
+  --brand-mark: 223 136 84;
   --sev-critical: 255 138 160;
   --sev-high: 255 153 102;
   --sev-medium: 245 197 80;
@@ -89,6 +91,7 @@
     --muted: 154 167 186;
     --accent: 45 190 215;
     --accent-fg: 6 20 28;
+    --brand-mark: 223 136 84;
     --sev-critical: 255 138 160;
     --sev-high: 255 153 102;
     --sev-medium: 245 197 80;
@@ -134,6 +137,24 @@
   th {
     @apply text-left font-medium text-muted;
   }
+}
+
+/* Unlayered to override the standalone SVG's unlayered theme rules. */
+.brand-logo {
+  display: inline-flex;
+  aspect-ratio: 368 / 104;
+  color: rgb(var(--fg));
+}
+.brand-logo > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.brand-logo .deckard-wordmark {
+  fill: currentColor;
+}
+.brand-logo .deckard-mark {
+  fill: rgb(var(--brand-mark));
 }
 
 @layer components {

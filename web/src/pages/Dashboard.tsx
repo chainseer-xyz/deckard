@@ -105,7 +105,7 @@ function SeverityTiles({ counts, fresh, loading }: { counts?: Record<string, num
 
 function SourceStrip({ items, now }: { items: SyncStatus[]; now: number }) {
   if (items.length === 0) {
-    return <Empty>No sources configured. Add a source in the deckard config to discover assets.</Empty>;
+    return <Empty>No sources configured. Add a source in the Deckard config to discover assets.</Empty>;
   }
   return (
     <ul className="grid gap-2 p-3 sm:grid-cols-2 lg:grid-cols-3">

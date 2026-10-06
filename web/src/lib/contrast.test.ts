@@ -25,7 +25,7 @@ const ratio = (a: number[], b: number[]) => {
 /** Colour of `fg` at `alpha` over `bg`, as the tinted badge backgrounds render. */
 const over = (fg: number[], bg: number[], alpha: number) => fg.map((c, i) => c * alpha + (bg[i] as number) * (1 - alpha));
 
-const TEXT = ['sev-critical', 'sev-high', 'sev-medium', 'sev-low', 'sev-info', 'ok', 'warn', 'bad', 'muted', 'accent'];
+const TEXT = ['sev-critical', 'sev-high', 'sev-medium', 'sev-low', 'sev-info', 'ok', 'warn', 'bad', 'muted', 'accent', 'brand-mark'];
 
 describe.each([
   ['light', ':root'],

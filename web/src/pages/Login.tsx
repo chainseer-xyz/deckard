@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { KeyRound } from 'lucide-react';
 import { setToken } from '../api/auth';
 import { ThemeToggle } from '../components/Layout';
+import { Brand } from '../components/Brand';
 
 export function Login({ message }: { message?: string }) {
   const qc = useQueryClient();
@@ -28,9 +28,8 @@ export function Login({ message }: { message?: string }) {
       </div>
       <form onSubmit={submit} className="card w-full max-w-sm space-y-4 p-6" aria-labelledby="login-h" noValidate>
         <div>
-          <h1 id="login-h" className="flex items-center gap-2 text-lg font-semibold">
-            <KeyRound size={18} aria-hidden="true" /> Sign in to deckard
-          </h1>
+          <Brand className="mb-4 h-14" />
+          <h1 id="login-h" className="text-lg font-semibold">Sign in to Deckard</h1>
           <p className="mt-1 text-xs text-muted">
             Paste an API bearer token. It is kept in this tab only (sessionStorage) and cleared when the tab closes.
           </p>
