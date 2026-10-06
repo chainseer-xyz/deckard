@@ -7,7 +7,7 @@ import { emptyCounts } from './triage';
 export const SCOPE_INFO: Record<ScopeClass, { label: string; probing: string }> = {
   owned: {
     label: 'Owned',
-    probing: 'Yours: deckard runs passive, active and intrusive checks against it.',
+    probing: 'Yours: Deckard runs passive, active and intrusive checks against it.',
   },
   shared: {
     label: 'Shared',
@@ -19,7 +19,7 @@ export const SCOPE_INFO: Record<ScopeClass, { label: string; probing: string }> 
   },
   excluded: {
     label: 'Excluded',
-    probing: 'Matches scope.exclude: deckard never touches it.',
+    probing: 'Matches scope.exclude: Deckard never touches it.',
   },
 };
 

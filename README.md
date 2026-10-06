@@ -1,8 +1,6 @@
-<p align="center">
-  <img src="docs/img/readme-hero.svg" alt="Deckard — external attack surface monitoring" width="100%">
-</p>
-
-<h1 align="center">deckard</h1>
+<h1 align="center">
+  <img src="web/src/assets/deckard-logo.svg" alt="Deckard" width="552">
+</h1>
 
 <p align="center">
   <strong>Self-hosted, continuous external attack-surface monitoring.</strong><br>

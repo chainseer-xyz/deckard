@@ -5,6 +5,7 @@ import { LiveIndicator } from './Live';
 import { Loading } from './ui';
 import { useTheme } from '../lib/theme';
 import { useMe } from '../api/hooks';
+import { Brand } from './Brand';
 
 const nav = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -41,9 +42,7 @@ export function Layout() {
       </a>
       <header className="sticky top-0 z-40 border-b border-line bg-surface">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2">
-          <span className="text-base font-bold tracking-tight">
-            <span className="text-accent">d</span>eckard
-          </span>
+          <Brand className="h-8 shrink-0" />
           <nav aria-label="Main" className="flex flex-1 flex-wrap items-center gap-1">
             {nav.map((n) => (
               <NavLink
