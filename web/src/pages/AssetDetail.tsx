@@ -1,6 +1,7 @@
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Network, RefreshCw } from 'lucide-react';
 import { useAsset, useMe, useRescan } from '../api/hooks';
+import { isProbeTarget } from '../api/types';
 import { AssetProperties } from '../components/AssetProperties';
 import { AssetSourceFacts } from '../components/AssetSourceFacts';
 import { DnsChainView } from '../components/DnsChainView';
@@ -25,6 +26,7 @@ export default function AssetDetail() {
   const d = q.data;
   const { asset, edges, observations, baselines, findings } = d;
   const canWrite = me.data?.can_write ?? false;
+  const probeTarget = isProbeTarget(asset);
   const chain = buildDnsChain(d);
   const sorted = sortFindings(findings, 'severity', 'desc');
   const setDrawer = (fid?: number) => {
@@ -45,14 +47,15 @@ export default function AssetDetail() {
         </Link>
         <button
           className="btn btn-sm btn-primary"
-          disabled={!canWrite || rescan.isPending}
-          title={canWrite ? undefined : 'Read-only access'}
+          disabled={!canWrite || !probeTarget || rescan.isPending}
+          title={!probeTarget ? 'Refresh through the source or scanner' : canWrite ? undefined : 'Read-only access'}
           onClick={() => rescan.mutate(asset.id)}
         >
           <RefreshCw size={12} aria-hidden="true" /> Rescan now
         </button>
       </PageHeader>
       <div role="status" aria-live="polite" className="mb-2 min-h-5 text-sm">
+        {!probeTarget && <span className="text-muted">Refresh this asset through its inventory source or scanner. Deckard does not network-probe metadata.</span>}
         {rescan.isSuccess && <span className="text-ok">Rescan queued.</span>}
         {rescan.isError && <span role="alert" className="text-bad">Rescan failed: {(rescan.error as Error).message}</span>}
       </div>

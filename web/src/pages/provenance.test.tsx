@@ -28,6 +28,13 @@ afterEach(() => {
 });
 
 describe('shared asset provenance', () => {
+	it('shows imported image inventory without offering a network rescan', async () => {
+		state.assets = [{ ...sharedIP, id: 55, kind: 'container_image', key: `sha256:${'a'.repeat(64)}`, source: 'ingest:trivy', scope: 'external' }];
+		renderRoute(<AssetDetail />, '/assets/:id', '/assets/55');
+    expect(await screen.findByRole('heading', { name: `sha256:${'a'.repeat(64)}` })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Rescan now' })).toBeDisabled();
+		expect(screen.getByText(/Refresh this asset through its inventory source or scanner/)).toBeInTheDocument();
+	});
   it('shows a CF-first overlapping IP once, retains AWS/K8s facts and related resources', async () => {
     server.use(http.get('*/api/v1/assets/5', () => HttpResponse.json({
       asset: sharedIP, edges: [{ direction: 'in', type: 'has_public_ip', asset: resource }],

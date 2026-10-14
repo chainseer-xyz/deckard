@@ -9,6 +9,9 @@ const COLUMN: Record<string, number> = {
   ip: 2,
   service: 3,
   certificate: 4,
+  workload: 4,
+  container_image: 5,
+  package: 6,
 };
 
 export const COL_W = 260;

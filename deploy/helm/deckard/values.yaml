@@ -142,6 +142,8 @@ serviceAccount:
 # -- ClusterRole letting the kubernetes source list Services, Nodes, Ingresses and Gateway API routes.
 rbac:
   create: true
+  # Optional reads for config.sources[].topology. Does not enable collection.
+  topology: false
 
 service:
   type: ClusterIP

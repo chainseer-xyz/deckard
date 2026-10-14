@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,14 +45,26 @@ type Source struct {
 	name     string
 	clusters []Cluster
 	log      *slog.Logger
+	topology bool
 }
 
+// Option configures optional Kubernetes discovery features.
+type Option func(*Source)
+
+// WithTopology enables metadata-only Service, workload and image relationships.
+// It never makes internal addresses into network scan targets.
+func WithTopology(enabled bool) Option { return func(s *Source) { s.topology = enabled } }
+
 // NewWithClusters builds a Source around explicit clusters (used by tests).
-func NewWithClusters(name string, clusters []Cluster, log *slog.Logger) *Source {
+func NewWithClusters(name string, clusters []Cluster, log *slog.Logger, opts ...Option) *Source {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Source{name: name, clusters: clusters, log: log}
+	s := &Source{name: name, clusters: clusters, log: log}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // New builds a Source from config. No cluster is contacted until Discover.
@@ -97,7 +110,7 @@ func New(cfg config.SourceConfig, log *slog.Logger) (source.Source, error) {
 			clusters = append(clusters, c)
 		}
 	}
-	return NewWithClusters(cfg.Name, clusters, log), nil
+	return NewWithClusters(cfg.Name, clusters, log, WithTopology(cfg.Topology)), nil
 }
 
 func clusterFromRest(name string, rc *rest.Config) (Cluster, error) {
@@ -142,6 +155,7 @@ func skippable(err error) bool {
 }
 
 func (s *Source) discoverCluster(ctx context.Context, b *builder, c Cluster) error {
+	exposureStart := len(b.exposures)
 	// Services are mandatory.
 	var svcs []corev1.Service
 	if err := paginate(func(o metav1.ListOptions) (string, error) {
@@ -169,14 +183,23 @@ func (s *Source) discoverCluster(ctx context.Context, b *builder, c Cluster) err
 			return err
 		}
 	}
-	if err := s.ingresses(ctx, b, c); err != nil {
+	ingresses, err := s.ingresses(ctx, b, c)
+	if err != nil {
 		return err
 	}
-	return s.httpRoutes(ctx, b, c)
+	routes, err := s.httpRoutes(ctx, b, c)
+	if err != nil {
+		return err
+	}
+	if s.topology {
+		return s.discoverTopology(ctx, b, c, svcs, ingresses, routes, b.exposures[exposureStart:])
+	}
+	return nil
 }
 
 func paginate(page func(metav1.ListOptions) (string, error)) error {
 	opts := metav1.ListOptions{Limit: pageSize}
+	seen := map[string]bool{}
 	for {
 		next, err := page(opts)
 		if err != nil {
@@ -185,6 +208,10 @@ func paginate(page func(metav1.ListOptions) (string, error)) error {
 		if next == "" {
 			return nil
 		}
+		if seen[next] {
+			return fmt.Errorf("repeated Kubernetes list continuation token")
+		}
+		seen[next] = true
 		opts.Continue = next
 	}
 }
@@ -234,6 +261,9 @@ func (s *Source) loadBalancer(b *builder, cluster string, svc corev1.Service) {
 				"port": int(p.Port), "protocol": proto(p.Protocol), "service_type": "LoadBalancer", "port_name": p.Name,
 			}))
 			b.rel(fromKind, addr, model.KindService, key, model.RelExposes)
+			if s.topology {
+				b.exposures = append(b.exposures, serviceExposure{namespace: svc.Namespace, name: svc.Name, key: key})
+			}
 		}
 	}
 }
@@ -279,19 +309,26 @@ func (s *Source) nodePorts(ctx context.Context, b *builder, c Cluster, svcs []co
 					"port": int(p.NodePort), "protocol": proto(p.Protocol), "service_type": "NodePort", "node": n.node, "port_name": p.Name,
 				}))
 				b.rel(model.KindIP, ip, model.KindService, key, model.RelExposes)
+				if s.topology {
+					b.exposures = append(b.exposures, serviceExposure{namespace: svc.Namespace, name: svc.Name, key: key})
+				}
 			}
 		}
 	}
 	return nil
 }
 
-func (s *Source) ingresses(ctx context.Context, b *builder, c Cluster) error {
+func (s *Source) ingresses(ctx context.Context, b *builder, c Cluster) ([]networkingv1.Ingress, error) {
+	var items []networkingv1.Ingress
 	err := paginate(func(o metav1.ListOptions) (string, error) {
 		l, err := c.Client.NetworkingV1().Ingresses(metav1.NamespaceAll).List(ctx, o)
 		if err != nil {
 			return "", err
 		}
 		for _, ing := range l.Items {
+			if s.topology {
+				items = append(items, ing)
+			}
 			attrs := objAttrs(c.Name, ing.Namespace, ing.Name, map[string]any{"via": "ingress"})
 			var hosts []string
 			for _, r := range ing.Spec.Rules {
@@ -328,23 +365,27 @@ func (s *Source) ingresses(ctx context.Context, b *builder, c Cluster) error {
 			if !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) { // kind absent is not a gap
 				b.skip(fmt.Sprintf("cluster %s: ingresses skipped (access denied)", c.Name))
 			}
-			return nil
+			return items, nil
 		}
-		return fmt.Errorf("list ingresses: %w", err)
+		return nil, fmt.Errorf("list ingresses: %w", err)
 	}
-	return nil
+	return items, nil
 }
 
-func (s *Source) httpRoutes(ctx context.Context, b *builder, c Cluster) error {
+func (s *Source) httpRoutes(ctx context.Context, b *builder, c Cluster) ([]unstructured.Unstructured, error) {
 	if c.Dynamic == nil {
-		return nil
+		return nil, nil
 	}
+	var items []unstructured.Unstructured
 	err := paginate(func(o metav1.ListOptions) (string, error) {
 		l, err := c.Dynamic.Resource(httpRouteGVR).Namespace(metav1.NamespaceAll).List(ctx, o)
 		if err != nil {
 			return "", err
 		}
 		for _, item := range l.Items {
+			if s.topology {
+				items = append(items, item)
+			}
 			hosts, _, _ := unstructured.NestedStringSlice(item.Object, "spec", "hostnames")
 			attrs := objAttrs(c.Name, item.GetNamespace(), item.GetName(), map[string]any{"via": "httproute"})
 			for _, h := range hosts {
@@ -358,15 +399,15 @@ func (s *Source) httpRoutes(ctx context.Context, b *builder, c Cluster) error {
 	if err != nil {
 		switch {
 		case apierrors.IsNotFound(err) || meta.IsNoMatchError(err):
-			return nil // Gateway API CRDs not installed
+			return items, nil // Gateway API CRDs not installed
 		case apierrors.IsForbidden(err):
 			s.log.Warn("kubernetes: not permitted to list httproutes", "source", s.name, "cluster", c.Name, "err", err)
 			b.skip(fmt.Sprintf("cluster %s: httproutes skipped (access denied)", c.Name))
-			return nil
+			return items, nil
 		}
-		return fmt.Errorf("list httproutes: %w", err)
+		return nil, fmt.Errorf("list httproutes: %w", err)
 	}
-	return nil
+	return items, nil
 }
 
 func normalizeHost(h string) string {
@@ -374,12 +415,13 @@ func normalizeHost(h string) string {
 }
 
 type builder struct {
-	source   string
-	assets   map[string]*model.AssetInput
-	order    []string
-	rels     map[model.RelationInput]bool
-	relOrder []model.RelationInput
-	partial  []string
+	source    string
+	assets    map[string]*model.AssetInput
+	order     []string
+	rels      map[model.RelationInput]bool
+	relOrder  []model.RelationInput
+	partial   []string
+	exposures []serviceExposure
 }
 
 // skip records a feature that could not be read (access denied), making the

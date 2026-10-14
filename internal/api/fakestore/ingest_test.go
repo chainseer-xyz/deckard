@@ -52,3 +52,7 @@ func seed(t *testing.T, st store.Store, source string, assets []store.AssetUpser
 func TestIngestContract(t *testing.T) {
 	storetest.RunIngest(t, func(*testing.T) store.Store { return New() }, seed)
 }
+
+func TestArtifactContract(t *testing.T) {
+	storetest.RunArtifacts(t, func(*testing.T) store.Store { return New() })
+}

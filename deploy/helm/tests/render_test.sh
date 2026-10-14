@@ -44,6 +44,12 @@ check "non-root"                     "runAsNonRoot: true" "$cnpg"
 check "read-only rootfs"             "readOnlyRootFilesystem: true" "$cnpg"
 absent "no cpu limit by default"     "cpu: " "$(print -r -- "$cnpg" | awk "/limits:/{f=1} f&&/cpu/{print} /requests:/{f=0}")"
 check "roles env"                    "api,scheduler,worker" "$cnpg"
+absent "topology reads disabled by default" "resources: [pods]" "$cnpg"
+topology=$(helm template t deckard --set database.cnpg.enabled=true --set rbac.topology=true)
+check "topology pod reads opt in" "resources: [pods]" "$topology"
+check "topology endpoint reads opt in" "resources: [endpointslices]" "$topology"
+check "topology identity read is scoped" "resourceNames: [kube-system]" "$topology"
+absent "topology never grants secret reads" "resources: [secrets]" "$topology"
 absent "default keeps implicit rolling strategy" "strategy:" "$cnpg"
 recreate=$(helm template t deckard --set database.cnpg.enabled=true --set worker.enabled=true --set "roles={api,scheduler}" --set deploymentStrategy.type=Recreate)
 check_count "Recreate applied to server and worker" "^    type: Recreate$" 2 "$recreate"

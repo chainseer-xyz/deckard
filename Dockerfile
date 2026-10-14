@@ -9,7 +9,7 @@ RUN --mount=type=cache,target=/root/.npm if [ -f package.json ]; then npm ci; fi
 COPY web/ ./
 RUN if [ -f package.json ]; then npm run build; else mkdir -p dist; fi
 
-FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine AS build
 ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /src
@@ -28,13 +28,13 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # NUCLEI_VERSION is bumped by .github/workflows/nuclei-bump.yml. NUCLEI_GO_GET_PINS
 # holds the transitive-dependency fixes; that workflow also builds with the pins
 # emptied and, when Trivy stays clean, opens a PR that removes the obsolete ones.
-FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS nuclei
+FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine AS nuclei
 ARG BUILDOS
 ARG BUILDARCH
 ARG TARGETOS
 ARG TARGETARCH
 ARG NUCLEI_VERSION=v3.11.1
-ARG NUCLEI_GO_GET_PINS="golang.org/x/crypto@v0.55.0 golang.org/x/mod@v0.40.0 google.golang.org/grpc@v1.83.2 github.com/go-git/go-git/v5@v5.19.2"
+ARG NUCLEI_GO_GET_PINS="golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.60.0 golang.org/x/mod@v0.41.0 google.golang.org/grpc@v1.83.2 github.com/go-git/go-git/v5@v5.19.2"
 RUN apk add --no-cache git
 WORKDIR /src
 RUN git clone --quiet --depth 1 --branch ${NUCLEI_VERSION} https://github.com/projectdiscovery/nuclei.git .

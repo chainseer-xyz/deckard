@@ -17,11 +17,13 @@ import (
 	"time"
 
 	"github.com/chainseer-xyz/deckard/internal/ingest"
+	"github.com/chainseer-xyz/deckard/internal/ingest/cyclonedx"
 	"github.com/chainseer-xyz/deckard/internal/ingest/gitleaks"
 	"github.com/chainseer-xyz/deckard/internal/ingest/kubescape"
 	"github.com/chainseer-xyz/deckard/internal/ingest/prowler"
 	"github.com/chainseer-xyz/deckard/internal/ingest/s3scanner"
 	"github.com/chainseer-xyz/deckard/internal/ingest/sarif"
+	"github.com/chainseer-xyz/deckard/internal/ingest/trivy"
 	"github.com/chainseer-xyz/deckard/internal/ingest/trufflehog"
 	"github.com/chainseer-xyz/deckard/internal/model"
 )
@@ -47,6 +49,13 @@ var ingestParsers = map[string]ingest.Parser{
 	sarif.Tool:      sarif.Parse,
 }
 
+// Artifact parsers retain clean inventory in addition to optional findings.
+// They cannot masquerade as other producers and alter their reconciliation set.
+var artifactParsers = map[string]func([]byte, ingest.ParseOptions) (ingest.ArtifactReport, error){
+	trivy.Tool:     trivy.ParseReport,
+	cyclonedx.Tool: cyclonedx.ParseReport,
+}
+
 // stdin is the input when --file is absent (a variable for tests).
 var stdin io.Reader = os.Stdin
 
@@ -65,6 +74,11 @@ pulls the latest scans from a running Prowler App instead; see deckard ingest pr
 
   --incomplete   the output is not everything the tool found in the scope: nothing will be resolved
   --dry-run      print the request (never the token) after validating it locally, post nothing
+
+Native trivy and cyclonedx formats require --tool to match --format. Trivy accepts
+container-image vulnerability JSON bound by Metadata.RepoDigests. Pass --incomplete
+for filtered or partial reports. CycloneDX requires an immutable OCI image PURL;
+SBOM imports always use complete=false: inventory is not a clean CVE scan.
 
 Exit codes: 0 posted and applied, 1 usage, input or validation error, 2 the server rejected the
 request or some items (or did not apply it as complete), 3 network error. See docs/ingest.md.
@@ -94,8 +108,11 @@ func runIngest(args []string, stdout, stderr io.Writer) int {
 	fs.BoolVar(&f.dryRun, "dry-run", false, "print the request instead of posting it")
 	fs.BoolVar(&f.verbose, "v", false, "verbose progress on stderr")
 	fs.DurationVar(&f.timeout, "timeout", 2*time.Minute, "overall time limit for posting, retries included")
-	names := make([]string, 0, len(ingestParsers))
+	names := make([]string, 0, len(ingestParsers)+len(artifactParsers))
 	for n := range ingestParsers {
+		names = append(names, n)
+	}
+	for n := range artifactParsers {
 		names = append(names, n)
 	}
 	sort.Strings(names)
@@ -129,11 +146,15 @@ func runIngest(args []string, stdout, stderr io.Writer) int {
 		f.format = f.tool
 	}
 	parse, ok := ingestParsers[f.format]
+	parseArtifact, artifactFormat := artifactParsers[f.format]
+	_, artifactTool := artifactParsers[f.tool]
 	switch {
 	case !model.ValidIngestTool(f.tool):
 		return fail(ingestExitUsage, "--tool must match ^[a-z0-9][a-z0-9-]{1,31}$\n\n%s", usage)
-	case !ok:
+	case !ok && !artifactFormat:
 		return fail(ingestExitUsage, "unknown --format %q (known: %s)", f.format, strings.Join(names, ", "))
+	case (artifactFormat || artifactTool) && f.format != f.tool:
+		return fail(ingestExitUsage, "native artifact --format must match --tool to preserve producer reconciliation")
 	case strings.TrimSpace(f.scope) == "":
 		return fail(ingestExitUsage, "--scope is required\n\n%s", usage)
 	}
@@ -159,18 +180,33 @@ func runIngest(args []string, stdout, stderr io.Writer) int {
 		observed = t.UTC()
 	}
 
-	data, src, err := readIngestInput(f.file)
+	inputLimit := int64(maxIngestInput)
+	if artifactFormat {
+		inputLimit = min(trivy.MaxInputBytes, cyclonedx.MaxInputBytes)
+	}
+	data, src, err := readIngestInput(f.file, inputLimit)
 	if err != nil {
 		return fail(ingestExitUsage, "%v", err)
 	}
-	findings, err := parse(data, ingest.ParseOptions{Scope: f.scope})
+	var report ingest.ArtifactReport
+	if artifactFormat {
+		report, err = parseArtifact(data, ingest.ParseOptions{Scope: f.scope})
+	} else {
+		report.Findings, err = parse(data, ingest.ParseOptions{Scope: f.scope})
+	}
 	if err != nil {
 		return fail(ingestExitUsage, "parse %s as %s output: %v", src, f.format, err)
 	}
+	findings := report.Findings
 	if findings == nil {
 		findings = []ingest.Finding{}
 	}
-	req := &ingest.Request{Tool: f.tool, Scope: f.scope, Complete: !f.incomplete, ObservedAt: &observed, Findings: findings}
+	if f.format == cyclonedx.Tool {
+		f.incomplete = true
+		_, _ = fmt.Fprintln(errw, "deckard ingest: note: CycloneDX SBOM inventory is not a CVE scan; complete=false, existing findings cannot resolve")
+	}
+	req := &ingest.Request{Tool: f.tool, Scope: f.scope, Complete: !f.incomplete, ObservedAt: &observed, Findings: findings,
+		Artifacts: report.Artifacts, Relations: report.Relations}
 	if problems := ingest.Validate(req, ingest.Options{Now: time.Now()}); len(problems) > 0 {
 		return fail(ingestExitUsage, "the request would be rejected: %s", ingest.Summary(problems))
 	}
@@ -185,6 +221,9 @@ func runIngest(args []string, stdout, stderr io.Writer) int {
 	if f.verbose {
 		_, _ = fmt.Fprintf(errw, "deckard ingest: %d findings from %s (%s parser), %d bytes, complete=%v, observed_at=%s\n",
 			len(findings), src, f.format, len(body), req.Complete, observed.Format(time.RFC3339))
+		if artifactFormat {
+			_, _ = fmt.Fprintf(errw, "deckard ingest: %d artifact nodes, %d package relationships\n", len(report.Artifacts), len(report.Relations))
+		}
 	}
 	if f.dryRun {
 		var pretty bytes.Buffer
@@ -217,7 +256,7 @@ func ingestEndpoint(raw string) (string, error) {
 	return strings.TrimRight(u.String(), "/") + "/api/v1/ingest", nil
 }
 
-func readIngestInput(path string) ([]byte, string, error) {
+func readIngestInput(path string, limit int64) ([]byte, string, error) {
 	r := stdin
 	src := "stdin"
 	if path != "" && path != "-" {
@@ -228,12 +267,12 @@ func readIngestInput(path string) ([]byte, string, error) {
 		defer func() { _ = fh.Close() }()
 		r, src = fh, path
 	}
-	data, err := io.ReadAll(io.LimitReader(r, maxIngestInput+1))
+	data, err := io.ReadAll(io.LimitReader(r, limit+1))
 	if err != nil {
 		return nil, "", fmt.Errorf("read %s: %w", src, err)
 	}
-	if len(data) > maxIngestInput {
-		return nil, "", fmt.Errorf("%s is larger than %d MiB", src, maxIngestInput>>20)
+	if int64(len(data)) > limit {
+		return nil, "", fmt.Errorf("%s is larger than %d MiB", src, limit>>20)
 	}
 	return data, src, nil
 }

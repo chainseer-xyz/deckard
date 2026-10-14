@@ -1,5 +1,20 @@
 # Operations
 
+## Upgrade before enabling OSS topology and artifact imports
+
+Drain old inventory and ingest writers before enabling `sources[].topology` or
+posting native image reports. Upgrade every API, scheduler and worker instance.
+Older binaries do not take the new identity advisory lock and retain the old
+metadata scope-healing behavior. Mixed-version writes can bypass serialization
+or resolve metadata findings. An additive schema does not make those semantics
+rolling-compatible.
+
+For a single Deployment, use `deploymentStrategy.type: Recreate`. With separate
+workers, drain and upgrade both Deployments before enabling the new integrations.
+This release requires no database migration. Rollback can preserve stored data,
+but stop the new imports/topology before restoring old writers. Verify source
+health and retained CVEs before resuming scheduled collection.
+
 ## Upgrading source-attributed inventory facts
 
 Migration 12 adds source-attributed facts. Stop old inventory writers before

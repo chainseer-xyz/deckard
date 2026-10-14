@@ -67,6 +67,9 @@ func (s *Store) UpsertSnapshot(ctx context.Context, source string, assets []stor
 func (s *Store) applySnapshot(ctx context.Context, source string, assets []store.AssetUpsert, rels []model.RelationInput, now time.Time, remove bool) (store.InventoryDiff, error) {
 	var diff store.InventoryDiff
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		if err := lockInventoryIdentity(ctx, tx); err != nil {
+			return err
+		}
 		d, seen, err := upsertAssets(ctx, tx, modeSnapshot, source, assets, now, remove)
 		if err != nil {
 			return err
@@ -123,6 +126,9 @@ func (s *Store) applySnapshot(ctx context.Context, source string, assets []store
 func (s *Store) AddDiscovered(ctx context.Context, assets []store.AssetUpsert, rels []model.RelationInput, now time.Time) (store.InventoryDiff, error) {
 	var diff store.InventoryDiff
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		if err := lockInventoryIdentity(ctx, tx); err != nil {
+			return err
+		}
 		d, _, err := upsertAssets(ctx, tx, modeDiscover, "", assets, now, true)
 		if err != nil {
 			return err
@@ -238,6 +244,7 @@ func resolveOutOfScopeFindings(ctx context.Context, tx pgx.Tx, seen []int64, now
 	}
 	rows, err := tx.Query(ctx, `SELECT a.id FROM assets a
 		WHERE a.id = ANY($1::bigint[]) AND a.scope <> 'owned'
+		AND a.kind IN ('zone', 'hostname', 'ip', 'service', 'url')
 		AND EXISTS (SELECT 1 FROM findings f WHERE f.asset_id = a.id AND f.status IN ('open', 'acknowledged'))
 		ORDER BY a.id`, seen)
 	if err != nil {
@@ -304,6 +311,9 @@ func resolveFindings(ctx context.Context, tx pgx.Tx, ids []int64, now time.Time)
 func (s *Store) ReplaceDerived(ctx context.Context, assetID int64, origin string, assets []store.AssetUpsert, rels []model.RelationInput, now time.Time) (store.InventoryDiff, error) {
 	var diff store.InventoryDiff
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		if err := lockInventoryIdentity(ctx, tx); err != nil {
+			return err
+		}
 		var parentRemoved bool
 		if err := tx.QueryRow(ctx, `SELECT removed_at IS NOT NULL FROM assets WHERE id = $1 FOR UPDATE`, assetID).Scan(&parentRemoved); err != nil {
 			return notFound(err)
@@ -601,7 +611,7 @@ func upsertAssets(ctx context.Context, tx pgx.Tx, mode upsertMode, snap string, 
 		if err != nil {
 			return diff, nil, err
 		}
-		if resolveScopeTransitions && old.Scope == model.ScopeOwned && it.Scope != model.ScopeOwned {
+		if resolveScopeTransitions && model.NetworkKind(it.Kind) && old.Scope == model.ScopeOwned && it.Scope != model.ScopeOwned {
 			if err := resolveFindings(ctx, tx, []int64{upd.ID}, now); err != nil {
 				return diff, nil, fmt.Errorf("resolve out-of-scope findings for %s: %w", it.Key, err)
 			}

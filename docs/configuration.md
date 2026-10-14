@@ -251,6 +251,7 @@ sources:
   - { name: gcp, type: gcpdns, projects: [my-project-a] }          # Application Default Credentials
   - { name: prod, type: kubernetes, kubeconfig: /etc/deckard/kc, contexts: [prod] }
   - { name: this, type: kubernetes, in_cluster: true }
+  - { name: recon, type: bbot, discovery_file: /reports/bbot/output.json }
   - { name: extra, type: static, hostnames: [a.example.com], ips: [203.0.113.5], cidrs: [203.0.113.0/28] }
 ```
 
@@ -258,6 +259,51 @@ Cloudflare token permissions (all read-only): Zone:Read, DNS:Read, Load
 Balancers:Read, Account Settings:Read, Cloudflare Tunnel:Read.
 Features your plan does not include (Spectrum, Load Balancing) are skipped with
 a warning rather than failing the sync.
+
+### Kubernetes topology
+
+Set `sources[].topology: true` on a Kubernetes source to collect Service, Pod,
+direct controller and image relationships. It is off by default. With the Helm
+chart, also set `rbac.topology: true` to grant the additional reads:
+
+| API | Resource | Verb |
+| --- | --- | --- |
+| core | namespace `kube-system` only | `get` |
+| core | pods | `list` |
+| `discovery.k8s.io` | endpointslices | `list` |
+
+No Secrets, pod exec/logs or controller-spec permissions are required. Pod read
+access can still reveal literal environment values from the Kubernetes API;
+Deckard does not persist them. Denied or failed optional reads mark the sync
+partial and cannot remove unseen assets.
+
+The `kube-system` namespace UID identifies a cluster. When unavailable, a unique
+configured source/context identity is a partial fallback, not equivalent to the
+UID identity. Pods and direct controllers use object UIDs. Internal addresses
+remain outside the probe inventory. Only repository-qualified runtime manifest
+digests create image links. Tags and bare runtime config digests stay unresolved.
+Running Pods without a pullable manifest identity make topology partial, preserving
+previous registrations. Pending Pods without a pulled image remain metadata-only.
+Cross-namespace HTTPRoute backends remain partial until ReferenceGrant validation
+exists. Deployment/CronJob ancestors are not inferred from ReplicaSet/Job names.
+
+### BBOT report source
+
+`type: bbot` requires `discovery_file`, a regular NDJSON report file mounted
+read-only. Deckard reads at most `64 MiB` and `100,000` events per sync. Supported
+events are `DNS_NAME`, `IP_ADDRESS`, `URL` and `OPEN_TCP_PORT`; unknown event types
+do not establish inventory coverage. Malformed or oversized reports fail the
+whole sync without changing inventory.
+
+Every successful import is additive and reports a partial warning. BBOT EOF is
+not an authoritative inventory snapshot. Empty reports never remove assets.
+BBOT scope tags and distances cannot claim zones or IP ownership. URL credentials,
+queries and fragments are discarded. Only allowlisted provenance metadata is
+retained; discovery ancestry does not create guessed network relationships.
+Deckard does not install or execute BBOT.
+Use a distinct source name for each report producer. Source `LastOK` records a
+successful file import, not a fresh BBOT scan. Schedule report production and
+monitor its heartbeat separately; rereading an old file does not prove coverage.
 
 ### Overlapping inventory and discovery
 

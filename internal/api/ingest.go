@@ -201,6 +201,10 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 	if tc.Owned {
 		in.AssetScope = model.ScopeOwned
 	}
+	for _, artifact := range req.Artifacts {
+		in.Artifacts = append(in.Artifacts, model.AssetInput{Kind: artifact.Kind, Key: artifact.Key, Source: in.Source, Attrs: artifact.Attrs})
+	}
+	in.Relations = req.Relations
 	for i, f := range req.Findings {
 		it := store.IngestItem{Index: i, AssetKind: f.Asset.Kind, AssetKey: f.Asset.Key, Finding: model.FindingInput{
 			Key: f.Key, Severity: f.Severity, Title: f.Title, Description: f.Description,

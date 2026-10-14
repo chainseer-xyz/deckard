@@ -540,7 +540,7 @@ components:
         method: {type: string, enum: [none, token, cookie]}
         can_write: {type: boolean}
         csrf_token: {type: string, description: Present for cookie sessions}
-    AssetKind: {type: string, enum: [zone, hostname, ip, service, url, certificate, cloud_resource]}
+    AssetKind: {type: string, enum: [zone, hostname, ip, service, url, certificate, cloud_resource, workload, container_image, package]}
     ScopeClass: {type: string, enum: [owned, shared, external, excluded]}
     Severity: {type: string, enum: [info, low, medium, high, critical]}
     FindingStatus: {type: string, enum: [open, acknowledged, suppressed, false_positive, resolved]}
@@ -671,6 +671,38 @@ components:
         complete: {type: boolean, default: false, description: 'true asserts findings is everything the tool found in scope, so absent findings may resolve'}
         observed_at: {type: string, format: date-time, description: 'When the run happened; identifies the run (no more than 5 minutes in the future)'}
         findings: {type: array, maxItems: 5000, items: {$ref: '#/components/schemas/IngestFinding'}, description: 'Required; [] is an empty run. ingest.tools.<tool>.max_findings may lower the limit.'}
+        artifacts: {type: array, maxItems: 5000, items: {$ref: '#/components/schemas/IngestArtifact'}, description: 'Additive inventory, never removed by finding completeness'}
+        relations: {type: array, maxItems: 10000, items: {$ref: '#/components/schemas/IngestArtifactRelation'}}
+    IngestArtifact:
+      type: object
+      additionalProperties: false
+      required: [kind, key]
+      properties:
+        kind: {type: string, enum: [container_image, package]}
+        key: {type: string, maxLength: 512, description: 'Canonical sha256 manifest digest or canonical versioned package URL'}
+        attrs:
+          type: object
+          additionalProperties: false
+          description: 'At most 16 KiB; digest/purl must match key, repositories must reference the same manifest'
+          properties:
+            digest: {type: string}
+            purl: {type: string}
+            name: {type: string, maxLength: 512}
+            version: {type: string, maxLength: 512}
+            type: {type: string, maxLength: 512}
+            scanner_version: {type: string, maxLength: 512}
+            repositories: {type: array, maxItems: 20, items: {type: string, maxLength: 512}}
+    IngestArtifactRelation:
+      type: object
+      additionalProperties: false
+      required: [from_kind, from_key, to_kind, to_key, type]
+      description: 'Both endpoints must appear in artifacts; only image contains package is accepted'
+      properties:
+        from_kind: {type: string, enum: [container_image]}
+        from_key: {type: string, maxLength: 512}
+        to_kind: {type: string, enum: [package]}
+        to_key: {type: string, maxLength: 512}
+        type: {type: string, enum: [contains]}
     IngestFinding:
       type: object
       additionalProperties: false
@@ -688,10 +720,12 @@ components:
       type: object
       additionalProperties: false
       description: >-
-        Either kind and key (created with source ingest:<tool> when missing; only cloud_resource, a kind deckard never
-        probes) or ref (an existing, live, owned asset of any kind, never modified).
+        Either kind and key (created with source ingest:<tool> when missing; only cloud_resource,
+        container_image or package, kinds Deckard never probes) or ref (an existing, live, owned asset,
+        never modified). Image/package findings require a matching artifacts entry.
+        Exact, unambiguous authoritative ARNs can attach to native cloud inventory.
       properties:
-        kind: {type: string, enum: [cloud_resource]}
+        kind: {type: string, enum: [cloud_resource, container_image, package]}
         key: {type: string, minLength: 1, maxLength: 512}
         ref:
           type: object

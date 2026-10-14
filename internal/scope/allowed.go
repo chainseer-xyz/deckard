@@ -32,6 +32,9 @@ func Allowed(tier model.Tier, class model.ScopeClass) bool {
 // only be probed by hostname (hostname, zone, URL), never by IP or service
 // endpoint.
 func AllowedFor(kind model.AssetKind, tier model.Tier, class model.ScopeClass) bool {
+	if !model.NetworkKind(kind) {
+		return false
+	}
 	if !Allowed(tier, class) {
 		return false
 	}
