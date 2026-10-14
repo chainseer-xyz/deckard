@@ -487,7 +487,8 @@ describe('Asset detail', () => {
     const props = await panel('Properties');
     expect(props.getByText('hostname')).toBeInTheDocument();
     expect(props.getByText('owned')).toBeInTheDocument();
-    expect(props.getByText(/passive, active and intrusive checks/)).toBeInTheDocument();
+    expect(props.getByText(/eligible asset kinds and enabled scan profiles/)).toBeInTheDocument();
+    expect(props.queryByText(/runs passive, active and intrusive checks/)).not.toBeInTheDocument();
     expect(props.getByRole('link', { name: 'cloudflare' })).toHaveAttribute('href', '/inventory?source=cloudflare');
     expect(props.getByRole('link', { name: 'example.com' })).toHaveAttribute('href', '/inventory?zone=example.com');
     expect(props.getByText(/30d ago/)).toBeInTheDocument(); // first seen
