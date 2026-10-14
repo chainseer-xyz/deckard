@@ -289,7 +289,7 @@ exists. Deployment/CronJob ancestors are not inferred from ReplicaSet/Job names.
 
 ### BBOT report source
 
-`type: bbot` requires `discovery_file`, a regular NDJSON report file mounted
+`type: bbot` accepts `discovery_file`, a regular NDJSON report file mounted
 read-only. Deckard reads at most `64 MiB` and `100,000` events per sync. Supported
 events are `DNS_NAME`, `IP_ADDRESS`, `URL` and `OPEN_TCP_PORT`; unknown event types
 do not establish inventory coverage. Malformed or oversized reports fail the
@@ -300,10 +300,17 @@ not an authoritative inventory snapshot. Empty reports never remove assets.
 BBOT scope tags and distances cannot claim zones or IP ownership. URL credentials,
 queries and fragments are discarded. Only allowlisted provenance metadata is
 retained; discovery ancestry does not create guessed network relationships.
-Deckard does not install or execute BBOT.
+Alternatively, set `remote_only: true` without `discovery_file`. A scoped producer
+posts native NDJSON to `POST /api/v1/discovery/{source}` through
+`deckard discovery ingest`. The API limits reports to `10 MiB`. Set
+`report_interval` to the collector schedule (`6h` by default). Remote sources do
+not run server-side file syncs. The optional Helm collector executes a fixed
+passive BBOT profile in a separate Job, never inside the application process.
 Use a distinct source name for each report producer. Source `LastOK` records a
 successful file import, not a fresh BBOT scan. Schedule report production and
 monitor its heartbeat separately; rereading an old file does not prove coverage.
+See [Collectors and isolated assessments](collectors.md) for schedules,
+credentials, exact coverage and containment requirements.
 
 ### Overlapping inventory and discovery
 
@@ -1004,6 +1011,27 @@ ingest:
 ```
 
 The `ingest:` source-name prefix and the `ext.` plugin-name prefix are reserved.
+
+`ingest.credentials` defines dedicated exact tool/scope or remote-discovery grants.
+Its token values must differ from the admin token and other producer tokens.
+`ingest.tools.<tool>.expected_report_interval` measures accepted delivery, including
+incomplete reports. `expected_interval` still measures complete reconciliation.
+They are not interchangeable. See [producer credential examples](collectors.md#credentials).
+
+## Isolated assessments
+
+`assessment.enabled` defaults to `false`. Explicit API/UI requests can run pinned
+ZGrab2, ZAP or constrained Strix Jobs against current owned inventory targets.
+The default budgets are `16` retained sessions, `2` running sessions, `15m`,
+`500` target requests, `8 MiB` request bytes and `32 MiB` response bytes.
+Session admission expires completed status records; durable findings remain.
+
+Enabling requires immutable images, an isolated namespace, Pod IP broker settings
+and an operator-verified `network_policy_enforced: true`. Helm also requires
+one API replica, `Recreate` and NetworkPolicy. No run inherits cloud, admin or
+Kubernetes credentials. ZAP, Strix and ZGrab2 results never resolve findings by
+absence. Read [the full assessment contract](collectors.md#isolated-assessments)
+before enabling execution or target authentication.
 
 ## Alerting
 

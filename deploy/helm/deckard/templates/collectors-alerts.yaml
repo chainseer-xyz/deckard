@@ -1,0 +1,47 @@
+{{- $root := . -}}
+{{- $collectors := .Values.collectors | default dict -}}
+{{- $alerts := $collectors.alerts | default dict -}}
+{{- if and $collectors.enabled $alerts.enabled $collectors.jobs }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "deckard.fullname" . }}-collectors
+  labels:
+    {{- include "deckard.labels" . | nindent 4 }}
+    {{- with $alerts.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: deckard-collectors
+      rules:
+        {{- range $job := $collectors.jobs }}
+        {{- if ne (toString $job.enabled) "false" }}
+        {{- $name := include "deckard.collectorName" (dict "root" $root "job" $job) }}
+        - alert: DeckardCollectorStale
+          # Job success includes a successful Deckard ingest. A failed scanner,
+          # report guard or upload cannot advance this heartbeat. Requires KSM.
+          expr: >-
+            (time() - (max(kube_cronjob_status_last_successful_time{namespace={{ $root.Release.Namespace | quote }},cronjob={{ $name | quote }}})
+            or max(kube_cronjob_created{namespace={{ $root.Release.Namespace | quote }},cronjob={{ $name | quote }}})))
+            > {{ default (default 172800 $alerts.maxAgeSeconds) $job.maxAgeSeconds }}
+            and on() max(kube_cronjob_spec_suspend{namespace={{ $root.Release.Namespace | quote }},cronjob={{ $name | quote }}}) == 0
+          for: 15m
+          labels: {severity: warning, namespace: {{ $root.Release.Namespace | quote }}, collector: {{ $job.name | quote }}}
+          annotations:
+            summary: {{ printf "Deckard collector %s has no recent successful ingest" $job.name | quote }}
+            description: "Check the CronJob, scanner and ingest logs. Failed or incomplete work must not certify clean findings."
+        - alert: DeckardCollectorFailed
+          expr: >-
+            max(kube_job_created{namespace={{ $root.Release.Namespace | quote }}}
+            * on(namespace,job_name) (kube_job_status_failed{namespace={{ $root.Release.Namespace | quote }}} > bool 0)
+            * on(namespace,job_name) group_left() kube_job_owner{namespace={{ $root.Release.Namespace | quote }},owner_kind="CronJob",owner_name={{ $name | quote }}})
+            > (max(kube_cronjob_status_last_successful_time{namespace={{ $root.Release.Namespace | quote }},cronjob={{ $name | quote }}}) or vector(0))
+          for: 5m
+          labels: {severity: warning, namespace: {{ $root.Release.Namespace | quote }}, collector: {{ $job.name | quote }}}
+          annotations:
+            summary: {{ printf "Deckard collector %s failed after its last successful ingest" $job.name | quote }}
+            description: "A scanner or upload failed. Inspect the Job; no fresh complete report has been applied."
+        {{- end }}
+        {{- end }}
+{{- end }}

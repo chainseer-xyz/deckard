@@ -1,0 +1,9 @@
+**
+!deploy
+deploy/**
+!deploy/assessment
+deploy/assessment/**
+!deploy/assessment/Dockerfile.zgrab2
+!deploy/assessment/zgrab2.go.mod
+!deploy/assessment/zgrab2.go.sum
+!deploy/assessment/ZGRAB2-SECURITY.md

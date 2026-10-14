@@ -63,6 +63,20 @@ spec:
   egress:
     - {}
   ingress:
+    {{- if dig "assessment" "enabled" false .Values.config }}
+    # This private listener is never a Service or ingress route. Only managed
+    # runners in the explicitly isolated namespace may reach the broker.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ dig "assessment" "namespace" "deckard-assessments" .Values.config | quote }}
+              deckard.io/assessment-isolated: "true"
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: deckard-assessment
+      ports:
+        - { port: 9092, protocol: TCP }
+    {{- end }}
     # API/UI: same namespace, the ingress controller, plus any ingressFrom extras.
     - from:
         - podSelector: {}

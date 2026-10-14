@@ -1,0 +1,401 @@
+{{/* Collectors deliberately do not use deckard.selectorLabels: the server's
+     open-egress NetworkPolicy must never select these restricted jobs. */}}
+{{- define "deckard.collectorName" -}}
+{{- $prefix := include "deckard.fullname" .root -}}
+{{- if gt (len $prefix) 23 -}}
+{{- $prefix = printf "%s-%s" ($prefix | trunc 16 | trimSuffix "-") (sha256sum $prefix | trunc 6) -}}
+{{- end -}}
+{{- printf "%s-collect-%s" $prefix .job.name -}}
+{{- end -}}
+{{- define "deckard.collectorInstance" -}}
+{{/* Helm release names have at most 53 characters. Appending to at most 52
+     produces a distinct valid label, even if nameOverride collides with name. */}}
+{{- printf "%s-collectors" (.Release.Name | trunc 52 | trimSuffix "-") -}}
+{{- end -}}
+{{- define "deckard.collectorLabels" -}}
+helm.sh/chart: {{ include "deckard.chart" .root }}
+app.kubernetes.io/name: {{ printf "%s-collector" (include "deckard.name" .root) | trunc 63 | trimSuffix "-" }}
+app.kubernetes.io/instance: {{ include "deckard.collectorInstance" .root }}
+app.kubernetes.io/managed-by: {{ .root.Release.Service }}
+app.kubernetes.io/component: collector
+deckard.io/collector: {{ .job.name | quote }}
+{{- end -}}
+{{- define "deckard.collectorSecurity" -}}
+allowPrivilegeEscalation: false
+readOnlyRootFilesystem: true
+capabilities:
+  drop: [ALL]
+{{- end -}}
+{{- define "deckard.collectorPinnedImage" -}}
+{{- if or (not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._:/-]*@sha256:[a-f0-9]{64}$" (toString .))) (contains "://" (toString .)) -}}
+{{- fail "collectors images and Trivy targets must use an immutable repository@sha256:<64 lowercase hex> reference" -}}
+{{- end -}}
+{{- end -}}
+{{- define "deckard.collectorURL" -}}
+{{- if not (regexMatch "^https?://[^/@?#[:space:]]+(/[^?#[:space:]]*)?$" (toString .)) -}}
+{{- fail "collector URLs must use http(s) without credentials, query strings or fragments" -}}
+{{- end -}}
+{{- end -}}
+{{- $root := . -}}
+{{- $collectors := .Values.collectors | default dict -}}
+{{- if $collectors.enabled -}}
+{{- $ingest := $collectors.ingest | default dict -}}
+{{- $ingestImage := required "collectors.ingest.image is required" $ingest.image -}}
+{{- include "deckard.collectorPinnedImage" $ingestImage -}}
+{{- $globalToken := $ingest.tokenSecretRef | default dict -}}
+{{- $url := default (printf "http://%s.%s.svc:%v" (include "deckard.fullname" .) .Release.Namespace .Values.service.port) $ingest.url -}}
+{{- include "deckard.collectorURL" $url -}}
+{{- $seen := dict -}}
+{{- range $job := $collectors.jobs -}}
+{{- if ne (toString $job.enabled) "false" -}}
+{{- $name := required "collectors.jobs[].name is required" $job.name -}}
+{{- $token := $globalToken -}}
+{{- if hasKey $job "tokenSecretRef" -}}{{- $token = $job.tokenSecretRef | default dict -}}{{- end -}}
+{{- $tokenName := required "collector tokenSecretRef.name is required (use a dedicated ingest token, never the administrator token)" $token.name -}}
+{{- if not (regexMatch "^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$" $name) -}}{{- fail "collector name must be a DNS label of at most 20 characters" -}}{{- end -}}
+{{- if hasKey $seen $name -}}{{- fail "collector names must be unique" -}}{{- end -}}
+{{- $_ := set $seen $name true -}}
+{{- if not (has $job.type (list "trivy" "trivy-runtime" "kubescape" "prowler-app" "bbot" "tetragon")) -}}{{- fail "collector type must be trivy, trivy-runtime, kubescape, prowler-app, bbot or tetragon" -}}{{- end -}}
+{{- $image := default "" $job.image -}}
+{{- if eq $job.type "tetragon" -}}
+{{- $image = default $ingestImage $job.image -}}
+{{- include "deckard.collectorPinnedImage" $image -}}
+{{- else if ne $job.type "prowler-app" -}}
+{{- $image = required "collector image is required" $job.image -}}
+{{- include "deckard.collectorPinnedImage" $image -}}
+{{- end -}}
+{{- if eq $job.type "trivy" -}}
+{{- include "deckard.collectorPinnedImage" (required "Trivy collector target is required" $job.target) -}}
+{{- if and $job.platform (not (has $job.platform (list "linux/amd64" "linux/arm64"))) -}}{{- fail "Trivy platform must be linux/amd64 or linux/arm64" -}}{{- end -}}
+{{- end -}}
+{{- if eq $job.type "prowler-app" -}}
+{{- include "deckard.collectorURL" (required "prowler-app collector apiURL is required" $job.apiURL) -}}
+{{- end -}}
+{{- if eq $job.type "trivy-runtime" -}}
+{{- if eq (not (empty $job.namespaces)) (eq (toString $job.allNamespaces) "true") -}}{{- fail "trivy-runtime requires namespaces or allNamespaces, never both" -}}{{- end -}}
+{{- if not (regexMatch "^k8s:uid:[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}:runtime-images$" (default "" $job.clusterScope)) -}}{{- fail "trivy-runtime clusterScope must use k8s:uid:<UUID>:runtime-images" -}}{{- end -}}
+{{- if gt (len ($job.namespaces | default list)) 128 -}}{{- fail "trivy-runtime supports at most 128 explicit namespaces" -}}{{- end -}}
+{{- range $namespace := $job.namespaces -}}
+{{- if or (gt (len $namespace) 63) (not (regexMatch "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" $namespace)) -}}{{- fail "trivy-runtime namespaces must be explicit DNS labels" -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if eq $job.type "tetragon" -}}
+{{- $namespace := default "" $job.sensorNamespace -}}
+{{- if or (gt (len $namespace) 63) (not (regexMatch "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" $namespace)) -}}{{- fail "Tetragon sensorNamespace must be an explicit DNS label" -}}{{- end -}}
+{{- $_ := required "Tetragon sensorSelector is required" $job.sensorSelector -}}
+{{- if and $job.sensorContainer (ne $job.sensorContainer "export-stdout") -}}{{- fail "Tetragon sensorContainer must be export-stdout" -}}{{- end -}}
+{{- if not (regexMatch "^k8s:uid:[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$" (default "" $job.clusterScope)) -}}{{- fail "Tetragon clusterScope must use k8s:uid:<UUID>" -}}{{- end -}}
+{{- end -}}
+{{- if eq $job.type "bbot" -}}
+{{- $_ := required "BBOT collector source is required (register a remote-only BBOT source)" $job.source -}}
+{{- if or (lt (len ($job.targets | default list)) 1) (gt (len $job.targets) 16) -}}{{- fail "BBOT requires 1 to 16 explicit DNS targets" -}}{{- end -}}
+{{- range $target := $job.targets -}}
+{{- if or (gt (len $target) 253) (not (regexMatch "^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$" $target)) -}}{{- fail "BBOT targets must be DNS names, not URLs, IPs, CIDRs or wildcards" -}}{{- end -}}
+{{- end -}}
+{{- if or (lt (len ($job.modules | default list)) 1) (gt (len $job.modules) 3) -}}{{- fail "BBOT modules must be a nonempty subset of crt, certspotter, hackertarget" -}}{{- end -}}
+{{- range $module := $job.modules -}}
+{{- if not (has $module (list "crt" "certspotter" "hackertarget")) -}}{{- fail "BBOT modules must be a nonempty subset of crt, certspotter, hackertarget" -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- range $field := list "startingDeadlineSeconds" "activeDeadlineSeconds" "ttlSecondsAfterFinished" "maxAgeSeconds" -}}
+{{- if and (hasKey $job $field) (le (int (index $job $field)) 0) -}}{{- fail "collector deadlines and TTL must be positive" -}}{{- end -}}
+{{- end -}}
+{{- range $resources := list ($job.resources | default dict) ($job.ingestResources | default dict) -}}
+{{- if hasKey ($resources.limits | default dict) "cpu" -}}{{- fail "collector resources.limits.cpu must not be set" -}}{{- end -}}
+{{- end -}}
+{{- $ctx := dict "root" $root "job" $job -}}
+{{- $resourceName := include "deckard.collectorName" $ctx -}}
+{{- $scannerResources := mergeOverwrite (dict "requests" (dict "cpu" "250m" "memory" "512Mi" "ephemeral-storage" "1Gi") "limits" (dict "memory" "2Gi" "ephemeral-storage" "5Gi")) ($job.resources | default dict) -}}
+{{- if eq $job.type "tetragon" -}}
+{{- $scannerResources = mergeOverwrite (dict "requests" (dict "cpu" "50m" "memory" "128Mi" "ephemeral-storage" "64Mi") "limits" (dict "memory" "512Mi" "ephemeral-storage" "256Mi")) ($job.resources | default dict) -}}
+{{- end -}}
+{{- $uploadResources := mergeOverwrite (dict "requests" (dict "cpu" "50m" "memory" "128Mi") "limits" (dict "memory" "512Mi")) ($job.ingestResources | default dict) -}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $resourceName }}
+  labels: {{- include "deckard.collectorLabels" $ctx | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $resourceName }}
+  labels: {{- include "deckard.collectorLabels" $ctx | nindent 4 }}
+spec:
+  schedule: {{ required "collector schedule is required" $job.schedule | quote }}
+  concurrencyPolicy: Forbid
+  suspend: {{ default false $job.suspend }}
+  startingDeadlineSeconds: {{ default 600 $job.startingDeadlineSeconds }}
+  successfulJobsHistoryLimit: {{ if hasKey $job "successfulJobsHistoryLimit" }}{{ $job.successfulJobsHistoryLimit }}{{ else }}2{{ end }}
+  failedJobsHistoryLimit: {{ if hasKey $job "failedJobsHistoryLimit" }}{{ $job.failedJobsHistoryLimit }}{{ else }}2{{ end }}
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: {{ default (ternary 300 (ternary 3000 1800 (eq $job.type "trivy-runtime")) (eq $job.type "tetragon")) $job.activeDeadlineSeconds }}
+      ttlSecondsAfterFinished: {{ default 86400 $job.ttlSecondsAfterFinished }}
+      template:
+        metadata:
+          labels: {{- include "deckard.collectorLabels" $ctx | nindent 12 }}
+        spec:
+          serviceAccountName: {{ $resourceName }}
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          terminationGracePeriodSeconds: 30
+          {{- if eq $job.type "bbot" }}
+          # The pinned upstream BBOT 3.0.2 index publishes linux/amd64 only.
+          nodeSelector: {kubernetes.io/os: linux, kubernetes.io/arch: amd64}
+          {{- end }}
+          {{- with $root.Values.imagePullSecrets }}
+          imagePullSecrets: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile: {type: RuntimeDefault}
+          {{- if ne $job.type "prowler-app" }}
+          initContainers:
+            - name: scanner
+              image: {{ $image | quote }}
+              imagePullPolicy: IfNotPresent
+              # A nonzero scanner exit or an empty/oversized report stops the
+              # init container. No upload container starts on that path.
+              {{- if has $job.type (list "trivy-runtime" "tetragon") }}
+              command: ["/usr/local/bin/deckard"]
+              {{- else }}
+              command: [{{ if eq $job.type "kubescape" }}"/busybox/sh"{{ else }}"/bin/sh"{{ end }}, "-ec"]
+              {{- end }}
+              workingDir: /tmp
+              args:
+                {{- if eq $job.type "trivy-runtime" }}
+                - images
+                - collect
+                - --cluster-scope
+                - {{ $job.clusterScope | quote }}
+                {{- if $job.allNamespaces }}
+                - --all-namespaces
+                {{- else }}
+                - --namespaces
+                - {{ join "," $job.namespaces | quote }}
+                {{- end }}
+                - --timeout
+                - 45m
+                - --output
+                - /report/request.json
+                {{- if $job.registryAuthSecretRef }}
+                - --registry-auth-dir
+                - /registry
+                {{- end }}
+                {{- else if eq $job.type "tetragon" }}
+                - runtime
+                - collect
+                - --provider
+                - tetragon
+                - --namespace
+                - {{ $job.sensorNamespace | quote }}
+                - --selector
+                - {{ $job.sensorSelector | quote }}
+                - --container
+                - export-stdout
+                - --cluster-scope
+                - {{ $job.clusterScope | quote }}
+                - --lookback
+                - 6m
+                - --collect-timeout
+                - 1m
+                - --timeout
+                - 2m
+                - --output
+                - /report/request.json
+                {{- else }}
+                - |-
+                  umask 077
+                  "$@"
+                  test -s /report/{{ if eq $job.type "bbot" }}output{{ else }}result{{ end }}.json
+                  bytes=$(wc -c < /report/{{ if eq $job.type "bbot" }}output{{ else }}result{{ end }}.json)
+                  test "$bytes" -le {{ if eq $job.type "bbot" }}10485760{{ else }}67108864{{ end }}
+                - --
+                {{- if eq $job.type "trivy" }}
+                - trivy
+                - image
+                - --image-src
+                - remote
+                - --platform
+                - {{ required "Trivy collector platform is required (use a distinct scope per platform)" $job.platform | quote }}
+                - --scanners
+                - vuln
+                - --format
+                - json
+                - --output
+                - /report/result.json
+                - --cache-dir
+                - /tmp/trivy
+                - --exit-code
+                - "0"
+                - --timeout
+                - {{ default "20m" $job.scanTimeout | quote }}
+                - {{ $job.target | quote }}
+                {{- else if eq $job.type "bbot" }}
+                - python
+                - /collector/collect.py
+                {{- else }}
+                - kubescape
+                - scan
+                - framework
+                - nsa,mitre
+                - --use-default
+                - --keep-local
+                - --submit=false
+                - --host-scan=false
+                - --scan-images=false
+                - --format
+                - json
+                - --format-version
+                - v2
+                - --output
+                - /report/result.json
+                - --exclude-kinds
+                - Secret,ConfigMap
+                - --cluster-name
+                - {{ required "collector scope is required" $job.scope | quote }}
+                {{- with $job.namespaces }}
+                - --include-namespaces
+                - {{ join "," . | quote }}
+                {{- end }}
+                {{- end }}
+                {{- end }}
+              env:
+                - {name: HOME, value: {{ if eq $job.type "kubescape" }}/home/nonroot{{ else }}/tmp{{ end }}}
+              securityContext: {{- include "deckard.collectorSecurity" . | nindent 16 }}
+              resources: {{- toYaml $scannerResources | nindent 16 }}
+              volumeMounts:
+                - {name: report, mountPath: /report}
+                - {name: scratch, mountPath: /tmp}
+                {{- if has $job.type (list "kubescape" "trivy-runtime" "tetragon") }}
+                - {name: kube-api, mountPath: /var/run/secrets/kubernetes.io/serviceaccount, readOnly: true}
+                {{- end }}
+                {{- if and (eq $job.type "trivy-runtime") $job.registryAuthSecretRef }}
+                - {name: registry-auth, mountPath: /registry, readOnly: true}
+                {{- end }}
+                {{- if eq $job.type "bbot" }}
+                - {name: collector-code, mountPath: /collector, readOnly: true}
+                {{- end }}
+          {{- end }}
+          containers:
+            - name: ingest
+              image: {{ $ingestImage | quote }}
+              imagePullPolicy: IfNotPresent
+              args:
+                {{- if has $job.type (list "trivy-runtime" "tetragon") }}
+                - {{ ternary "runtime" "images" (eq $job.type "tetragon") }}
+                - upload
+                - --file
+                - /report/request.json
+                - --cluster-scope
+                - {{ $job.clusterScope | quote }}
+                {{- else if eq $job.type "bbot" }}
+                - discovery
+                - ingest
+                - --source
+                - {{ $job.source | quote }}
+                - --file
+                - /report/output.json
+                {{- else }}
+                - ingest
+                {{- if eq $job.type "prowler-app" }}
+                - prowler-app
+                - --api-url
+                - {{ required "prowler-app collector apiURL is required" $job.apiURL | quote }}
+                - --api-key-env
+                - PROWLER_API_KEY
+                - --max-scan-age
+                - {{ default "48h" $job.maxScanAge | quote }}
+                - --min-severity
+                - {{ default "medium" $job.minSeverity | quote }}
+                - --max-requests
+                - {{ default 1000 $job.maxRequests | quote }}
+                - --include-muted={{ default false $job.includeMuted }}
+                {{- with $job.providerTypes }}
+                - --provider-type
+                - {{ join "," . | quote }}
+                {{- end }}
+                {{- with $job.providerUIDs }}
+                - --provider-uid
+                - {{ join "," . | quote }}
+                {{- end }}
+                {{- else }}
+                - --tool
+                - {{ $job.type }}
+                - --scope
+                - {{ required "collector scope is required" $job.scope | quote }}
+                - --file
+                - /report/result.json
+                {{- end }}
+                {{- end }}
+                - --url
+                - {{ $url | quote }}
+                - --token-env
+                - DECKARD_TOKEN
+                - --timeout
+                - {{ if eq $job.type "prowler-app" }}{{ default "15m" $job.pullTimeout | quote }}{{ else }}{{ default "2m" $ingest.timeout | quote }}{{ end }}
+                {{- if eq $job.type "kubescape" }}
+                # Excluding Secret/ConfigMap and host data cannot certify a
+                # complete cluster assessment. Never resolve missing findings.
+                - --incomplete
+                {{- end }}
+              env:
+                - name: DECKARD_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $tokenName | quote }}
+                      key: {{ default "token" $token.key | quote }}
+                {{- if eq $job.type "prowler-app" }}
+                {{- $apiKey := $job.apiKeySecretRef | default dict }}
+                - name: PROWLER_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ required "prowler-app collector apiKeySecretRef.name is required" $apiKey.name | quote }}
+                      key: {{ default "api-key" $apiKey.key | quote }}
+                {{- end }}
+              securityContext: {{- include "deckard.collectorSecurity" . | nindent 16 }}
+              resources: {{- toYaml $uploadResources | nindent 16 }}
+              {{- if ne $job.type "prowler-app" }}
+              volumeMounts:
+                - {name: report, mountPath: /report, readOnly: true}
+              {{- end }}
+          {{- if ne $job.type "prowler-app" }}
+          volumes:
+            - name: report
+              emptyDir: {sizeLimit: 64Mi}
+            - name: scratch
+              emptyDir: {sizeLimit: {{ default (ternary "64Mi" "4Gi" (eq $job.type "tetragon")) $job.scratchSizeLimit }}}
+            {{- if eq $job.type "bbot" }}
+            - name: collector-code
+              configMap: {name: {{ $resourceName }}, defaultMode: 0444}
+            {{- end }}
+            {{- if and (eq $job.type "trivy-runtime") $job.registryAuthSecretRef }}
+            - name: registry-auth
+              secret:
+                secretName: {{ required "trivy-runtime registryAuthSecretRef.name is required" $job.registryAuthSecretRef.name | quote }}
+                defaultMode: 0440
+                items: [{key: {{ default ".dockerconfigjson" $job.registryAuthSecretRef.key | quote }}, path: config.json}]
+            {{- end }}
+            {{- if has $job.type (list "kubescape" "trivy-runtime" "tetragon") }}
+            - name: kube-api
+              projected:
+                defaultMode: 0440
+                sources:
+                  - serviceAccountToken: {path: token, expirationSeconds: 3600}
+                  - configMap:
+                      name: kube-root-ca.crt
+                      items: [{key: ca.crt, path: ca.crt}]
+                  - downwardAPI:
+                      items: [{path: namespace, fieldRef: {apiVersion: v1, fieldPath: metadata.namespace}}]
+            {{- end }}
+          {{- end }}
+{{- end -}}
+{{- end -}}
+{{- end -}}

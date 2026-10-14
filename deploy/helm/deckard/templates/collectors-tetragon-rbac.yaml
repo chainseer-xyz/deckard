@@ -1,0 +1,33 @@
+{{- $root := . -}}
+{{- $collectors := .Values.collectors | default dict -}}
+{{- if $collectors.enabled -}}
+{{- range $job := $collectors.jobs -}}
+{{- if and (ne (toString $job.enabled) "false") (eq $job.type "tetragon") -}}
+{{- $ctx := dict "root" $root "job" $job -}}
+{{- $name := include "deckard.collectorName" $ctx -}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ required "Tetragon sensorNamespace must be an explicit DNS label" $job.sensorNamespace | quote }}
+  labels: {{- include "deckard.collectorLabels" $ctx | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [list]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ $job.sensorNamespace | quote }}
+  labels: {{- include "deckard.collectorLabels" $ctx | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ $name }}}
+subjects: [{kind: ServiceAccount, name: {{ $name }}, namespace: {{ $root.Release.Namespace }}}]
+{{- end -}}
+{{- end -}}
+{{- end -}}

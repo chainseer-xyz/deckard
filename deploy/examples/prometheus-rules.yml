@@ -4,16 +4,21 @@ groups:
   - name: deckard-health
     rules:
       - alert: DeckardSourceSyncStale
-        expr: time() - deckard_source_last_success_timestamp > 3600
+        expr: |
+          (time() - max by(source) (deckard_source_last_success_timestamp))
+            > on(source) (3 * max by(source) (deckard_source_expected_interval_seconds))
+          and on(source) max by(source) (deckard_source_last_success_timestamp) > 0
         for: 10m
         labels:
           severity: high
         annotations:
-          summary: "deckard source {{ $labels.source }} has not synced for over an hour"
+          summary: "deckard source {{ $labels.source }} missed three configured sync or report intervals"
           description: "Inventory from {{ $labels.source }} is stale, so new assets are not being scanned."
 
       - alert: DeckardSourceNeverSynced
-        expr: deckard_source_last_success_timestamp == 0
+        expr: |
+          max by(source) (deckard_source_expected_interval_seconds)
+            unless on(source) (deckard_source_last_success_timestamp > 0)
         for: 30m
         labels:
           severity: medium

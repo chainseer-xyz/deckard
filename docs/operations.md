@@ -15,6 +15,15 @@ This release requires no database migration. Rollback can preserve stored data,
 but stop the new imports/topology before restoring old writers. Verify source
 health and retained CVEs before resuming scheduled collection.
 
+Optional collectors and assessments have separate credentials and isolation
+requirements. Follow [Collectors and isolated assessments](collectors.md). Never
+mark CNI containment verified from chart renders or local Docker fixtures alone.
+
+Source staleness uses three configured sync/report intervals, aggregated across
+replicas. A remote six-hour collector is not stale after thirty minutes. Never-seen
+configured sources remain visible and alert separately. Collector report freshness
+does not certify complete scanner coverage or lossless runtime telemetry.
+
 ## Upgrading source-attributed inventory facts
 
 Migration 12 adds source-attributed facts. Stop old inventory writers before

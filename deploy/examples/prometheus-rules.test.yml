@@ -1,0 +1,39 @@
+rule_files: [prometheus-rules.yml]
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      - series: deckard_source_last_success_timestamp{source="native",instance="api"}
+        values: 1+0x120
+      - series: deckard_source_last_success_timestamp{source="native",instance="worker"}
+        values: 1+0x120
+      - series: deckard_source_expected_interval_seconds{source="native",instance="api"}
+        values: 600+0x120
+      - series: deckard_source_expected_interval_seconds{source="native",instance="worker"}
+        values: 600+0x120
+      - series: deckard_source_last_success_timestamp{source="recon",instance="api"}
+        values: 1+0x120
+      - series: deckard_source_last_success_timestamp{source="recon",instance="worker"}
+        values: 1+0x120
+      - series: deckard_source_expected_interval_seconds{source="recon",instance="api"}
+        values: 21600+0x120
+      - series: deckard_source_expected_interval_seconds{source="recon",instance="worker"}
+        values: 21600+0x120
+      - series: deckard_source_expected_interval_seconds{source="unseen",instance="api"}
+        values: 600+0x120
+      - series: deckard_source_expected_interval_seconds{source="unseen",instance="worker"}
+        values: 600+0x120
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: DeckardSourceSyncStale
+        exp_alerts:
+          - exp_labels: {source: native, severity: high}
+            exp_annotations:
+              summary: deckard source native missed three configured sync or report intervals
+              description: Inventory from native is stale, so new assets are not being scanned.
+      - eval_time: 31m
+        alertname: DeckardSourceNeverSynced
+        exp_alerts:
+          - exp_labels: {source: unseen, severity: medium}
+            exp_annotations:
+              summary: deckard source unseen has never synced successfully

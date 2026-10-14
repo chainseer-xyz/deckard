@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1.7
+# Resolve DECKARD_IMAGE to this release's verified slim digest before building.
+ARG DECKARD_IMAGE
+FROM ${DECKARD_IMAGE} AS deckard
+
+FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine AS scanner
+ARG TARGETOS
+ARG TARGETARCH
+SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
+RUN apk add --no-cache git
+WORKDIR /src
+RUN git clone --depth 1 --branch v1.0.0 https://github.com/zmap/zgrab2.git . \
+ && test "$(git rev-parse HEAD)" = ea734bcf60ef2921684cb522dfb87a07a322afa6
+# Explicit reviewed downstream dependency lock; upstream scanner source is intact.
+COPY deploy/assessment/zgrab2.go.mod /src/go.mod
+COPY deploy/assessment/zgrab2.go.sum /src/go.sum
+COPY deploy/assessment/ZGRAB2-SECURITY.md /out/licenses/zgrab2/DECKARD-SECURITY.md
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    go mod verify \
+ && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -mod=readonly -trimpath -ldflags="-s -w" -o /out/zgrab2 ./cmd/zgrab2 \
+ && mkdir -p /out/licenses/zgrab2 \
+ && cp LICENSE /out/licenses/zgrab2/LICENSE \
+ && cp lib/smb/LICENSE /out/licenses/zgrab2/lib-smb-LICENSE \
+ && cp /usr/local/go/LICENSE /out/licenses/zgrab2/Go-LICENSE \
+ && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go list -mod=readonly -deps -f '{{if .Module}}{{.Module.Path}}|{{.Module.Version}}|{{.Module.Dir}}{{end}}' ./cmd/zgrab2 | sort -u > /tmp/zgrab-modules \
+ && while IFS='|' read -r module module_version module_dir; do \
+      test -n "$module" || continue; \
+      destination="/out/licenses/zgrab2/dependencies/$(printf '%s@%s' "$module" "$module_version" | tr '/' '_')"; \
+      mkdir -p "$destination"; \
+      for notice in "$module_dir"/LICENSE* "$module_dir"/license* "$module_dir"/NOTICE* "$module_dir"/notice* "$module_dir"/COPYING* "$module_dir"/copying* "$module_dir"/COPYRIGHT* "$module_dir"/copyright*; do \
+        test -f "$notice" || continue; \
+        cp "$notice" "$destination/"; \
+      done; \
+      test -n "$(find "$destination" -type f -print -quit)" || exit 1; \
+      printf '%s@%s\n' "$module" "$module_version" >> /out/licenses/zgrab2/DEPENDENCIES.txt; \
+    done < /tmp/zgrab-modules
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=scanner /out/zgrab2 /usr/local/bin/zgrab2
+COPY --from=scanner /out/licenses/zgrab2 /usr/share/licenses/zgrab2
+COPY --from=deckard /usr/local/bin/deckard /usr/local/bin/deckard
+ENV HOME=/tmp
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/deckard"]

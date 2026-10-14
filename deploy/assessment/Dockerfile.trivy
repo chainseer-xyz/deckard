@@ -1,0 +1,12 @@
+# syntax=docker/dockerfile:1.7
+ARG DECKARD_IMAGE
+FROM ${DECKARD_IMAGE} AS deckard
+
+# Official Trivy 0.76.0. No Docker socket, host filesystem or cloud identity.
+FROM ghcr.io/aquasecurity/trivy@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222
+COPY --from=deckard /usr/local/bin/deckard /usr/local/bin/deckard
+ENV HOME=/tmp \
+    TRIVY_CACHE_DIR=/tmp/trivy \
+    AWS_EC2_METADATA_DISABLED=true
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/deckard"]

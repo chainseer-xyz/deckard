@@ -81,6 +81,8 @@ docker compose --profile alerting up -d
 | Change detection | Learns stable observations and reports meaningful DNS, HTTP and TLS drift |
 | Fresh intelligence | Refreshes takeover fingerprints, shared-hosting ranges, Nuclei templates, CISA KEV and FIRST EPSS data |
 | External scanner ingest | Reconciles Prowler, Kubescape, trufflehog, gitleaks, s3scanner and SARIF results into the same lifecycle |
+| Optional OSS collectors | Schedules isolated Trivy, Kubescape, passive BBOT and existing Tetragon delivery; pulls completed Prowler scans |
+| Explicit assessments | Runs bounded ZGrab2, ZAP and constrained Strix against owned targets; requires verified network containment |
 | Artifact correlation | Imports Trivy image CVEs and CycloneDX inventory; joins versioned packages to exact Kubernetes runtime image digests |
 | Optional discovery | Imports bounded BBOT reports without executing BBOT or treating discovery as proof of ownership |
 | Operations built in | Exposes a web UI, REST API, SSE stream, Prometheus metrics, alert rules and a Grafana dashboard |
@@ -385,6 +387,7 @@ Deckard orchestrates and remembers scanners; it does not replace them. Use speci
 | [Configuration](docs/configuration.md) | Every setting, source, check override, scope rule and authentication mode |
 | [Operations](docs/operations.md) | Egress, updates, metrics, alerts, queues and runbooks |
 | [External scanner ingest](docs/ingest.md) | API semantics, CLI usage, Prowler App and Kubernetes CronJobs |
+| [Collectors and assessments](docs/collectors.md) | Scoped credentials, runtime delivery, exact coverage, optional runners and containment requirements |
 | [Exec plugins](docs/plugins.md) | Plugin configuration and protocol |
 | [AWS IAM](docs/aws-iam.md) | Minimum permissions for AWS inventory sources |
 | [OpenAPI](docs/openapi.yaml) | REST API contract |

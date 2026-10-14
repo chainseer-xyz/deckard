@@ -1,4 +1,4 @@
-# Threat model: OSS inventory and report imports
+# Threat model: OSS inventory, collectors and assessments
 
 ## Scope and trust boundaries
 
@@ -6,7 +6,8 @@ Protect ownership decisions, finding history, cloud identity, credentials and
 service availability. Actors are operators, authenticated report producers,
 cloud/Kubernetes APIs and potentially malicious report content. Public API
 authentication, write authorization, CSRF, body/rate/concurrency limits remain
-unchanged. Reports do not grant executable code or credential access.
+unchanged. Report imports do not grant executable code or credential access.
+Optional assessment execution is a separate operator-authorized boundary.
 
 ```mermaid
 flowchart LR
@@ -37,7 +38,10 @@ the numbered execution tasks in [the platform plan](../oss-platform-plan.md).
 | T5 | Oversized report exhausts memory/DB / denial | 4.2 | 64 MiB local inputs, API 10 MiB, bounded nodes/edges/depth/events and existing API throttles; tasks 1–3, 6 | Mitigated |
 | T6 | Missing provenance/audit trail / repudiation | 3.6 | Separate source facts, stable finding IDs, artifact-change events, replay tests; task 2 | Mitigated |
 | T7 | Concurrent fact update defeats exact identity / tampering | 4.0 | Shared transaction advisory lock before inventory/ingest mutation; ambiguity and lock regressions; tasks 2, 5 | Mitigated |
-| T8 | Scanner process escapes scope / elevation, disclosure | 5.0 | No BBOT/Trivy/Strix/ZGrab2/ZAP subprocess runner in this release; task 8 | Eliminated from this release |
+| T8 | Scanner process escapes scope / elevation, disclosure | 5.0 | Dedicated non-root Jobs, no host socket/cloud identity, default deny, broker or exact IP/port grants, immutable images, deadlines and bounded IO | Mitigated in local contracts; live CNI proof required |
+| T9 | Scanner success erases issues without full coverage / tampering | 4.8 | Runtime, restricted Kubescape, BBOT, ZAP and Strix remain incomplete; ZGrab2 stores observations only; failed runtime-image collection cannot upload | Mitigated |
+| T10 | Producer token escalates to operator / elevation | 4.8 | Exact tool/scope/source grants; no inventory reads, UI or assessment actions; duplicate/admin-token refusal | Mitigated |
+| T11 | Broker overload or lifecycle race / denial, tampering | 4.6 | 32 listener connections, 8 handlers/session, 4 CONNECT tunnels, upload reservation, cumulative budgets, drain before result acceptance, cancellation and UID-checked cleanup | Mitigated in race/integration tests |
 
 ## Critical attack paths
 
@@ -59,13 +63,27 @@ digests cannot stand in for runtime manifest identity. Missing versions/PURLs an
 unsupported Kubernetes ancestors remain explicit coverage gaps.
 
 Database inventory/ingest mutations share a coarse advisory lock; network reads
-do not. High ingestion throughput needs load testing before replacing that lock
-with a narrower persisted identity design. No schema migration is required now.
+do not. A local PostgreSQL16 race-enabled fixture completed `144` contending
+transactions: `3200` finding updates and `800` inventory rows in `17.935s`.
+With eight producers, one inventory writer and pool4, transaction p95 was `1.398s`.
+This is regression evidence, not a production capacity guarantee. Keep bounded
+collector concurrency; measure Marina latency before narrowing the identity lock.
+Run `DECKARD_IDENTITY_LOAD=1 go test -race -v ./internal/store/postgres -run TestIdentityLockConcurrentLoad`
+against the disposable testcontainer, never production data.
 
-ZGrab2, Falco, ZAP and Strix runners remain separate milestones. They require
-enforced egress, isolated credentials, explicit target authorization and bounded
-runtime. Runtime event silence must not resolve incidents. Hosted LLMs additionally
-require a budget and explicit data-egress policy.
+ZGrab2's direct fixed-IP grant lasts at most `15m`; ownership revocation is not
+instantaneous, but final verification prevents clean coverage after revocation.
+Stock ZAP disables client TLS verification. Strict Go preflights and broker target
+TLS plus enforced CNI contain the supported boundary; they do not protect against
+a compromised broker or CNI. Native ZAP scan timeout can be silent, so its reports
+remain additive. Runtime event silence must not resolve incidents.
+
+Strix uses genuine pinned upstream with a constrained HTTP/shell/filesystem adapter,
+not unrestricted upstream feature parity. Model credentials stay in its controller;
+runtime tools cannot reach the model gateway directly. Hosted LLMs require explicit
+cost/data-egress approval. Turn limits do not impose a dollar budget. No live model
+assessment or Marina CNI containment is claimed by local protocol fixtures.
+See [the operating contract](collectors.md) for exact trust boundaries and gaps.
 
 Review this model before adding a runnable collector, privileged sensor,
 authenticated active scan or new artifact/identity authority.
