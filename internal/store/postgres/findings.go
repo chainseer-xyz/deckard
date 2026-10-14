@@ -421,7 +421,7 @@ func (s *Store) ChangeFindingStatus(ctx context.Context, id int64, c store.Statu
 	switch c.Status {
 	case model.StatusSuppressed, model.StatusAcknowledged:
 		until = c.Until
-	case model.StatusOpen, model.StatusResolved:
+	case model.StatusOpen:
 		note = ""
 	}
 	tag, err := s.pool.Exec(ctx, `UPDATE findings SET status = $2, suppressed_until = $3, suppression_note = $4, status_actor = $5,

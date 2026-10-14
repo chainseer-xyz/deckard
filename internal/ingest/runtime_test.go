@@ -21,3 +21,13 @@ func TestRuntimeEventsCannotAssertCompleteCoverage(t *testing.T) {
 		})
 	}
 }
+
+func TestRuntimeEventsRejectFutureEvidence(t *testing.T) {
+	r := valid()
+	r.Tool, r.Complete = "tetragon", false
+	r.Findings[0].Evidence = map[string]any{"runtime_last_seen": "2099-01-01T00:00:00Z"}
+	problems := Validate(r, Options{Now: now})
+	if len(problems) != 1 || !strings.Contains(problems[0].Reason, "runtime event time") {
+		t.Fatalf("future event could prevent later incident updates: %v", problems)
+	}
+}

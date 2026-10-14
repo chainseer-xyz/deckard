@@ -93,6 +93,13 @@ func ingestTx(ctx context.Context, tx pgx.Tx, in store.IngestInput, res *store.I
 		return err
 	}
 	res.Rejected = rejected
+	links, err := runtimeRelations(ctx, tx, in)
+	if err != nil {
+		return err
+	}
+	if err := syncRelations(ctx, tx, relationReporter{name: "runtime:" + in.Tool + ":" + in.Scope}, links, false); err != nil {
+		return err
+	}
 	if err := syncRelations(ctx, tx, relationReporter{name: "identity:" + in.Tool + ":" + in.Scope}, aliases, false); err != nil {
 		return err
 	}
@@ -111,12 +118,22 @@ func ingestTx(ctx context.Context, tx pgx.Tx, in store.IngestInput, res *store.I
 		return err
 	}
 	items := make([]reconcileItem, 0, len(in.Items))
+	previous := make(map[string]model.Finding, len(existing))
+	if model.IsRuntimeTool(in.Tool) {
+		for _, f := range existing {
+			previous[f.Fingerprint] = f
+		}
+	}
 	for _, it := range in.Items {
 		id, ok := assetIDs[it.Index]
 		if !ok {
 			continue // rejected
 		}
-		items = append(items, reconcileItem{fp: model.Fingerprint(in.Check, in.Scope, it.Finding.Key), assetID: id, fi: it.Finding})
+		fp := model.Fingerprint(in.Check, in.Scope, it.Finding.Key)
+		if old, found := previous[fp]; found && !model.RuntimeEventAdvances(it.Finding.Evidence, old.Evidence) {
+			continue
+		}
+		items = append(items, reconcileItem{fp: fp, assetID: id, fi: it.Finding})
 	}
 	rr, cnt, err := reconcileTx(ctx, tx, reconcileSet{
 		check: in.Check, existing: existing, items: items, partial: !complete,

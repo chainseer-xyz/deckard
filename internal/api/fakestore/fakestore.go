@@ -375,7 +375,7 @@ func (s *Store) ListFindings(_ context.Context, f store.FindingFilter) ([]model.
 	return out[lo:hi], len(out), nil
 }
 
-func (s *Store) ChangeFindingStatus(_ context.Context, id int64, c store.StatusChange, _ time.Time) error {
+func (s *Store) ChangeFindingStatus(_ context.Context, id int64, c store.StatusChange, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f, ok := s.Findings[id]
@@ -385,6 +385,10 @@ func (s *Store) ChangeFindingStatus(_ context.Context, id int64, c store.StatusC
 	f.Status = c.Status
 	f.SuppressedUntil = c.Until
 	f.SuppressionNote = c.Note
+	f.ResolvedAt = nil
+	if c.Status == model.StatusResolved {
+		f.ResolvedAt = &now
+	}
 	s.Findings[id] = f
 	s.Changes = append(s.Changes, Change{ID: id, StatusChange: c})
 	return nil
