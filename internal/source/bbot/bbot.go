@@ -26,8 +26,9 @@ const (
 
 // Source rereads one operator-configured local report on each discovery.
 type Source struct {
-	name string
-	file string
+	name     string
+	file     string
+	openFile func(string) (*os.File, error)
 }
 
 // New validates configuration without opening the report or starting a scan.
@@ -35,7 +36,7 @@ func New(cfg config.SourceConfig) (*Source, error) {
 	if strings.TrimSpace(cfg.DiscoveryFile) == "" {
 		return nil, errors.New("bbot: discovery_file is required")
 	}
-	return &Source{name: cfg.Name, file: cfg.DiscoveryFile}, nil
+	return &Source{name: cfg.Name, file: cfg.DiscoveryFile, openFile: openReport}, nil
 }
 
 // Constructor implements the standard source registry constructor contract.
@@ -52,20 +53,16 @@ func (s *Source) Discover(ctx context.Context) (*source.Discovery, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	info, err := os.Stat(s.file)
-	if err != nil || !info.Mode().IsRegular() {
-		return nil, errors.New("bbot: discovery_file must be a readable regular file")
+	openFile := s.openFile
+	if openFile == nil {
+		openFile = openReport
 	}
-	if info.Size() > maxReportBytes {
-		return nil, errors.New("bbot: report exceeds 64 MiB")
-	}
-	// #nosec G304 -- The operator explicitly configures this local input path.
-	f, err := os.Open(s.file)
+	f, err := openFile(s.file)
 	if err != nil {
 		return nil, errors.New("bbot: cannot open discovery_file")
 	}
 	defer func() { _ = f.Close() }()
-	info, err = f.Stat()
+	info, err := f.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Size() > maxReportBytes {
 		return nil, errors.New("bbot: discovery_file changed or exceeds 64 MiB")
 	}

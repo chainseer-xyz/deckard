@@ -227,3 +227,34 @@ func TestProvenanceRejectsNonIdentifiersAndInvalidTimestamps(t *testing.T) {
 		}
 	}
 }
+
+func TestSyntheticWildcardMarkersAreIgnoredWithoutHidingMalformedNames(t *testing.T) {
+	for _, tc := range []struct {
+		marker string
+		valid  bool
+	}{
+		{"_wildcard.example.com", true},
+		{"_wildcard.invalid..example", false},
+		{"_wildcard.", false},
+		{"_wildcard.-invalid.example", false},
+	} {
+		t.Run(tc.marker, func(t *testing.T) {
+			data := "{\"type\":\"DNS_NAME\",\"data\":\"valid.example\"}\n" +
+				"{\"type\":\"DNS_NAME\",\"data\":\"" + tc.marker + "\"}"
+			s, err := New(config.SourceConfig{Name: "recon", DiscoveryFile: reportFile(t, data)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			d, err := s.Discover(context.Background())
+			if !tc.valid {
+				if err == nil || d != nil {
+					t.Fatal("malformed marker hid an invalid parent domain")
+				}
+				return
+			}
+			if err != nil || len(d.Assets) != 1 || d.Assets[0].Key != "valid.example" || len(d.Relations) != 0 || !d.Partial {
+				t.Fatalf("synthetic marker poisoned or polluted valid discovery: %+v, %v", d, err)
+			}
+		})
+	}
+}

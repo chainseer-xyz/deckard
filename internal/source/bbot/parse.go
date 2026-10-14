@@ -34,6 +34,12 @@ func parseEvent(raw []byte, name string) (model.AssetInput, bool, error) {
 	if err := json.Unmarshal(e.Data, &data); err != nil {
 		return model.AssetInput{}, false, errors.New("event data must be a string")
 	}
+	if kind == model.KindHostname && strings.HasPrefix(data, "_wildcard.") {
+		if _, ok := hostname(strings.TrimPrefix(data, "_wildcard.")); !ok {
+			return model.AssetInput{}, false, errors.New("invalid wildcard parent domain")
+		}
+		return model.AssetInput{}, false, nil // BBOT's synthetic DNS wildcard marker.
+	}
 	key, ok := eventKey(kind, data)
 	if !ok {
 		return model.AssetInput{}, false, errors.New("invalid event data")
