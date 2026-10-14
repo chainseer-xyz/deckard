@@ -12,7 +12,10 @@ export type AssetKind =
   | 'service'
   | 'url'
   | 'certificate'
-  | 'cloud_resource';
+  | 'cloud_resource'
+  | 'workload'
+  | 'container_image'
+  | 'package';
 export const ASSET_KINDS: AssetKind[] = [
   'zone',
   'hostname',
@@ -21,7 +24,14 @@ export const ASSET_KINDS: AssetKind[] = [
   'url',
   'certificate',
   'cloud_resource',
+  'workload',
+  'container_image',
+  'package',
 ];
+
+/** Metadata and external-report assets refresh through their producer, not probes. */
+export const isProbeTarget = (asset: Pick<Asset, 'kind' | 'source'>): boolean =>
+  ['zone', 'hostname', 'ip', 'service', 'url'].includes(asset.kind) && !asset.source.startsWith('ingest:');
 
 export type ScopeClass = 'owned' | 'shared' | 'external' | 'excluded';
 export const SCOPES: ScopeClass[] = ['owned', 'shared', 'external', 'excluded'];

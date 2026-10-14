@@ -82,6 +82,7 @@ var assetKinds = map[string]bool{
 	string(model.KindZone): true, string(model.KindHostname): true, string(model.KindIP): true,
 	string(model.KindService): true, string(model.KindURL): true, string(model.KindCertificate): true,
 	string(model.KindCloudResource): true,
+	string(model.KindWorkload):      true, string(model.KindContainerImage): true, string(model.KindPackage): true,
 }
 
 var scopeClasses = map[string]bool{
@@ -601,6 +602,10 @@ func (s *Server) rescanAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.RemovedAt != nil {
 		writeError(w, http.StatusConflict, "conflict", "asset is removed")
+		return
+	}
+	if !model.NetworkKind(a.Kind) || model.IsIngestSource(a.Source) {
+		writeError(w, http.StatusConflict, "not_probeable", "refresh this asset through its inventory source or scanner")
 		return
 	}
 	if err := s.d.Actions.RescanAsset(ctx, id); err != nil {

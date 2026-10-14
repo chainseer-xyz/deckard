@@ -50,6 +50,9 @@
   --k-url: 190 24 93;
   --k-certificate: 161 98 7;
   --k-cloud_resource: 67 56 202;
+  --k-workload: 3 105 161;
+  --k-container_image: 109 40 217;
+  --k-package: 15 118 110;
 }
 
 :root[data-theme='dark'] {
@@ -78,6 +81,9 @@
   --k-url: 255 130 180;
   --k-certificate: 240 200 80;
   --k-cloud_resource: 150 160 255;
+  --k-workload: 125 211 252;
+  --k-container_image: 196 181 253;
+  --k-package: 94 234 212;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -107,6 +113,9 @@
     --k-url: 255 130 180;
     --k-certificate: 240 200 80;
     --k-cloud_resource: 150 160 255;
+    --k-workload: 125 211 252;
+    --k-container_image: 196 181 253;
+    --k-package: 94 234 212;
   }
 }
 
