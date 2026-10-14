@@ -60,13 +60,16 @@ func (s Severity) AtLeast(min Severity) bool { return s.Rank() >= min.Rank() }
 type AssetKind string
 
 const (
-	KindZone          AssetKind = "zone"
-	KindHostname      AssetKind = "hostname"
-	KindIP            AssetKind = "ip"
-	KindService       AssetKind = "service"
-	KindURL           AssetKind = "url"
-	KindCertificate   AssetKind = "certificate"
-	KindCloudResource AssetKind = "cloud_resource"
+	KindZone           AssetKind = "zone"
+	KindHostname       AssetKind = "hostname"
+	KindIP             AssetKind = "ip"
+	KindService        AssetKind = "service"
+	KindURL            AssetKind = "url"
+	KindCertificate    AssetKind = "certificate"
+	KindCloudResource  AssetKind = "cloud_resource"
+	KindWorkload       AssetKind = "workload"
+	KindContainerImage AssetKind = "container_image"
+	KindPackage        AssetKind = "package"
 )
 
 // ScopeClass says how deckard may treat an asset. See spec section 2.
@@ -92,6 +95,9 @@ const (
 	RelExposes    RelationType = "exposes"
 	RelHasCert    RelationType = "has_cert"
 	RelInZone     RelationType = "in_zone"
+	RelTargets    RelationType = "targets"
+	RelRuns       RelationType = "runs"
+	RelContains   RelationType = "contains"
 )
 
 // SourceFact is the most recent metadata one inventory source reported.

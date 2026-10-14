@@ -238,7 +238,9 @@ func Normalize(f Finding) Finding {
 	if f.Asset.Ref != nil {
 		f.Asset.Ref.Key = ID(f.Asset.Ref.Key, MaxAssetKeyLen)
 	} else {
-		f.Asset.Kind = model.KindCloudResource
+		if !CreatableKinds[f.Asset.Kind] {
+			f.Asset.Kind = model.KindCloudResource
+		}
 		if f.Asset.Key = ID(f.Asset.Key, MaxAssetKeyLen); f.Asset.Key == "" {
 			f.Asset.Key = "unknown-resource"
 		}

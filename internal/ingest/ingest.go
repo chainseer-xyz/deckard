@@ -62,6 +62,25 @@ type Request struct {
 	ObservedAt *time.Time `json:"observed_at"`
 	// Findings must be present; [] is a valid (empty) run.
 	Findings []Finding `json:"findings"`
+	// Artifacts is additive inventory, independent of finding completeness.
+	// Only immutable images and versioned packages can be created here.
+	Artifacts []Artifact            `json:"artifacts,omitempty"`
+	Relations []model.RelationInput `json:"relations,omitempty"`
+}
+
+// Artifact is non-probeable inventory from an artifact report. It cannot
+// assert ownership, a source label, a zone or a network destination.
+type Artifact struct {
+	Kind  model.AssetKind `json:"kind"`
+	Key   string          `json:"key"`
+	Attrs map[string]any  `json:"attrs,omitempty"`
+}
+
+// ArtifactReport preserves clean inventory without manufacturing findings.
+type ArtifactReport struct {
+	Findings  []Finding
+	Artifacts []Artifact
+	Relations []model.RelationInput
 }
 
 // Finding is one item of a Request.
@@ -94,11 +113,14 @@ type AssetRef struct {
 
 // CreatableKinds are the asset kinds an ingest may create: kinds no check is
 // ever allowed to probe.
-var CreatableKinds = map[model.AssetKind]bool{model.KindCloudResource: true}
+var CreatableKinds = map[model.AssetKind]bool{
+	model.KindCloudResource: true, model.KindContainerImage: true, model.KindPackage: true,
+}
 
 var refKinds = map[model.AssetKind]bool{
 	model.KindZone: true, model.KindHostname: true, model.KindIP: true, model.KindService: true,
 	model.KindURL: true, model.KindCertificate: true, model.KindCloudResource: true,
+	model.KindWorkload: true, model.KindContainerImage: true, model.KindPackage: true,
 }
 
 // Rejection is one problem with a request; Index is the finding's position,
@@ -195,6 +217,7 @@ func Validate(r *Request, o Options) []Rejection {
 		return v.out // do not walk an oversized list
 	}
 	keys := make(map[string]int, len(r.Findings))
+	validateArtifacts(v, r)
 	for i := range r.Findings {
 		f := &r.Findings[i]
 		if prev, dup := keys[f.Key]; dup && f.Key != "" {
@@ -231,9 +254,12 @@ func validateFinding(v *validator, i int, f *Finding) {
 			v.item(i, fmt.Sprintf("asset.ref.key must be 1 to %d bytes of UTF-8 without control characters", MaxAssetKeyLen))
 		}
 	case !CreatableKinds[a.Kind]:
-		v.item(i, fmt.Sprintf("asset.kind %q cannot be created by ingest (allowed: cloud_resource; use asset.ref for an existing owned asset)", a.Kind))
+		v.item(i, fmt.Sprintf("asset.kind %q cannot be created by ingest (allowed: cloud_resource, container_image, package; use asset.ref for an existing owned asset)", a.Kind))
 	case a.Key == "" || len(a.Key) > MaxAssetKeyLen || !cleanLine(a.Key):
 		v.item(i, fmt.Sprintf("asset.key must be 1 to %d bytes of UTF-8 without control characters", MaxAssetKeyLen))
+	}
+	if a.Ref == nil && (a.Kind == model.KindContainerImage || a.Kind == model.KindPackage) && !artifactKey(a.Kind, a.Key) {
+		v.item(i, "asset.key must be a canonical image digest or versioned package URL")
 	}
 	switch {
 	case strings.TrimSpace(f.Title) == "":
