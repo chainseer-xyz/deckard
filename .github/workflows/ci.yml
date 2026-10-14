@@ -105,7 +105,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: test baked finder pack with the shipped nuclei binary
+      - name: test finder pack and containment with the shipped nuclei binary
         if: matrix.target == 'full'
         shell: bash
         run: |
@@ -116,6 +116,11 @@ jobs:
           NUCLEI_BINARY=/tmp/nuclei go test -count=1 -v ./templates/deckard | tee finder-test.log
           if grep -q -- '--- SKIP' finder-test.log; then
             echo "finder template test skipped" >&2
+            exit 1
+          fi
+          NUCLEI_BIN=/tmp/nuclei go test -tags=live -count=1 -v ./internal/nuclei -run '^TestLiveDestinationPolicy' | tee containment-test.log
+          if grep -q -- '--- SKIP' containment-test.log; then
+            echo "Nuclei containment test skipped" >&2
             exit 1
           fi
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
