@@ -1,0 +1,22 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "metadata": {"component": {
+    "type": "container",
+    "name": "web",
+    "purl": "pkg:oci/web@sha256%3Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?repository_url=registry.example%2Fteam%2Fweb",
+    "properties": [{"name": "password", "value": "DO-NOT-RETAIN-TEST-MARKER"}]
+  }},
+  "components": [{
+    "bom-ref": "local-package-id",
+    "type": "library",
+    "name": "library",
+    "version": "1.0.0",
+    "purl": "pkg:golang/example.org/library@1.0.0",
+    "properties": [{"name": "secret", "value": "DO-NOT-RETAIN-TEST-MARKER"}],
+    "externalReferences": [{"type": "distribution", "url": "https://user:DO-NOT-RETAIN-TEST-MARKER@example.test/package"}],
+    "components": [{"type":"library", "name":"helper", "version":"2.0.0", "purl":"pkg:npm/helper@2.0.0"}]
+  }],
+  "vulnerabilities": [{"id": "CVE-2026-12345", "description": "DO-NOT-RETAIN-TEST-MARKER"}]
+}

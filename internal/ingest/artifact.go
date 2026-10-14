@@ -55,6 +55,15 @@ func validateArtifacts(v *validator, r *Request) {
 			return
 		}
 	}
+	for i, finding := range r.Findings {
+		if finding.Asset.Ref == nil && (finding.Asset.Kind == model.KindContainerImage || finding.Asset.Kind == model.KindPackage) &&
+			!seen[assetKey{finding.Asset.Kind, finding.Asset.Key}] {
+			v.item(i, "image/package findings require a matching artifacts entry to retain producer provenance")
+		}
+		if v.full() {
+			return
+		}
+	}
 }
 
 func artifactAttrs(artifact Artifact) string {

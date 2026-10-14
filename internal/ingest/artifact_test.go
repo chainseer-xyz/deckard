@@ -44,3 +44,17 @@ func TestArtifactContract(t *testing.T) {
 		})
 	}
 }
+
+func TestArtifactFindingRequiresProvenance(t *testing.T) {
+	now := time.Now()
+	digest := "sha256:" + strings.Repeat("f", 64)
+	finding := Normalize(Finding{Key: "cve", Asset: Asset{Kind: model.KindContainerImage, Key: digest}, Title: "CVE", Description: "Vulnerability"})
+	r := &Request{Tool: "trivy", Scope: digest, ObservedAt: &now, Findings: []Finding{finding}}
+	if len(Validate(r, Options{})) == 0 {
+		t.Fatal("accepted a finding without producer artifact membership")
+	}
+	r.Artifacts = []Artifact{{Kind: model.KindContainerImage, Key: digest}}
+	if problems := Validate(r, Options{}); len(problems) != 0 {
+		t.Fatal(problems)
+	}
+}

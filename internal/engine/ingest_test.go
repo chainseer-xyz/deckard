@@ -27,7 +27,8 @@ func TestIngestedAssetsAreNeverProbed(t *testing.T) {
 	}
 	h := newHarness(func(c *testCfg) { c.Profiles.Intrusive.Enabled = true },
 		[]model.Asset{ingested, ingestedHost}, checks[0], checks[1], checks[2])
-	// fakeGuard classifies every key as owned: only the source can refuse.
+	// fakeGuard classifies every key as owned. The hostname verifies the
+	// source refusal independently of the metadata-kind refusal.
 	ctx := context.Background()
 
 	for _, tier := range allTiers {
@@ -76,13 +77,23 @@ func TestIngestedAssetsAreNeverProbed(t *testing.T) {
 		}
 	}
 
-	// The same assets from a regular source are scheduled, so the refusal
-	// above is the source rule and not a broken harness.
-	plain := ingested
+	// A hostname from a regular source is scheduled. Metadata kinds remain
+	// non-probeable regardless of source or an owned label.
+	plain := ingestedHost
 	plain.Source = "aws"
 	h2 := newHarness(nil, []model.Asset{plain}, checks[0])
 	if n, _ := h2.r.scheduleTier(ctx, model.TierPassive); n != 1 {
 		t.Fatalf("control: queued %d, want 1", n)
+	}
+}
+
+func TestMetadataKindsNeverProbeEvenWhenLabelledOwned(t *testing.T) {
+	for _, kind := range []model.AssetKind{model.KindCloudResource, model.KindWorkload, model.KindContainerImage, model.KindPackage, "unknown"} {
+		for _, tier := range allTiers {
+			if scope.AllowedFor(kind, tier, model.ScopeOwned) {
+				t.Errorf("owned metadata kind %s allowed at %s", kind, tier)
+			}
+		}
 	}
 }
 

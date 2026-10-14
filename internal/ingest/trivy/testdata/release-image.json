@@ -1,0 +1,20 @@
+{
+  "SchemaVersion": 2,
+  "ArtifactType": "container_image",
+  "Metadata": {"RepoDigests": ["ghcr.io/chainseer-xyz/deckard@sha256:1d12693d0a1e75f3e3e3385932117660bce2daeaab63210debe82a5fcb41e021"]},
+  "Results": [
+    {
+      "Target": "ghcr.io/chainseer-xyz/deckard@sha256:1d12693d0a1e75f3e3e3385932117660bce2daeaab63210debe82a5fcb41e021 (debian 12.15)",
+      "Class": "os-pkgs", "Type": "debian",
+      "Packages": [{"Identifier": {"PURL": "pkg:deb/debian/base-files@12.4%2Bdeb12u15?arch=amd64&distro=debian-12.15"}, "Name": "base-files", "Version": "12.4+deb12u15"}]
+    },
+    {
+      "Target": "usr/local/bin/deckard", "Class": "lang-pkgs", "Type": "gobinary",
+      "Packages": [{"Identifier": {"PURL": "pkg:golang/github.com/chainseer-xyz/deckard"}, "Name": "github.com/chainseer-xyz/deckard"}]
+    },
+    {
+      "Target": "usr/local/bin/nuclei", "Class": "lang-pkgs", "Type": "gobinary",
+      "Packages": [{"Identifier": {"PURL": "pkg:golang/github.com/projectdiscovery/nuclei/v3@v3.11.1%2Bdirty"}, "Name": "github.com/projectdiscovery/nuclei/v3", "Version": "v3.11.1+dirty"}]
+    }
+  ]
+}
