@@ -105,6 +105,7 @@ export function FindingDrawer({ id, seed, onClose }: { id: number; seed?: Findin
   const closeRef = useRef<HTMLButtonElement>(null);
   const f = q.data;
   const canWrite = me.data?.can_write ?? false;
+  const scannerFinding = f?.check.startsWith('ext.') ?? false;
 
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
@@ -227,8 +228,8 @@ export function FindingDrawer({ id, seed, onClose }: { id: number; seed?: Findin
               <div className="flex flex-wrap items-center gap-1.5">
                 <button
                   className="btn btn-sm"
-                  disabled={!canWrite || rescan.isPending}
-                  title={canWrite ? undefined : 'Read-only access'}
+                  disabled={!canWrite || scannerFinding || rescan.isPending}
+                  title={scannerFinding ? 'Refresh through the external scanner' : canWrite ? undefined : 'Read-only access'}
                   onClick={() => rescan.mutate(f.asset_id)}
                 >
                   <RefreshCw size={12} aria-hidden="true" /> Rescan asset
@@ -238,6 +239,7 @@ export function FindingDrawer({ id, seed, onClose }: { id: number; seed?: Findin
                 </button>
               </div>
               <div role="status" aria-live="polite" className="min-h-4 text-xs">
+                {scannerFinding && <span className="text-muted">Refresh this finding through its external scanner.</span>}
                 {rescan.isSuccess && <span className="text-ok">Rescan queued for {f.asset_key}.</span>}
                 {rescan.isError && <span role="alert" className="text-bad">Rescan failed: {(rescan.error as Error).message}</span>}
                 {copied === 'ok' && <span className="text-ok">Copied to clipboard.</span>}

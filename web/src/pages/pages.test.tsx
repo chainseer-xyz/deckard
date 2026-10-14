@@ -365,6 +365,15 @@ describe('Finding drawer', () => {
     expect(await screen.findByText('Rescan queued for promo.example.com.')).toBeInTheDocument();
   });
 
+  it('directs external scanner findings to their producer instead of network rescanning', async () => {
+    const finding = state.findings.find((item) => item.id === 1)!;
+    finding.check = 'ext.trivy';
+    renderRoute(<Findings />, '/findings', '/findings?finding=1');
+    const drawer = await screen.findByRole('dialog', { name: 'Finding details' });
+    expect(await within(drawer).findByRole('button', { name: /Rescan asset/ })).toBeDisabled();
+    expect(within(drawer).getByText('Refresh this finding through its external scanner.')).toBeInTheDocument();
+  });
+
   it('copies a ticket-ready markdown summary', async () => {
     const user = userEvent.setup();
     renderRoute(<Findings />, '/findings', '/findings?finding=1');
