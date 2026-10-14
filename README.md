@@ -393,7 +393,7 @@ Deckard orchestrates and remembers scanners; it does not replace them. Use speci
 
 ## Development
 
-Deckard requires Go 1.26. Building the web UI requires Node.js 22. Integration tests use Docker through testcontainers.
+Deckard requires Go 1.26.9 or newer. Building the web UI requires Node.js 22. Integration tests use Docker through testcontainers.
 
 ```sh
 make build                              # build bin/deckard
