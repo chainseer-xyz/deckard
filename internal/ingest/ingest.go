@@ -189,6 +189,9 @@ func Validate(r *Request, o Options) []Rejection {
 	if !model.ValidIngestTool(r.Tool) {
 		v.req("tool must match ^[a-z0-9][a-z0-9-]{1,31}$")
 	}
+	if model.IsRuntimeTool(r.Tool) && r.Complete {
+		v.req("runtime events cannot assert complete coverage; use complete=false")
+	}
 	switch {
 	case r.Scope == "":
 		v.req("scope is required")

@@ -73,6 +73,9 @@ func ingestTx(ctx context.Context, tx pgx.Tx, in store.IngestInput, res *store.I
 	}
 
 	complete := in.Complete
+	if model.IsRuntimeTool(in.Tool) {
+		complete, res.NotCompleteReason = false, "runtime events cannot assert complete coverage"
+	}
 	if complete && known && !in.ObservedAt.After(lastObserved) {
 		complete, res.NotCompleteReason = false, "observed_at is not after the newest run already accepted for this tool and scope"
 	}
