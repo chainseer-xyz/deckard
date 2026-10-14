@@ -17,7 +17,7 @@ import (
 const concurrencyARN = "arn:aws:elasticloadbalancing:us-west-2:123456789012:loadbalancer/app/public/abc123"
 
 func TestInventoryMutationsAndARNIngestShareIdentityLock(t *testing.T) {
-	for _, operation := range []string{"snapshot", "partial_snapshot", "discovered", "derived", "arn_ingest", "opaque_ingest"} {
+	for _, operation := range []string{"snapshot", "partial_snapshot", "discovered", "derived", "arn_ingest", "opaque_ingest", "artifact_ingest"} {
 		t.Run(operation, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			t.Cleanup(cancel)
@@ -62,6 +62,13 @@ func identityMutation(ctx context.Context, s *postgres.Store, parent model.Asset
 		_, err = s.IngestFindings(ctx, identityIngest(now, concurrencyARN))
 	case "opaque_ingest":
 		_, err = s.IngestFindings(ctx, identityIngest(now, "repository:example/app"))
+	case "artifact_ingest":
+		in := identityIngest(now, "")
+		in.Tool, in.Check, in.Source = "trivy", model.IngestCheck("trivy"), model.IngestSource("trivy")
+		in.Items = nil
+		in.Artifacts = []model.AssetInput{{Kind: model.KindContainerImage,
+			Key: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+		_, err = s.IngestFindings(ctx, in)
 	default:
 		return fmt.Errorf("unknown identity test operation %q", operation)
 	}
