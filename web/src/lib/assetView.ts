@@ -7,7 +7,7 @@ import { emptyCounts } from './triage';
 export const SCOPE_INFO: Record<ScopeClass, { label: string; probing: string }> = {
   owned: {
     label: 'Owned',
-    probing: 'Yours: Deckard runs passive, active and intrusive checks against it.',
+    probing: 'Owned scope: only eligible asset kinds and enabled scan profiles permit probing.',
   },
   shared: {
     label: 'Shared',
