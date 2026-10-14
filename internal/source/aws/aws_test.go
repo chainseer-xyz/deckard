@@ -259,6 +259,9 @@ func TestDiscoverEC2(t *testing.T) {
 	if inst.Attrs["resource_type"] != "instance" {
 		t.Errorf("instance attrs: %v", inst.Attrs)
 	}
+	if inst.Attrs["arn"] != "arn:aws:ec2:us-east-1:"+acct+":instance/i-pub" {
+		t.Errorf("missing exact EC2 identity: %v", inst.Attrs)
+	}
 	if !hasRel(d, model.KindCloudResource, "aws:ec2:us-east-1:i-pub", model.KindIP, "203.0.113.10", model.RelExposes) {
 		t.Error("instance should expose its IP")
 	}

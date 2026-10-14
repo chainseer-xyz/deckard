@@ -25,6 +25,7 @@ import (
 	"github.com/aws/smithy-go"
 
 	"github.com/chainseer-xyz/deckard/internal/config"
+	"github.com/chainseer-xyz/deckard/internal/identity"
 	"github.com/chainseer-xyz/deckard/internal/model"
 	"github.com/chainseer-xyz/deckard/internal/source"
 )
@@ -309,11 +310,15 @@ func (s *Source) discoverEC2(ctx context.Context, b *builder, region string, api
 				}
 				acct, name := aws.ToString(r.OwnerId), nameTag(in.Tags)
 				rk := fmt.Sprintf("aws:ec2:%s:%s", region, id)
-				b.asset(model.KindCloudResource, rk, map[string]any{
+				attrs := map[string]any{
 					"aws.account": acct, "aws.region": region, "aws.resource_id": id, "aws.name": name,
 					"resource_type": "instance", "public_ips": toAny(keys),
 					"security_groups": toAny(sgs), "open_ingress": openFor(sgOpen, sgs),
-				})
+				}
+				if arn := instanceARN(region, acct, id); arn != "" {
+					attrs["arn"] = arn
+				}
+				b.asset(model.KindCloudResource, rk, attrs)
 				for _, k := range keys {
 					b.asset(model.KindIP, k, map[string]any{
 						"owned": true, "aws.account": acct, "aws.region": region,
@@ -366,6 +371,20 @@ func (s *Source) discoverEC2(ctx context.Context, b *builder, region string, api
 		}
 	}
 	return sgOpen, nil
+}
+
+// Reservation.OwnerId and the SDK's partition registry establish EC2 identity
+// without a new AWS request. Preserve the historical inventory key and ID.
+func instanceARN(region, account, id string) string {
+	endpoint, err := ec2.NewDefaultEndpointResolver().ResolveEndpoint(region, ec2.EndpointResolverOptions{})
+	if err != nil || endpoint.PartitionID == "" || account == "" || id == "" {
+		return ""
+	}
+	arn := identity.AWSARN{Partition: endpoint.PartitionID, Service: "ec2", Region: region, Account: account, Resource: "instance/" + id}
+	if _, err := identity.ParseAWSARN(arn.String()); err != nil {
+		return ""
+	}
+	return arn.String()
 }
 
 func openIngress(sg string, perms []ec2types.IpPermission) []any {
