@@ -1,0 +1,51 @@
+# Separate optional HTTP-assessment image. Supply a pinned freshly built Deckard
+# application image containing `assessment execute` / `assessment upload`.
+ARG DECKARD_IMAGE
+FROM ${DECKARD_IMAGE} AS deckard
+FROM ghcr.io/astral-sh/uv@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 AS uv
+
+FROM python@sha256:a1165e272e578941b84abc79e4ab38a0305cd12803a5c4247979ac7655f4d641 AS dependencies
+COPY --from=uv /uv /usr/local/bin/uv
+WORKDIR /opt/strix
+# Strix 1.7.0: immutable upstream commit AND independently verified archive hash.
+# Keep the complete upstream source, LICENSE and notices in the resulting image.
+ADD --checksum=sha256:f2638e152af46dc649ea14498d983f1d63b7845e93df1f9e8b6226ff83135a55 https://codeload.github.com/usestrix/strix/tar.gz/55bc07991aacb1c26a81b43e7ca53148730d2019 /tmp/strix-source.tar.gz
+COPY deploy/assessment/strix-security-requirements.txt /opt/strix/deckard-security-requirements.txt
+COPY deploy/assessment/STRIX-SECURITY.md /opt/strix/DECKARD-SECURITY.md
+RUN tar -xzf /tmp/strix-source.tar.gz --strip-components=1 -C /opt/strix \
+    && rm /tmp/strix-source.tar.gz \
+    && UV_PROJECT_ENVIRONMENT=/opt/venv uv sync --frozen --no-dev --no-install-project --python /usr/local/bin/python3 \
+    && uv pip install --python /opt/venv/bin/python --no-deps --only-binary :all: --require-hashes -r /opt/strix/deckard-security-requirements.txt \
+    && uv pip check --python /opt/venv/bin/python
+
+FROM python@sha256:a1165e272e578941b84abc79e4ab38a0305cd12803a5c4247979ac7655f4d641
+LABEL org.opencontainers.image.title="Deckard constrained Strix assessment" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      io.deckard.strix.source="https://github.com/usestrix/strix" \
+      io.deckard.strix.revision="55bc07991aacb1c26a81b43e7ca53148730d2019" \
+      io.deckard.strix.coverage="HTTP-shell-filesystem; no Caido/browser/search/MCP"
+# Shell is required by the real Agents SDK. No browser, daemon or host runtime.
+# Debian security updates are chosen at build; scan and pin the resulting image.
+# hadolint ignore=DL3008
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends bash curl ca-certificates \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip uninstall --yes pip \
+    && rm /usr/local/lib/python3.13/ensurepip/_bundled/pip-26.2.1-py3-none-any.whl \
+    && install -d -o 65532 -g 65532 /workspace /report /request
+COPY --from=dependencies /opt/venv /opt/venv
+COPY --from=dependencies /opt/strix /opt/strix
+COPY --from=deckard /usr/local/bin/deckard /usr/local/bin/deckard
+COPY deploy/assessment/strix_adapter.py /opt/deckard/strix_adapter.py
+ENV PATH="/opt/venv/bin:/usr/local/bin:/usr/bin:/bin" \
+    PYTHONPATH="/opt/strix:/opt/deckard" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HOME=/tmp \
+    STRIX_TELEMETRY=false \
+    OPENAI_AGENTS_DISABLE_TRACING=1 \
+    LITELLM_LOCAL_MODEL_COST_MAP=true
+WORKDIR /tmp
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/deckard"]

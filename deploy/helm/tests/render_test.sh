@@ -305,4 +305,9 @@ for key in nuclei.update.dir refdata.dir vulnintel.dir; do
   if (( covered )); then print "ok   default $key ($d) is under a mounted volume"; else print "FAIL default $key ($d) is not under a mounted volume"; fail=1; fi
 done
 
+# Structured collector assertions use real rendered Kubernetes objects. The
+# optional BBOT fixture runs the pinned scanner SDK offline inside Docker.
+if ! zsh tests/collectors_test.sh; then fail=1; fi
+if ! zsh tests/assessment_test.sh; then fail=1; fi
+
 exit $fail

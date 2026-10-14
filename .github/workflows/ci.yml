@@ -85,7 +85,98 @@ jobs:
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
       - run: helm lint deploy/helm/deckard --set database.cnpg.enabled=true
       - run: sudo apt-get update && sudo apt-get install -y zsh
-      - run: zsh deploy/helm/tests/render_test.sh
+      - name: pinned structured YAML parser
+        run: |
+          curl -fsSL --retry 3 https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_linux_amd64 -o yq
+          echo '8e34fc298390875de416e6a4afcb8cabeceb25d9aa8506c1a2f9353cf702ea5f  yq' | sha256sum --check
+          chmod +x yq
+          sudo mv yq /usr/local/bin/yq
+      - name: chart renders and real offline BBOT collector fixture
+        env:
+          DECKARD_BBOT_FIXTURE: "1"
+        run: zsh deploy/helm/tests/render_test.sh
+      - name: replicated source health alert contracts
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,nosuid,nodev,size=64m --entrypoint /bin/promtool \
+            --mount "type=bind,src=$PWD/deploy/examples,dst=/rules,readonly" --workdir /rules \
+            prom/prometheus@sha256:76947e7ef22f8a698fc638f706685909be425dbe09bd7a2cd7aca849f79b5f64 \
+            test rules prometheus-rules.test.yml
+
+  runners:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tool: zgrab2
+            dockerfile: deploy/assessment/Dockerfile.zgrab2
+          - tool: zap
+            dockerfile: deploy/assessment/Dockerfile.zap
+          - tool: strix
+            dockerfile: deploy/assessment/Dockerfile.strix
+          - tool: trivy
+            dockerfile: deploy/assessment/Dockerfile.trivy
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: build candidate with the current application
+        env:
+          DOCKERFILE: ${{ matrix.dockerfile }}
+        run: |
+          docker build --target slim -t deckard:runner-base .
+          docker build -f "$DOCKERFILE" --build-arg DECKARD_IMAGE=deckard:runner-base -t deckard:runner-candidate .
+      - name: actual scanner interoperability and denied fixtures
+        if: matrix.tool != 'trivy'
+        env:
+          DECKARD_ASSESSMENT_NATIVE_INTEGRATION: "1"
+          DECKARD_ASSESSMENT_NATIVE_TOOL: ${{ matrix.tool }}
+          DECKARD_ASSESSMENT_ZGRAB2_IMAGE: deckard:runner-candidate
+          DECKARD_ASSESSMENT_ZAP_IMAGE: deckard:runner-candidate
+          DECKARD_ASSESSMENT_STRIX_IMAGE: deckard:runner-candidate
+        run: go test -tags=live -count=1 -v ./internal/assessmentexec -run '^TestNativeAssessmentInteroperability$'
+      - name: real Strix SDK and protocol contracts
+        if: matrix.tool == 'strix'
+        run: |
+          docker run --rm --network none --user 65532:65532 --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+            --mount "type=bind,src=$PWD/deploy/assessment,dst=/tests,readonly" \
+            --env STRIX_SECURITY_CHECK=1 --entrypoint /opt/venv/bin/python deckard:runner-candidate \
+            -m unittest discover -s /tests/tests -p 'test_strix*.py' -v
+      - name: actual ZGrab dependency metadata and license notices
+        if: matrix.tool == 'zgrab2'
+        env:
+          ZGRAB_SECURITY_IMAGE: deckard:runner-candidate
+          ZGRAB_LICENSE_IMAGE: deckard:runner-candidate
+        run: |
+          python3 -m unittest discover -s deploy/assessment/tests -p 'test_zgrab_security.py' -v
+          python3 -m unittest discover -s deploy/assessment/tests -p 'test_runner_licenses.py' -v
+      - name: actual registry-only runtime image scan
+        if: matrix.tool == 'trivy'
+        run: |
+          fixture_dir=$(mktemp -d "$RUNNER_TEMP/deckard-trivy.XXXXXXXX")
+          trap 'rmdir "$fixture_dir"' EXIT
+          chmod 1777 "$fixture_dir"
+          CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/imagecollector.test" ./internal/imagecollector
+          docker run --rm --user 65532:65532 --read-only --cap-drop ALL --security-opt no-new-privileges --memory 2g \
+            --mount "type=bind,src=$fixture_dir,dst=/tmp" \
+            --mount "type=bind,src=$RUNNER_TEMP/imagecollector.test,dst=/fixture.test,readonly" \
+            --env TRIVY_COLLECTOR_FIXTURE_TARGET=alpine@sha256:ae959799024a09da597284763c417a6e820e020fad0634c5267cf4f125e682bf \
+            --entrypoint /fixture.test deckard:runner-candidate \
+            -test.run '^TestNativePinnedTrivyFixture$' -test.v
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.0
+          image-ref: deckard:runner-candidate
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
 
   image:
     runs-on: ubuntu-latest

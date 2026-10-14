@@ -1,0 +1,39 @@
+{{- $root := . -}}
+{{- $collectors := .Values.collectors | default dict -}}
+{{- $network := $collectors.networkPolicy | default dict -}}
+{{- if and $collectors.enabled (ne (toString $network.enabled) "false") -}}
+{{- range $job := $collectors.jobs -}}
+{{- if ne (toString $job.enabled) "false" -}}
+{{- $ctx := dict "root" $root "job" $job -}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "deckard.collectorName" $ctx }}
+  labels: {{- include "deckard.collectorLabels" $ctx | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ printf "%s-collector" (include "deckard.name" $root) | trunc 63 | trimSuffix "-" }}
+      app.kubernetes.io/instance: {{ include "deckard.collectorInstance" $root }}
+      deckard.io/collector: {{ $job.name | quote }}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector: {{- toYaml (default (dict "matchLabels" (dict "kubernetes.io/metadata.name" "kube-system")) $network.dnsNamespaceSelector) | nindent 12 }}
+          podSelector: {matchLabels: {k8s-app: kube-dns}}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to:
+        - podSelector:
+            matchLabels: {{- include "deckard.selectorLabels" $root | nindent 14 }}
+      ports: [{protocol: TCP, port: 8080}]
+    {{- with $network.egress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with $job.egress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end -}}
+{{- end -}}
+{{- end -}}

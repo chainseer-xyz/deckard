@@ -1,0 +1,163 @@
+# Optional scheduled collectors. Merge with the chart's normal installation values.
+# Disabled until an operator supplies pinned images, targets and dedicated Secrets.
+collectors:
+  enabled: false
+  ingest:
+    # Required immutable Deckard image reference, preferably the slim image.
+    image: ""
+    # Empty uses this release's internal Service URL. Remote URLs need explicit egress.
+    url: ""
+    # Optional fallback. Prefer jobs[].tokenSecretRef to isolate producer authority.
+    # Secret exists already; create a dedicated ingest credential, never reuse admin.
+    # Only the uploader receives this Secret. Scanner containers do not receive it.
+    tokenSecretRef: {name: "", key: token}
+    timeout: 2m
+  networkPolicy:
+    enabled: true
+    dnsNamespaceSelector:
+      matchLabels: {kubernetes.io/metadata.name: kube-system}
+    # DNS and the local Deckard API are allowed. All other egress is denied.
+    # Add exact Kubernetes API/Prowler peers or approved registry/DB destinations.
+    # Standard NetworkPolicy has no FQDN rules; use a controlled proxy or your CNI's
+    # separate FQDN policy for changing public registry/CDN addresses. Never claim
+    # an IP rule pins a hostname. NodeLocal DNS needs a site-specific DNS rule.
+    egress: []
+  alerts:
+    enabled: false
+    # Requires Prometheus Operator CRDs and kube-state-metrics CronJob/Job metrics.
+    # Successful Job completion includes successful ingest, not just scanner exit.
+    # These alerts also cover incomplete-only producers, such as restricted Kubescape.
+    maxAgeSeconds: 172800
+    labels: {}
+  jobs: []
+  # One entry per producer reconciliation scope. enabled defaults to true per job.
+  # name is a unique DNS label, at most 20 characters. No arbitrary scanner args/env
+  # are accepted: filters must not silently turn a partial scan into clean evidence.
+  # jobs:
+  #   - name: web-image
+  #     type: trivy
+  #     schedule: "0 */6 * * *"
+  #     image: ghcr.io/aquasecurity/trivy@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222 # 0.76.0
+  #     target: registry.example.com/your-image@sha256:<64-lowercase-hex>
+  #     platform: linux/amd64
+  #     scope: image:your-image:linux-amd64
+  #     tokenSecretRef: {name: trivy-ingest, key: token}
+  #     # One selected platform is assessed. An index target is not a whole-index scan.
+  #     # Use separate jobs/scopes per platform and actual runtime digest when known.
+  #     scanTimeout: 20m
+  #     scratchSizeLimit: 4Gi # disk-backed emptyDir; DB needs more than 1.5Gi
+  #     resources:
+  #       requests: {cpu: 250m, memory: 512Mi, ephemeral-storage: 1Gi}
+  #       limits: {memory: 2Gi, ephemeral-storage: 5Gi}
+  #     ingestResources:
+  #       requests: {cpu: 50m, memory: 128Mi}
+  #       limits: {memory: 512Mi}
+  #     # Optional overrides for all types. Concurrency Forbid and backoffLimit 0
+  #     # are fixed. Never set CPU limits. Every run gets fresh scratch and output.
+  #     startingDeadlineSeconds: 600
+  #     activeDeadlineSeconds: 1800
+  #     ttlSecondsAfterFinished: 86400
+  #     successfulJobsHistoryLimit: 2
+  #     failedJobsHistoryLimit: 2
+  #     maxAgeSeconds: 86400
+  #     suspend: false
+  #     egress: []
+  #   - name: runtime-images
+  #     type: trivy-runtime
+  #     schedule: "0 */6 * * *"
+  #     image: ghcr.io/chainseer-xyz/deckard-collector-trivy@sha256:<64-lowercase-hex>
+  #     tokenSecretRef: {name: runtime-images-ingest, key: token}
+  #     clusterScope: k8s:uid:<kube-system-namespace-UID>:runtime-images
+  #     # Explicit cluster-wide authority is required for complete reconciliation.
+  #     allNamespaces: true
+  #     # Alternatively namespaces: [apps, edge] with allNamespaces: false.
+  #     # Namespace-limited scans always stay incomplete: changing filters cannot
+  #     # resolve findings previously observed elsewhere in the same cluster scope.
+  #     # Scanner reads only Pods and Nodes. Every regular/init/ephemeral container
+  #     # must have a qualified immutable ImageID plus supported Node OS/architecture.
+  #     # Bare config digests, tags, missing status, denied calls, changed inventories
+  #     # and any failed image scan fail the whole job without upload or resolution.
+  #     # Fixed limits: 10000 Pods, 1000 Nodes, 64 images/platforms, 2m per image,
+  #     # 45m collection, 5000 findings/artifacts, 10MiB normalized report. No truncation.
+  #     activeDeadlineSeconds: 3000
+  #     # Optional explicit read-only registry auth; mounted only in scanner.
+  #     # No node Docker sockets, cloud/admin credentials or inherited envFrom.
+  #     registryAuthSecretRef: {name: registry-reader, key: .dockerconfigjson}
+  #     # Add the real Kubernetes API and approved registry/DB destinations.
+  #     egress: []
+  #   - name: cluster-posture
+  #     type: kubescape
+  #     schedule: "15 */6 * * *"
+  #     image: quay.io/kubescape/kubescape-cli@sha256:d575d4f2281473ce539d41053d63482a4e9e07f35d987206b2bac79b2c9ad4bc # 4.0.16
+  #     scope: k8s:your-cluster
+  #     tokenSecretRef: {name: kubescape-ingest, key: token}
+  #     # Empty/missing means all namespaces. A list gives namespace RoleBindings
+  #     # and --include-namespaces; cluster metadata remains separately read-only.
+  #     namespaces: [apps, edge]
+  #     # Secret/ConfigMap and host/image assessment are excluded. Every report is
+  #     # incomplete: findings can open/refresh but never resolve missing findings.
+  #     # Policies are bundled in the pinned image; no SaaS upload or agent install.
+  #     # Only this scanner receives a short-lived projected Kubernetes API token.
+  #     egress:
+  #       - to: [{ipBlock: {cidr: 192.0.2.10/32}}] # replace with actual API destination
+  #         ports: [{protocol: TCP, port: 6443}]
+  #   - name: prowler-pull
+  #     type: prowler-app
+  #     schedule: "0 */6 * * *"
+  #     # Pulls completed Prowler scans. Does not run Prowler or receive cloud keys.
+  #     # Do not enable when an existing deployment already owns this pull schedule.
+  #     apiURL: http://prowler-api.prowler.svc:8080
+  #     tokenSecretRef: {name: prowler-ingest, key: token}
+  #     apiKeySecretRef: {name: prowler-reader, key: api-key} # read-only Prowler role
+  #     providerTypes: [aws, gcp]
+  #     providerUIDs: []
+  #     minSeverity: medium
+  #     maxScanAge: 48h
+  #     maxRequests: 1000
+  #     pullTimeout: 15m
+  #     includeMuted: false
+  #     # Native CLI bounds every response/request and fails incomplete/stale pulls.
+  #     # Only the pull uploader receives the Prowler API key and Deckard ingest key.
+  #     egress:
+  #       - to:
+  #           - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: prowler}}
+  #             podSelector: {matchLabels: {app.kubernetes.io/component: api}}
+  #         ports: [{protocol: TCP, port: 8080}]
+  #   - name: passive-discovery
+  #     type: bbot
+  #     schedule: "30 */12 * * *"
+  #     image: blacklanternsecurity/bbot@sha256:40ed0733e0163feee844d49346eb15e40872fa7008f621358eed9b9a7807382e # 3.0.2; AGPL-3.0; amd64 only
+  #     tokenSecretRef: {name: bbot-discovery, key: token}
+  #     source: bbot-external # must match a configured remote-only BBOT source
+  #     targets: [example.com] # 1..16 explicit DNS names, not IPs/URLs/CIDRs
+  #     modules: [crt, certspotter, hackertarget] # only these keyless passive modules
+  #     # The real upstream SDK writes native NDJSON. Version-pinned guards disable
+  #     # core dependency installation and use bundled PSL data. Only FINISHED scans
+  #     # with successful provider responses produce uploadable output <=10MiB.
+  #     # Fixed limits: 1200s, 512 provider requests, 10000 emitted events, 1 HTTP/s.
+  #     # This does not provide a free global Internet index or prove ownership.
+  #     # Keyless providers can restrict coverage; discovery always remains additive
+  #     # and partial. Active/brute-force/internal HTTP extraction is disabled.
+  #     # NetworkPolicy still requires explicit provider egress or a controlled CNI
+  #     # FQDN policy. DNS A/AAAA resolution is retained, not an active service scan.
+  #   - name: tetragon-events
+  #     type: tetragon
+  #     schedule: "*/5 * * * *"
+  #     tokenSecretRef: {name: tetragon-ingest, key: token}
+  #     sensorNamespace: tetragon
+  #     sensorSelector: app.kubernetes.io/name=tetragon
+  #     sensorContainer: export-stdout # fixed; never collect arbitrary agent logs
+  #     clusterScope: k8s:uid:<kube-system-namespace-UID>
+  #     # Uses collectors.ingest.image for both native scanner and uploader.
+  #     # Requires an existing Tetragon sensor and JSON export-stdout container.
+  #     # Installs no sensor, privileged DaemonSet, host mount or tracing policy.
+  #     # Fixed overlap lookback6m, collection1m, overall2m; always complete=false.
+  #     # Raw logs stay in memory; only bounded sanitized findings enter /report.
+  #     # RBAC limits reads to the sensor namespace. Standard RBAC cannot enforce
+  #     # label/container restrictions on pods/log; the CLI checks both. Prefer a
+  #     # dedicated sensor namespace because the SA can read all logs within it.
+  #     activeDeadlineSeconds: 300
+  #     maxAgeSeconds: 900 # optional KSM freshness alert after missed runs
+  #     egress:
+  #       - to: [{ipBlock: {cidr: 192.0.2.10/32}}] # actual Kubernetes API destination
+  #         ports: [{protocol: TCP, port: 6443}]

@@ -1,0 +1,12 @@
+# A Dockerfile-specific allowlist: the application context excludes all deploy/.
+# Send no application sources, credentials, agent state or generated reports.
+**
+!deploy/
+!deploy/assessment/
+!deploy/assessment/strix_adapter.py
+!deploy/assessment/strix-security-requirements.txt
+!deploy/assessment/STRIX-SECURITY.md
+!deploy/assessment/Dockerfile.strix
+!deploy/assessment/Dockerfile.strix.dockerignore
+!deploy/assessment/tests/
+!deploy/assessment/tests/test_strix_adapter.py

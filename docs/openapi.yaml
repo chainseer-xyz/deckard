@@ -329,6 +329,22 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
+  /api/v1/findings/{id}/resolve:
+    post:
+      summary: Resolve an investigated runtime incident
+      description: Only ext.falco and ext.tetragon incidents support manual resolution. A nonempty investigation note is required and retained. Event silence never resolves an incident.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      requestBody:
+        $ref: '#/components/requestBodies/FindingAction'
+      responses:
+        '200':
+          description: Updated runtime incident
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Finding'}
+        '400': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /api/v1/sources:
     get:
       summary: Source sync status
@@ -416,6 +432,113 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
+        '501': {$ref: '#/components/responses/Error'}
+  /api/v1/discovery/{source}:
+    post:
+      summary: Import a native BBOT discovery report
+      description: Requires a configured remote_only BBOT source. Imports are always partial, non-authoritative and cannot remove assets. Scoped collector credentials can write only their configured discovery source.
+      parameters:
+        - name: source
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/x-ndjson:
+            schema: {type: string, maxLength: 10485760}
+      responses:
+        '200':
+          description: Source-bound partial import receipt; no canonical inventory metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [source, partial, status, added, changed, revived, ignored]
+                properties:
+                  source: {type: string}
+                  partial: {type: boolean, enum: [true]}
+                  status: {type: string, enum: [accepted]}
+                  added: {type: integer, minimum: 0}
+                  changed: {type: integer, minimum: 0}
+                  revived: {type: integer, minimum: 0}
+                  ignored: {type: integer, minimum: 0}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /api/v1/collectors:
+    get:
+      summary: List collector report delivery and assessment coverage
+      description: Includes observed producer scopes and configured never-seen credential grants. Fresh event or partial reports never imply complete coverage. Collector credentials cannot read this endpoint.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated producer state
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ListEnvelope'
+                  - {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/CollectorState'}}}}
+  /api/v1/assessments:
+    get:
+      summary: Read enabled assessment capabilities
+      description: Does not expose image references, auth profile names or model credentials. An enabled tool is configured, not proof of a successful assessment.
+      responses:
+        '200':
+          description: Configured tool names and session deadline
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled, tools, results_additive, timeout_seconds]
+                properties:
+                  enabled: {type: boolean}
+                  tools: {type: array, items: {type: string, enum: [zgrab2, zap, strix]}}
+                  results_additive: {type: boolean, enum: [true]}
+                  timeout_seconds: {type: integer}
+    post:
+      summary: Start an explicitly scoped isolated assessment
+      description: Requires an operator identity, live owned inventory assets, immutable tool images and verified network containment. Runs never inherit cloud or Kubernetes credentials. Intrusive testing is not scheduled automatically.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [tool, asset_ids]
+              properties:
+                tool: {type: string, enum: [zgrab2, zap, strix]}
+                asset_ids: {type: array, minItems: 1, maxItems: 16, uniqueItems: true, items: {type: integer, format: int64, minimum: 1}}
+      responses:
+        '202':
+          description: Bounded assessment job started
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AssessmentSession'}
+        '403': {$ref: '#/components/responses/Error'}
+        '501': {$ref: '#/components/responses/Error'}
+  /api/v1/assessments/{session}:
+    get:
+      summary: Read an assessment session
+      description: Session state is local to the current controller. Reports are never recovered as clean after a restart; accepted findings remain in PostgreSQL.
+      parameters:
+        - name: session
+          in: path
+          required: true
+          schema: {type: string, maxLength: 64}
+      responses:
+        '200':
+          description: Current session state without credentials or raw reports
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AssessmentSession'}
+        '404': {$ref: '#/components/responses/Error'}
         '501': {$ref: '#/components/responses/Error'}
   /api/v1/scans:
     get:
@@ -779,9 +902,35 @@ components:
         assets_by_scope: {type: object, additionalProperties: {type: integer}}
         findings_by_severity: {type: object, additionalProperties: {type: integer}}
         findings_by_check: {type: object, additionalProperties: {type: integer}}
+    CollectorState:
+      type: object
+      required: [tool, scope, expected_interval_seconds, health, coverage, open_findings]
+      properties:
+        tool: {type: string}
+        scope: {type: string}
+        last_report: {type: string, format: date-time}
+        last_complete: {type: string, format: date-time}
+        expected_interval_seconds: {type: number, description: Expected accepted report interval; not complete coverage}
+        health: {type: string, enum: [never, healthy, stale, reporting]}
+        coverage: {type: string, enum: [never, complete, incomplete, event_only]}
+        open_findings: {type: integer}
+    AssessmentSession:
+      type: object
+      properties:
+        id: {type: string}
+        tool: {type: string, enum: [zgrab2, zap, strix]}
+        asset_ids: {type: array, items: {type: integer, format: int64}}
+        status: {type: string, enum: [starting, running, complete, partial, failed]}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        job_name: {type: string}
+        reason: {type: string}
+        cleanup_pending: {type: boolean, description: Resource deletion failed; inspect and remove only the session's owned resources}
     SyncStatus:
       type: object
       properties:
+        remote_only: {type: boolean, description: Reports come from a scheduled collector; server-side sync is unavailable}
+        expected_interval_seconds: {type: number, description: Configured sync or remote report interval}
         source: {type: string}
         type: {type: string}
         last_run: {type: string, format: date-time}

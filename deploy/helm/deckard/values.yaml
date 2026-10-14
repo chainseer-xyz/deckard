@@ -317,3 +317,23 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 topologySpreadConstraints: []
+
+# Optional external collectors. Keep producer-specific authority isolated with
+# jobs[].tokenSecretRef. See collectors-values.yaml for pinned scanner examples.
+collectors:
+  enabled: false
+  ingest:
+    image: "" # required immutable Deckard reference when enabled
+    url: "" # defaults to this release's internal Service
+    tokenSecretRef: {name: "", key: token} # optional fallback; prefer per-job Secret
+    timeout: 2m
+  networkPolicy:
+    enabled: true
+    dnsNamespaceSelector:
+      matchLabels: {kubernetes.io/metadata.name: kube-system}
+    egress: [] # DNS + Deckard only; add explicit scanner destinations
+  alerts:
+    enabled: false # requires Prometheus Operator and kube-state-metrics
+    maxAgeSeconds: 172800
+    labels: {}
+  jobs: []

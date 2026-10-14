@@ -71,6 +71,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{/* Guard: CPU limits are forbidden by platform policy. */}}
 {{- define "deckard.validate" -}}
+{{- include "deckard.assessmentValidate" . -}}
 {{- if and .Values.resources .Values.resources.limits .Values.resources.limits.cpu }}
 {{- fail "resources.limits.cpu must not be set: CPU limits cause throttling and are disallowed" }}
 {{- end }}
@@ -88,6 +89,49 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if and .Values.nuclei.customTemplates.configMap .Values.nuclei.customTemplates.existingClaim }}
 {{- fail "nuclei.customTemplates.configMap and existingClaim are mutually exclusive" }}
 {{- end }}
+{{- end }}
+
+{{/* Assessment execution changes controller authority. Keep the config flag as
+     the only Helm switch and reject rollout overlap or incomplete isolation. */}}
+{{- define "deckard.assessmentValidate" -}}
+{{- if dig "assessment" "enabled" false .Values.config -}}
+{{- $assessment := get .Values.config "assessment" -}}
+{{- $namespace := dig "namespace" "deckard-assessments" $assessment -}}
+{{- $podIPEnv := dig "broker_ip_env" "DECKARD_POD_IP" $assessment -}}
+{{- if not (dig "network_policy_enforced" false $assessment) -}}
+{{- fail "assessment execution requires verified network_policy_enforced=true" -}}
+{{- end -}}
+{{- if ne (int .Values.replicaCount) 1 -}}{{ fail "assessment execution requires replicaCount=1" }}{{- end -}}
+{{- if not (has "api" .Values.roles) -}}{{ fail "assessment execution requires the api role" }}{{- end -}}
+{{- if ne (dig "type" "" .Values.deploymentStrategy) "Recreate" -}}{{ fail "assessment execution requires deploymentStrategy.type=Recreate" }}{{- end -}}
+{{- if and (hasKey .Values.deploymentStrategy "rollingUpdate") (ne (toJson .Values.deploymentStrategy.rollingUpdate) "null") -}}{{ fail "assessment Recreate cannot include rollingUpdate" }}{{- end -}}
+{{- if not .Values.networkPolicy.enabled -}}{{ fail "assessment execution requires networkPolicy.enabled=true" }}{{- end -}}
+{{- if eq (int .Values.metrics.port) 9092 -}}{{ fail "assessment broker port 9092 cannot be used for metrics" }}{{- end -}}
+{{- if or (not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $namespace)) (gt (len $namespace) 63) (eq $namespace .Release.Namespace) (eq $namespace "default") (hasPrefix "kube-" $namespace) -}}
+{{- fail "assessment execution requires a dedicated namespace distinct from the API and system namespaces" -}}
+{{- end -}}
+{{- if not (has (dig "broker_addr" "0.0.0.0:9092" $assessment) (list "0.0.0.0:9092" "[::]:9092")) -}}
+{{- fail "chart requires assessment.broker_addr on port 9092" -}}
+{{- end -}}
+{{- if not (regexMatch "^[A-Za-z_][A-Za-z0-9_]*$" $podIPEnv) -}}{{ fail "assessment broker_ip_env must be a valid environment variable name" }}{{- end -}}
+{{- if or (hasKey .Values.env $podIPEnv) (hasKey (.Values.secretEnv | default dict) $podIPEnv) -}}{{ fail "assessment Pod IP environment variable is reserved for downwardAPI" }}{{- end -}}
+{{- range .Values.extraEnv -}}
+{{- if eq (toString .name) $podIPEnv -}}{{ fail "assessment Pod IP environment variable is reserved for downwardAPI" }}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{- define "deckard.assessmentName" -}}
+{{- $identity := printf "%s/%s" .Release.Namespace (include "deckard.fullname" .) -}}
+{{- printf "%s-assessment-%s" ((include "deckard.fullname" .) | trunc 42 | trimSuffix "-") ($identity | sha256sum | trunc 8) -}}
+{{- end }}
+
+{{- define "deckard.assessmentLabels" -}}
+helm.sh/chart: {{ include "deckard.chart" . }}
+app.kubernetes.io/name: deckard-assessment
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: assessment
+app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
 {{/* True unless config.nuclei.update.enabled is explicitly false (air-gapped installs). */}}
@@ -117,7 +161,11 @@ metadata:
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
+  {{- if and (dig "assessment" "enabled" false $root.Values.config) (has "api" .roles) }}
+  serviceAccountName: {{ include "deckard.assessmentName" $root }}
+  {{- else }}
   serviceAccountName: {{ include "deckard.serviceAccountName" $root }}
+  {{- end }}
   terminationGracePeriodSeconds: {{ $root.Values.terminationGracePeriodSeconds }}
   {{- with $root.Values.imagePullSecrets }}
   imagePullSecrets: {{- toYaml . | nindent 4 }}
@@ -132,6 +180,9 @@ spec:
       ports:
         - { name: http, containerPort: 8080, protocol: TCP }
         - { name: metrics, containerPort: {{ $root.Values.metrics.port }}, protocol: TCP }
+        {{- if and (dig "assessment" "enabled" false $root.Values.config) (has "api" .roles) }}
+        - { name: assessment, containerPort: 9092, protocol: TCP }
+        {{- end }}
       env:
         - { name: DECKARD_SERVER__ROLES, value: {{ join "," .roles | quote }} }
         - { name: DECKARD_SERVER__METRICS_ADDR, value: {{ printf ":%v" $root.Values.metrics.port | quote }} }
@@ -139,6 +190,12 @@ spec:
         # gives every nuclei run its own HOME/XDG directories under the update
         # volume; HOME=/tmp covers a nuclei run when the updater is off.
         - { name: HOME, value: /tmp }
+        {{- if and (dig "assessment" "enabled" false $root.Values.config) (has "api" .roles) }}
+        - name: {{ dig "assessment" "broker_ip_env" "DECKARD_POD_IP" $root.Values.config }}
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        {{- end }}
         {{- if $root.Values.database.cnpg.enabled }}
         - name: DECKARD_DATABASE__URL
           valueFrom:

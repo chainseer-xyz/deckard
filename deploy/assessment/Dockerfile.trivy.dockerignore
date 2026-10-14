@@ -1,0 +1,6 @@
+**
+!deploy
+deploy/**
+!deploy/assessment
+deploy/assessment/**
+!deploy/assessment/Dockerfile.trivy

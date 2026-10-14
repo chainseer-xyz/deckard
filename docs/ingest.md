@@ -322,9 +322,25 @@ request bodies before importing; SARIF messages are not a secret-redaction forma
 Strix supports local models as well as hosted providers. Hosted inference can cost
 money and send source or target evidence outside your environment. Its Docker
 runtime requests additional network capabilities and can access configured host
-mounts. Deckard does not install, execute, grant permissions to or schedule Strix.
-Any future runner needs explicit target authorization, isolated credentials,
-enforced egress, bounded runtime/model budget and no automatic fixes or PR writes.
+mounts. Deckard's separate optional runner does not use that host runtime. It uses
+a constrained adapter over genuine pinned Strix with isolated shell/filesystem
+RPC and broker-only target traffic. Reports always remain incomplete. See
+[constrained Strix](collectors.md#constrained-strix) for exclusions, model approval
+and live containment requirements. No automatic fixes or PR writes are supported.
+
+## Runtime incidents
+
+Native `--tool falco` and `--tool tetragon` imports accept bounded JSON/NDJSON.
+Use `--scope k8s:uid:<kube-system-namespace-UID>`. Both tools always import
+incompletely, regardless of caller-supplied completeness. Native rule identity,
+namespace and Pod UID bind stable incidents to exact current workloads.
+Display cluster names and reported ownership never establish that binding.
+
+Older or repeated events cannot reopen a manually resolved incident. Newer events
+can reopen it. Runtime telemetry silence, deleted Pods and empty batches cannot
+resolve findings. Resolve reviewed incidents with an audit note in the UI/API.
+Raw command arguments, environment, labels and log bodies are discarded.
+See [runtime delivery](collectors.md#runtime-delivery) for the bounded scheduled collector.
 
 ## Configuration
 
@@ -342,6 +358,7 @@ ingest:
       max_findings: 5000   # per request, 0..5000 (default 5000)
       expected_interval: 24h   # drives deckard_ingest_expected_interval_seconds and DeckardIngestStale
     kubescape: { expected_interval: 6h }
+    tetragon: { expected_report_interval: 5m } # delivery, never complete coverage
     trufflehog: { expected_interval: 24h }
 ```
 
@@ -357,6 +374,8 @@ staleness alert). Any identity that can acknowledge or suppress can ingest; set
 | `deckard_ingest_findings` | `tool` | open ingested findings (from the store) |
 | `deckard_ingest_last_success_timestamp` | `tool`, `scope` | last run applied as complete (from the store); scopes beyond `max_scopes_per_tool` (by first ingest) report together as `scope="other"` with the oldest timestamp, logged once |
 | `deckard_ingest_expected_interval_seconds` | `tool` | `ingest.tools.<tool>.expected_interval`, only for tools that set it |
+| `deckard_ingest_last_report_timestamp` | `tool`, `scope` | Last accepted report, including incomplete/event-only delivery; separate from complete coverage |
+| `deckard_ingest_report_expected_interval_seconds` | `tool` | `expected_report_interval`; delivery cadence only |
 
 `deploy/examples/prometheus-rules.yml` adds `DeckardIngestStale` (no complete run for a
 `(tool, scope)` in twice its expected interval) and `DeckardIngestRejected` (rejected,

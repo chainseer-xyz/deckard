@@ -1,0 +1,79 @@
+{{- $root := . -}}
+{{- $collectors := .Values.collectors | default dict -}}
+{{- if $collectors.enabled -}}
+{{- range $job := $collectors.jobs -}}
+{{- if and (ne (toString $job.enabled) "false") (eq $job.type "kubescape") -}}
+{{- $ctx := dict "root" $root "job" $job -}}
+{{- $name := include "deckard.collectorName" $ctx -}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-cluster
+  labels: {{- include "deckard.collectorLabels" $ctx | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [namespaces, nodes, persistentvolumes]
+    verbs: [get, list]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [clusterroles, clusterrolebindings]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-cluster
+  labels: {{- include "deckard.collectorLabels" $ctx | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ $name }}-cluster}
+subjects: [{kind: ServiceAccount, name: {{ $name }}, namespace: {{ $root.Release.Namespace }}}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-workloads
+  labels: {{- include "deckard.collectorLabels" $ctx | nindent 4 }}
+rules:
+  # No Secrets, ConfigMaps, exec, logs, proxy, mutation or wildcard resources.
+  - apiGroups: [""]
+    resources: [pods, services, serviceaccounts, persistentvolumeclaims, replicationcontrollers, resourcequotas, limitranges]
+    verbs: [get, list]
+  - apiGroups: [apps]
+    resources: [deployments, daemonsets, statefulsets, replicasets]
+    verbs: [get, list]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, networkpolicies]
+    verbs: [get, list]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, rolebindings]
+    verbs: [get, list]
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets]
+    verbs: [get, list]
+{{- if $job.namespaces -}}
+{{- range $namespace := $job.namespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-workloads
+  namespace: {{ $namespace | quote }}
+  labels: {{- include "deckard.collectorLabels" $ctx | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ $name }}-workloads}
+subjects: [{kind: ServiceAccount, name: {{ $name }}, namespace: {{ $root.Release.Namespace }}}]
+{{- end -}}
+{{- else }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-workloads
+  labels: {{- include "deckard.collectorLabels" $ctx | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ $name }}-workloads}
+subjects: [{kind: ServiceAccount, name: {{ $name }}, namespace: {{ $root.Release.Namespace }}}]
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
