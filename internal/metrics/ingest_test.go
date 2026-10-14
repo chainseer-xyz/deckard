@@ -102,3 +102,58 @@ func TestRegisterIngestOnTheRegistry(t *testing.T) {
 		t.Fatalf("scrape lacks ingest series:\n%s", out)
 	}
 }
+
+func TestReportFreshnessDoesNotConsumeCompleteCoverageLabelSlots(t *testing.T) {
+	src := &fakeIngestSrc{scopes: []store.IngestScope{
+		{Tool: "prowler", Scope: "partial-first", LastAt: it0},
+		{Tool: "prowler", Scope: "complete-a", LastAt: it0, CompleteAt: it0},
+		{Tool: "prowler", Scope: "complete-b", LastAt: it0.Add(time.Hour), CompleteAt: it0.Add(time.Hour)},
+		{Tool: "prowler", Scope: "complete-c", LastAt: it0.Add(2 * time.Hour), CompleteAt: it0.Add(2 * time.Hour)},
+		{Tool: "tetragon", Scope: "runtime", LastAt: it0, CompleteAt: it0},
+	}}
+	c := metrics.NewIngestCollector(src, metrics.IngestOptions{Expected: map[string]time.Duration{"prowler": time.Hour}, ExpectedReport: map[string]time.Duration{"prowler": 5 * time.Minute, "tetragon": time.Minute}, MaxScopesPerTool: 1}, nil)
+	want := fmt.Sprintf(`
+# HELP deckard_ingest_last_report_timestamp Unix time of the last accepted report per tool and scope, including incomplete and event-only reports. Overflow scopes use the oldest report timestamp.
+# TYPE deckard_ingest_last_report_timestamp gauge
+deckard_ingest_last_report_timestamp{scope="partial-first",tool="prowler"} %d
+deckard_ingest_last_report_timestamp{scope="other",tool="prowler"} %d
+deckard_ingest_last_report_timestamp{scope="runtime",tool="tetragon"} %d
+# HELP deckard_ingest_report_expected_interval_seconds How often an accepted report per scope is expected; this does not assert complete assessment coverage.
+# TYPE deckard_ingest_report_expected_interval_seconds gauge
+deckard_ingest_report_expected_interval_seconds{tool="prowler"} 300
+deckard_ingest_report_expected_interval_seconds{tool="tetragon"} 60
+# HELP deckard_ingest_last_success_timestamp Unix time of the last ingest applied as complete per tool and scope. A tool's scopes beyond ingest.max_scopes_per_tool are reported as scope="other" with the oldest of their timestamps.
+# TYPE deckard_ingest_last_success_timestamp gauge
+deckard_ingest_last_success_timestamp{scope="complete-a",tool="prowler"} %d
+deckard_ingest_last_success_timestamp{scope="other",tool="prowler"} %d
+`, it0.Unix(), it0.Unix(), it0.Unix(), it0.Unix(), it0.Add(time.Hour).Unix())
+	if err := testutil.CollectAndCompare(c, strings.NewReader(want), "deckard_ingest_last_report_timestamp", "deckard_ingest_report_expected_interval_seconds", "deckard_ingest_last_success_timestamp"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExpectedReportsRemainVisibleWhenDatabaseIsUnavailable(t *testing.T) {
+	src := &fakeIngestSrc{err: errors.New("database unavailable")}
+	c := metrics.NewIngestCollector(src, metrics.IngestOptions{ExpectedReport: map[string]time.Duration{"tetragon": time.Minute, "disabled": 0}}, nil)
+	if n := testutil.CollectAndCount(c); n != 1 {
+		t.Fatalf("expected report series=%d, want 1", n)
+	}
+}
+
+func TestReservedOverflowScopeCannotCreateDuplicateMetricLabels(t *testing.T) {
+	src := &fakeIngestSrc{scopes: []store.IngestScope{{Tool: "prowler", Scope: "other", LastAt: it0, CompleteAt: it0}, {Tool: "prowler", Scope: "a", LastAt: it0.Add(time.Hour), CompleteAt: it0.Add(time.Hour)}, {Tool: "prowler", Scope: "b", LastAt: it0.Add(2 * time.Hour), CompleteAt: it0.Add(2 * time.Hour)}}}
+	c := metrics.NewIngestCollector(src, metrics.IngestOptions{MaxScopesPerTool: 1}, nil)
+	want := fmt.Sprintf(`
+# HELP deckard_ingest_last_report_timestamp Unix time of the last accepted report per tool and scope, including incomplete and event-only reports. Overflow scopes use the oldest report timestamp.
+# TYPE deckard_ingest_last_report_timestamp gauge
+deckard_ingest_last_report_timestamp{scope="a",tool="prowler"} %d
+deckard_ingest_last_report_timestamp{scope="other",tool="prowler"} %d
+# HELP deckard_ingest_last_success_timestamp Unix time of the last ingest applied as complete per tool and scope. A tool's scopes beyond ingest.max_scopes_per_tool are reported as scope="other" with the oldest of their timestamps.
+# TYPE deckard_ingest_last_success_timestamp gauge
+deckard_ingest_last_success_timestamp{scope="a",tool="prowler"} %d
+deckard_ingest_last_success_timestamp{scope="other",tool="prowler"} %d
+`, it0.Add(time.Hour).Unix(), it0.Unix(), it0.Add(time.Hour).Unix(), it0.Unix())
+	if err := testutil.CollectAndCompare(c, strings.NewReader(want), "deckard_ingest_last_report_timestamp", "deckard_ingest_last_success_timestamp"); err != nil {
+		t.Fatal(err)
+	}
+}

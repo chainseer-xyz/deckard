@@ -32,6 +32,10 @@ const _ = uint(podTerminationGrace - shutdownGrace - engine.StopOverrun - shutdo
 
 func (a *App) hasRole(role string) bool { return slices.Contains(a.cfg.Server.Roles, role) }
 
+func (a *App) scopeRefreshEnabled() bool {
+	return a.hasRole("scheduler") || a.hasRole("worker") || a.hasRole("api") && a.cfg.Assessment.Enabled
+}
+
 // Serve runs the configured roles until ctx is cancelled or a component fails,
 // then shuts down gracefully. It migrates the database first so a fresh
 // deployment needs no separate step.
@@ -75,6 +79,9 @@ func (a *App) Serve(ctx context.Context) error {
 		run("api", func(c context.Context) error {
 			return a.api.ListenAndServe(c, a.cfg.Server.HTTPAddr)
 		})
+		if a.assessments != nil {
+			run("assessment-broker", a.serveAssessmentBroker)
+		}
 	}
 	if a.hasRole("scheduler") || a.hasRole("worker") {
 		// River treats a cancelled start context as stop-and-cancel, which would
@@ -86,13 +93,13 @@ func (a *App) Serve(ctx context.Context) error {
 			return fmt.Errorf("engine: %w", err)
 		}
 	}
-	if a.hasRole("scheduler") || a.hasRole("worker") {
+	if a.scopeRefreshEnabled() {
 		run("inventory-refresh", func(c context.Context) error {
 			a.inv.RunRefresh(c, inventoryRefresh)
 			return nil
 		})
 	}
-	if a.hasRole("scheduler") || a.hasRole("worker") {
+	if a.scopeRefreshEnabled() {
 		// Every node that scans refreshes its own in-memory datasets: the
 		// River job runs on whichever node picks it up, which would leave the
 		// others on stale data.
@@ -128,6 +135,9 @@ func (a *App) Serve(ctx context.Context) error {
 		a.log.Error("component failed, shutting down", "error", runErr)
 	}
 	cancel()
+	if a.assessments != nil {
+		a.assessments.Close()
+	}
 
 	stopCtx, stop := context.WithTimeout(context.Background(), shutdownGrace)
 	defer stop()

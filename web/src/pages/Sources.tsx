@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { RefreshCw } from 'lucide-react';
-import { useMe, useScans, useSources, useSyncSource } from '../api/hooks';
+import { useMe, useScans, useSources, useSyncSource, useCollectors } from '../api/hooks';
 import { Card, Empty, ErrorBox, Loading, PageHeader, Pagination } from '../components/ui';
 import { SourceStatus } from '../components/SourceHealth';
+import { CollectorHealth } from '../components/CollectorHealth';
 import { absTime, fmtDuration, relTime, syncHealth } from '../lib/format';
 
 const LIMIT = 50;
@@ -13,6 +14,8 @@ export default function Sources() {
   const me = useMe();
   const sync = useSyncSource();
   const [page, setPage] = useState(1);
+  const [collectorPage, setCollectorPage] = useState(1);
+  const collectors = useCollectors(LIMIT, (collectorPage - 1) * LIMIT);
   const scans = useScans(LIMIT, (page - 1) * LIMIT);
   const canWrite = me.data?.can_write ?? false;
 
@@ -49,6 +52,7 @@ export default function Sources() {
                           {s.error ? <span className="text-bad">{s.error}</span> : s.warning ? <span className="text-warn">{s.warning}</span> : null}
                         </td>
                         <td className="td">
+                          {s.remote_only ? <span className="text-xs text-muted">Collector managed</span> :
                           <button
                             className="btn btn-sm"
                             disabled={!canWrite || (sync.isPending && sync.variables === s.source)}
@@ -58,6 +62,7 @@ export default function Sources() {
                           >
                             <RefreshCw size={12} aria-hidden="true" /> Sync now
                           </button>
+                          }
                         </td>
                       </tr>
                     );
@@ -68,6 +73,15 @@ export default function Sources() {
           ))}
           {sync.isError && <p role="alert" className="px-3 pb-2 text-sm text-bad">Sync failed: {(sync.error as Error).message}</p>}
           {sync.isSuccess && <p role="status" className="px-3 pb-2 text-sm text-ok">Sync triggered for {sync.variables}.</p>}
+        </Card>
+
+        <Card title="Collector reports">
+          {collectors.isLoading && <Loading />}
+          {collectors.isError && <ErrorBox error={collectors.error} onRetry={() => void collectors.refetch()} />}
+          {collectors.data && <>
+            <CollectorHealth collectors={collectors.data.items} />
+            <Pagination total={collectors.data.total} limit={collectors.data.limit || LIMIT} offset={collectors.data.offset} onPage={setCollectorPage} />
+          </>}
         </Card>
 
         <Card title="Recent scan runs">

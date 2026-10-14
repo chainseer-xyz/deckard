@@ -11,15 +11,18 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/chainseer-xyz/deckard/internal/api"
 	"github.com/chainseer-xyz/deckard/internal/api/auth"
+	"github.com/chainseer-xyz/deckard/internal/assessmentjob"
 	"github.com/chainseer-xyz/deckard/internal/check"
 	checkall "github.com/chainseer-xyz/deckard/internal/check/all"
 	"github.com/chainseer-xyz/deckard/internal/check/exposed"
 	netcheck "github.com/chainseer-xyz/deckard/internal/check/net"
 	"github.com/chainseer-xyz/deckard/internal/check/tlsconfig"
 	"github.com/chainseer-xyz/deckard/internal/config"
+	"github.com/chainseer-xyz/deckard/internal/discoveryimport"
 	"github.com/chainseer-xyz/deckard/internal/engine"
 	"github.com/chainseer-xyz/deckard/internal/finding"
 	"github.com/chainseer-xyz/deckard/internal/inventory"
@@ -49,26 +52,28 @@ type Options struct {
 	// VulnintelOptions, when set, adjusts the exploit-intel service options
 	// (feed URLs, HTTP client; test seam so tests never reach the internet).
 	VulnintelOptions func(*vulnintel.Options)
+	AssessmentClient kubernetes.Interface
 }
 
 // App owns the running components.
 type App struct {
-	cfg     *config.Config
-	log     *slog.Logger
-	opts    Options
-	st      *postgres.Store
-	pool    *pgxpool.Pool
-	guard   *scope.Guard
-	metrics *metrics.Metrics
-	vuln    *vulnintel.Service
-	inv     *inventory.Service
-	proc    *finding.Processor
-	disp    *finding.Dispatcher
-	hb      *heartbeat.Pinger // nil unless notify.heartbeat.url is set
-	eng     *engine.Engine
-	api     *api.Server
-	sources []source.Source
-	nw      *nucleiWiring
+	cfg         *config.Config
+	log         *slog.Logger
+	opts        Options
+	st          *postgres.Store
+	pool        *pgxpool.Pool
+	guard       *scope.Guard
+	metrics     *metrics.Metrics
+	vuln        *vulnintel.Service
+	inv         *inventory.Service
+	proc        *finding.Processor
+	disp        *finding.Dispatcher
+	hb          *heartbeat.Pinger // nil unless notify.heartbeat.url is set
+	eng         *engine.Engine
+	api         *api.Server
+	sources     []source.Source
+	nw          *nucleiWiring
+	assessments *assessmentjob.Manager
 }
 
 // New connects to the database and builds every component. It does not
@@ -102,14 +107,24 @@ func (a *App) build() error {
 	cfg := a.cfg
 	a.metrics = metrics.New(a.opts.Version, a.opts.Commit)
 	a.metrics.RegisterState(a.st, 15*time.Second)
+	sourceIntervals := map[string]time.Duration{}
+	for _, source := range cfg.Sources {
+		sourceIntervals[source.Name] = source.ExpectedInterval(cfg.Sync.Interval)
+	}
+	a.metrics.RegisterSourceCadence(sourceIntervals)
 	expected := map[string]time.Duration{}
+	expectedReports := map[string]time.Duration{}
 	for tool, tc := range cfg.Ingest.Tools {
 		if tc.ExpectedInterval > 0 {
 			expected[tool] = tc.ExpectedInterval
 		}
+		if tc.ExpectedReportInterval > 0 {
+			expectedReports[tool] = tc.ExpectedReportInterval
+		}
 	}
 	a.metrics.RegisterIngest(a.st, metrics.IngestOptions{
 		Expected: expected, MaxScopesPerTool: cfg.Ingest.MaxScopesPerTool, TTL: 15 * time.Second, Logger: a.log,
+		ExpectedReport: expectedReports,
 	})
 	g, err := scope.NewGuard(cfg.Scope, scope.WithLogger(a.log), scope.WithRefusalObserver(a.metrics.ScopeRefusal))
 	if err != nil {
@@ -117,7 +132,12 @@ func (a *App) build() error {
 	}
 	a.guard = g
 
+	var remoteBBOT []string
 	for _, sc := range cfg.Sources {
+		if sc.Type == "bbot" && sc.RemoteOnly {
+			remoteBBOT = append(remoteBBOT, sc.Name)
+			continue
+		}
 		s, err := registry.Build(sc, cfg.Scope, a.opts.Getenv, a.log)
 		if err != nil {
 			return fmt.Errorf("source %q: %w", sc.Name, err)
@@ -126,6 +146,10 @@ func (a *App) build() error {
 	}
 
 	a.inv = inventory.New(a.st, g, a.log)
+	discovery, err := discoveryimport.New(a.inv, remoteBBOT)
+	if err != nil {
+		return fmt.Errorf("remote discovery: %w", err)
+	}
 	procIntel, engIntel, err := a.buildVulnintel()
 	if err != nil {
 		return fmt.Errorf("vulnintel: %w", err)
@@ -198,6 +222,13 @@ func (a *App) build() error {
 		return fmt.Errorf("engine: %w", err)
 	}
 
+	if err := a.buildAssessments(); err != nil {
+		return err
+	}
+	var assessments api.AssessmentRunner
+	if a.assessments != nil {
+		assessments = a.assessments
+	}
 	a.api = api.New(api.Deps{
 		Store:       a.st,
 		Auth:        cfg.Auth,
@@ -209,6 +240,10 @@ func (a *App) build() error {
 		Broadcaster: api.NewBroadcaster(),
 		Ingester:    a.proc,
 		Ingest:      cfg.Ingest,
+		Discovery:   discovery,
+		Assessments: assessments,
+		Assessment:  cfg.Assessment,
+		Sources:     cfg.Sources, SyncInterval: cfg.Sync.Interval,
 	})
 	return nil
 }
@@ -281,6 +316,9 @@ const inventoryRefresh = 5 * time.Minute
 // Close releases database resources. The pool belongs to the store, so
 // closing the store closes it.
 func (a *App) Close() {
+	if a.assessments != nil {
+		a.assessments.Close()
+	}
 	if a.st != nil {
 		a.st.Close()
 	}

@@ -75,8 +75,13 @@ type Deps struct {
 
 	// Ingester applies POST /api/v1/ingest (finding.Processor); nil answers
 	// 501. Ingest is its policy: the zero value is disabled (403).
-	Ingester Ingester
-	Ingest   config.IngestConfig
+	Ingester     Ingester
+	Ingest       config.IngestConfig
+	Discovery    DiscoveryImporter
+	Assessments  AssessmentRunner
+	Assessment   config.AssessmentConfig
+	Sources      []config.SourceConfig
+	SyncInterval time.Duration
 
 	// Tunables; zero values pick defaults.
 	RequestTimeout   time.Duration // default 30s
@@ -97,14 +102,15 @@ type Deps struct {
 
 // Server is the HTTP API.
 type Server struct {
-	d       Deps
-	log     *slog.Logger
-	clock   Clock
-	authn   auth.Authenticator
-	authErr error
-	router  *chi.Mux
-	sse     *sseGate
-	ing     *ingestState
+	d          Deps
+	log        *slog.Logger
+	clock      Clock
+	authn      auth.Authenticator
+	authErr    error
+	router     *chi.Mux
+	sse        *sseGate
+	ing        *ingestState
+	collectors []collectorCredential
 
 	reqTotal *prometheus.CounterVec
 	reqDur   *prometheus.HistogramVec
@@ -165,6 +171,7 @@ func New(d Deps) *Server {
 		}
 		s.authn = a
 	}
+	s.initCollectors()
 	s.initIngest()
 	s.registerMetrics()
 	s.registerIngestMetrics()
@@ -258,6 +265,7 @@ func (s *Server) routes() *chi.Mux {
 		r.Group(func(r chi.Router) {
 			r.Use(maxBody(ingest.MaxBodyBytes), timeout(s.d.Ingest.Timeout), s.csrf)
 			r.Post("/ingest", s.ingest)
+			r.Post("/discovery/{source}", s.importDiscovery)
 		})
 
 		r.Group(func(r chi.Router) {
@@ -277,6 +285,9 @@ func (s *Server) routes() *chi.Mux {
 				r.Get("/findings", s.listFindings)
 				r.Get("/findings/{id}", s.getFinding)
 				r.Get("/sources", s.listSources)
+				r.Get("/collectors", s.listCollectors)
+				r.Get("/assessments", s.assessmentCapabilities)
+				r.Get("/assessments/{session}", s.getAssessment)
 				r.Get("/scans", s.listScans)
 				r.Get("/changes", s.changes)
 
@@ -286,8 +297,10 @@ func (s *Server) routes() *chi.Mux {
 					r.Post("/findings/{id}/suppress", s.findingAction("suppress"))
 					r.Post("/findings/{id}/false-positive", s.findingAction("false-positive"))
 					r.Post("/findings/{id}/reopen", s.findingAction("reopen"))
+					r.Post("/findings/{id}/resolve", s.findingAction("resolve"))
 					r.Post("/assets/{id}/rescan", s.rescanAsset)
 					r.Post("/sources/{name}/sync", s.syncSource)
+					r.Post("/assessments", s.startAssessment)
 				})
 			})
 		})
@@ -300,6 +313,20 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.authErr != nil {
 			writeError(w, http.StatusServiceUnavailable, "auth_misconfigured", "authentication is not configured correctly")
+			return
+		}
+		if credential, ok := s.authenticateCollector(r); ok {
+			if !credential.permitsRoute(r) {
+				writeError(w, http.StatusForbidden, "collector_scope", "collector credentials cannot access this endpoint")
+				return
+			}
+			id := &auth.Identity{Subject: "collector:" + credential.name, Method: auth.MethodToken}
+			if li, ok := r.Context().Value(ctxLogInfo).(*logInfo); ok {
+				li.actor = id.Actor()
+			}
+			ctx := context.WithValue(r.Context(), collectorContextKey{}, credential)
+			ctx = context.WithValue(ctx, ctxIdentity, id)
+			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
 		id, err := s.authn.Authenticate(r)

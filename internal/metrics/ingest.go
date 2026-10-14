@@ -8,6 +8,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/chainseer-xyz/deckard/internal/model"
 	"github.com/chainseer-xyz/deckard/internal/store"
 )
 
@@ -29,6 +30,12 @@ var (
 	descIngestExpected = prometheus.NewDesc("deckard_ingest_expected_interval_seconds",
 		"ingest.tools.<tool>.expected_interval: how often a complete run per scope is expected (only tools that set it).",
 		[]string{"tool"}, nil)
+	descIngestLastReport = prometheus.NewDesc("deckard_ingest_last_report_timestamp",
+		"Unix time of the last accepted report per tool and scope, including incomplete and event-only reports. Overflow scopes use the oldest report timestamp.",
+		[]string{"tool", "scope"}, nil)
+	descIngestReportExpected = prometheus.NewDesc("deckard_ingest_report_expected_interval_seconds",
+		"How often an accepted report per scope is expected; this does not assert complete assessment coverage.",
+		[]string{"tool"}, nil)
 )
 
 // NewIngestRequests builds deckard_ingest_requests_total{tool,result}. The
@@ -44,6 +51,8 @@ func NewIngestRequests() *prometheus.CounterVec {
 type IngestOptions struct {
 	// Expected is ingest.tools.<tool>.expected_interval for tools that set one.
 	Expected map[string]time.Duration
+	// ExpectedReport tracks accepted partial/event reports independently of complete scans.
+	ExpectedReport map[string]time.Duration
 	// MaxScopesPerTool caps the scope label per tool (ingest.max_scopes_per_tool).
 	MaxScopesPerTool int
 	TTL              time.Duration
@@ -63,7 +72,7 @@ type IngestCollector struct {
 	at     time.Time
 	scopes []store.IngestScope
 	loaded bool
-	warned map[string]bool // tools whose scope overflow was logged
+	warned map[string]bool // metric/tool pairs whose scope aggregation was logged
 }
 
 // NewIngestCollector builds the collector. errs may be nil.
@@ -87,6 +96,8 @@ func (c *IngestCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- descIngestOpen
 	ch <- descIngestLastOK
 	ch <- descIngestExpected
+	ch <- descIngestLastReport
+	ch <- descIngestReportExpected
 }
 
 func (c *IngestCollector) refresh() ([]store.IngestScope, bool) {
@@ -114,50 +125,75 @@ func (c *IngestCollector) Collect(ch chan<- prometheus.Metric) {
 			ch <- prometheus.MustNewConstMetric(descIngestExpected, g, iv.Seconds(), tool)
 		}
 	}
+	for tool, iv := range c.o.ExpectedReport {
+		if iv > 0 {
+			ch <- prometheus.MustNewConstMetric(descIngestReportExpected, g, iv.Seconds(), tool)
+		}
+	}
 	scopes, ok := c.refresh()
 	if !ok {
 		return
 	}
 	open := map[string]int{}
+	for _, s := range scopes {
+		open[s.Tool] += s.Open
+	}
+	for tool, n := range open {
+		ch <- prometheus.MustNewConstMetric(descIngestOpen, g, float64(n), tool)
+	}
+	c.collectTimestamps(ch, scopes, descIngestLastOK, "complete", func(s store.IngestScope) time.Time {
+		if model.IsRuntimeTool(s.Tool) {
+			return time.Time{}
+		}
+		return s.CompleteAt
+	})
+	c.collectTimestamps(ch, scopes, descIngestLastReport, "report", func(s store.IngestScope) time.Time {
+		return s.LastAt
+	})
+}
+
+// Each timestamp family has its own label cap: partial-only reports cannot
+// consume the slots reserved for scopes with a complete assessment.
+func (c *IngestCollector) collectTimestamps(ch chan<- prometheus.Metric, scopes []store.IngestScope, desc *prometheus.Desc, kind string, timestamp func(store.IngestScope) time.Time) {
 	labelled := map[string]int{}
 	other := map[string]time.Time{}
 	overflow := map[string]int{}
 	// ListIngestScopes orders by tool, then first ingest: the oldest
 	// MaxScopesPerTool scopes of a tool keep their own series.
 	for _, s := range scopes {
-		open[s.Tool] += s.Open
-		if s.CompleteAt.IsZero() {
-			continue // never complete: no freshness to report
+		at := timestamp(s)
+		if at.IsZero() {
+			continue
 		}
-		if labelled[s.Tool] < c.o.MaxScopesPerTool {
+		// Reserve the synthetic scope even when a producer literally uses it.
+		// Otherwise an ordinary series collides with the overflow series.
+		if s.Scope != OverflowScope && labelled[s.Tool] < c.o.MaxScopesPerTool {
 			labelled[s.Tool]++
-			ch <- prometheus.MustNewConstMetric(descIngestLastOK, g, float64(s.CompleteAt.Unix()), s.Tool, s.Scope)
+			ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, float64(at.Unix()), s.Tool, s.Scope)
 			continue
 		}
 		overflow[s.Tool]++
-		if o, seen := other[s.Tool]; !seen || s.CompleteAt.Before(o) {
-			other[s.Tool] = s.CompleteAt
+		if o, seen := other[s.Tool]; !seen || at.Before(o) {
+			other[s.Tool] = at
 		}
 	}
-	for tool, n := range open {
-		ch <- prometheus.MustNewConstMetric(descIngestOpen, g, float64(n), tool)
-	}
 	for tool, t := range other {
-		ch <- prometheus.MustNewConstMetric(descIngestLastOK, g, float64(t.Unix()), tool, OverflowScope)
+		ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, float64(t.Unix()), tool, OverflowScope)
 	}
-	c.logOverflow(overflow)
+	c.logOverflow(kind, overflow)
 }
 
-// logOverflow logs once per tool when its scopes first overflow the label cap.
-func (c *IngestCollector) logOverflow(overflow map[string]int) {
+// logOverflow logs once per family/tool when scopes first enter aggregation.
+func (c *IngestCollector) logOverflow(kind string, overflow map[string]int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for tool, n := range overflow {
-		if c.warned[tool] {
+		key := kind + ":" + tool
+		if c.warned[key] {
 			continue
 		}
-		c.warned[tool] = true
-		c.o.Logger.Warn("ingest: tool has more scopes than ingest.max_scopes_per_tool; the rest are reported as scope=\"other\" in deckard_ingest_last_success_timestamp",
-			"tool", tool, "max_scopes_per_tool", c.o.MaxScopesPerTool, "overflow_scopes", n)
+		c.warned[key] = true
+		c.o.Logger.Warn("ingest: scopes are aggregated as scope=\"other\" because of the label cap or reserved scope name",
+			"tool", tool, "timestamp_family", kind, "max_scopes_per_tool", c.o.MaxScopesPerTool, "overflow_scopes", n)
 	}
 }

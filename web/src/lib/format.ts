@@ -34,9 +34,7 @@ export function fmtDuration(ms: number): string {
 }
 
 /**
- * The API does not expose the configured sync interval, so staleness assumes
- * the server default (`sync.interval: 10m`); a source is stale after 3 missed
- * intervals.
+ * Older servers omit cadence, so fall back to their default sync interval.
  */
 export const SYNC_INTERVAL_MS = 10 * 60_000;
 export const STALE_AFTER_MS = 3 * SYNC_INTERVAL_MS;
@@ -51,12 +49,14 @@ export type SyncHealth = 'ok' | 'stale' | 'failing' | 'never';
 
 /** A source is failing if its last run errored, stale if it has not succeeded recently. */
 export function syncHealth(
-  s: { last_ok: string; error?: string },
+  s: { last_ok: string; error?: string; expected_interval_seconds?: number },
   now = Date.now(),
 ): SyncHealth {
   if (s.error) return 'failing';
   if (isZeroTime(s.last_ok)) return 'never';
-  if (now - Date.parse(s.last_ok) > STALE_AFTER_MS) return 'stale';
+  const expected = s.expected_interval_seconds;
+  const staleAfter = expected && expected > 0 ? 3 * expected * 1000 : STALE_AFTER_MS;
+  if (now - Date.parse(s.last_ok) > staleAfter) return 'stale';
   return 'ok';
 }
 
