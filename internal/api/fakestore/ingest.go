@@ -76,6 +76,19 @@ func (s *Store) IngestFindings(_ context.Context, in store.IngestInput) (store.I
 		}
 	}
 	sort.Slice(res.Rejected, func(i, j int) bool { return res.Rejected[i].Index < res.Rejected[j].Index })
+	if model.IsRuntimeTool(in.Tool) {
+		inventory := make([]model.Asset, 0, len(s.Assets))
+		for _, asset := range s.Assets {
+			inventory = append(inventory, asset)
+		}
+		index := identity.NewRuntimeIndex(inventory)
+		for _, item := range in.Items {
+			asset, accepted := assets[item.Index]
+			if id, found := index.Resolve(in.Scope, item.Finding.Evidence); found && accepted && !item.Ref && item.AssetKind == model.KindCloudResource {
+				s.addArtifactRelationLocked(model.Relation{FromID: asset.ID, ToID: id, Type: model.RelTargets})
+			}
+		}
+	}
 	if complete && len(res.Rejected) > 0 {
 		complete, res.NotCompleteReason = false, fmt.Sprintf("%d item(s) rejected", len(res.Rejected))
 	}
@@ -88,12 +101,23 @@ func (s *Store) IngestFindings(_ context.Context, in store.IngestInput) (store.I
 		}
 	}
 	items := make([]item, 0, len(in.Items))
+	previous := make(map[string]model.Finding, len(ids))
+	if model.IsRuntimeTool(in.Tool) {
+		for _, id := range ids {
+			f := s.Findings[id]
+			previous[f.Fingerprint] = f
+		}
+	}
 	for _, it := range in.Items {
 		a, ok := assets[it.Index]
 		if !ok {
 			continue
 		}
-		items = append(items, item{fp: model.Fingerprint(in.Check, in.Scope, it.Finding.Key), asset: a, fi: it.Finding})
+		fp := model.Fingerprint(in.Check, in.Scope, it.Finding.Key)
+		if old, found := previous[fp]; found && !model.RuntimeEventAdvances(it.Finding.Evidence, old.Evidence) {
+			continue
+		}
+		items = append(items, item{fp: fp, asset: a, fi: it.Finding})
 	}
 	res.ReconcileResult, res.Refreshed, res.Pending = s.reconcileLocked(set{
 		check: in.Check, ids: ids, items: items, partial: !complete, resolveAfter: in.ResolveAfter,

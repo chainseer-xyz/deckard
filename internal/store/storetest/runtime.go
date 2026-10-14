@@ -36,5 +36,54 @@ func RunRuntime(t *testing.T, factory Factory) {
 				t.Fatalf("runtime incident lost: %+v, %v", findings, err)
 			}
 		})
+		t.Run(tool+" delayed events cannot overwrite or reopen", func(t *testing.T) {
+			ctx := context.Background()
+			s := factory(t)
+			now := time.Date(2026, 10, 14, 1, 0, 0, 0, time.UTC)
+			latest := now.Format(time.RFC3339Nano)
+			in := store.IngestInput{Tool: tool, Scope: "k8s:uid:cluster-a", Check: model.IngestCheck(tool), Source: model.IngestSource(tool),
+				AssetScope: model.ScopeExternal, ObservedAt: now, Now: now, ResolveAfter: 1, Digest: "latest",
+				Items: []store.IngestItem{{Index: 0, AssetKind: model.KindCloudResource, AssetKey: "runtime:cluster-a:pod-a",
+					Finding: model.FindingInput{Key: "policy:pod-a", Title: "Runtime policy detection", Severity: model.SeverityHigh,
+						Evidence: map[string]any{"runtime_last_seen": latest}}}}}
+			result, err := s.IngestFindings(ctx, in)
+			if err != nil || len(result.Opened) != 1 {
+				t.Fatalf("event import: %+v, %v", result, err)
+			}
+			id := result.Opened[0].ID
+			for _, eventTime := range []time.Time{now.Add(-10 * time.Minute), now} {
+				in.Now, in.ObservedAt = now.Add(20*time.Minute), now.Add(20*time.Minute)
+				in.Digest = eventTime.String()
+				in.Items[0].Finding.Evidence = map[string]any{"runtime_last_seen": eventTime.Format(time.RFC3339Nano)}
+				if _, err := s.IngestFindings(ctx, in); err != nil {
+					t.Fatal(err)
+				}
+				f, err := s.GetFinding(ctx, id)
+				if err != nil || f.Evidence["runtime_last_seen"] != latest || !f.LastSeen.Equal(now) {
+					t.Fatalf("late or duplicate event changed evidence: %+v, %v", f, err)
+				}
+			}
+			if err := s.ChangeFindingStatus(ctx, id, store.StatusChange{Status: model.StatusResolved, Actor: "operator", Note: "Investigated and contained"}, now.Add(21*time.Minute)); err != nil {
+				t.Fatal(err)
+			}
+			audited, err := s.GetFinding(ctx, id)
+			if err != nil || audited.ResolvedAt == nil || audited.SuppressionNote != "Investigated and contained" {
+				t.Fatalf("manual resolution audit lost: %+v %v", audited, err)
+			}
+			in.Digest = "redelivery-after-resolution"
+			if _, err := s.IngestFindings(ctx, in); err != nil {
+				t.Fatal(err)
+			}
+			f, err := s.GetFinding(ctx, id)
+			if err != nil || f.Status != model.StatusResolved {
+				t.Fatalf("duplicate event reopened resolved incident: %+v, %v", f, err)
+			}
+			in.Digest = "new-detection"
+			in.Items[0].Finding.Evidence = map[string]any{"runtime_last_seen": now.Add(time.Minute).Format(time.RFC3339Nano)}
+			result, err = s.IngestFindings(ctx, in)
+			if err != nil || len(result.Reopened) != 1 {
+				t.Fatalf("genuinely new detection did not reopen incident: %+v, %v", result, err)
+			}
+		})
 	}
 }

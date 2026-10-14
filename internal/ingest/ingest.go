@@ -229,6 +229,12 @@ func Validate(r *Request, o Options) []Rejection {
 			keys[f.Key] = i
 		}
 		validateFinding(v, i, f)
+		if model.IsRuntimeTool(r.Tool) && f.Evidence["runtime_last_seen"] != nil {
+			eventTime, valid := model.RuntimeEventTime(f.Evidence)
+			if !valid || !o.Now.IsZero() && eventTime.After(o.Now.Add(MaxFutureSkew)) {
+				v.item(i, "runtime event time must be RFC 3339 and cannot exceed the allowed future skew")
+			}
+		}
 		if v.full() {
 			break
 		}

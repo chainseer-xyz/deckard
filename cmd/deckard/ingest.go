@@ -18,11 +18,13 @@ import (
 
 	"github.com/chainseer-xyz/deckard/internal/ingest"
 	"github.com/chainseer-xyz/deckard/internal/ingest/cyclonedx"
+	"github.com/chainseer-xyz/deckard/internal/ingest/falco"
 	"github.com/chainseer-xyz/deckard/internal/ingest/gitleaks"
 	"github.com/chainseer-xyz/deckard/internal/ingest/kubescape"
 	"github.com/chainseer-xyz/deckard/internal/ingest/prowler"
 	"github.com/chainseer-xyz/deckard/internal/ingest/s3scanner"
 	"github.com/chainseer-xyz/deckard/internal/ingest/sarif"
+	"github.com/chainseer-xyz/deckard/internal/ingest/tetragon"
 	"github.com/chainseer-xyz/deckard/internal/ingest/trivy"
 	"github.com/chainseer-xyz/deckard/internal/ingest/trufflehog"
 	"github.com/chainseer-xyz/deckard/internal/model"
@@ -47,6 +49,8 @@ var ingestParsers = map[string]ingest.Parser{
 	gitleaks.Tool:   gitleaks.Parse,
 	s3scanner.Tool:  s3scanner.Parse,
 	sarif.Tool:      sarif.Parse,
+	falco.Tool:      falco.Parse,
+	tetragon.Tool:   tetragon.Parse,
 }
 
 // Artifact parsers retain clean inventory in addition to optional findings.
@@ -155,6 +159,8 @@ func runIngest(args []string, stdout, stderr io.Writer) int {
 		return fail(ingestExitUsage, "unknown --format %q (known: %s)", f.format, strings.Join(names, ", "))
 	case (artifactFormat || artifactTool) && f.format != f.tool:
 		return fail(ingestExitUsage, "native artifact --format must match --tool to preserve producer reconciliation")
+	case (model.IsRuntimeTool(f.format) || model.IsRuntimeTool(f.tool)) && f.format != f.tool:
+		return fail(ingestExitUsage, "native event --format must match --tool to preserve incident lifecycle")
 	case strings.TrimSpace(f.scope) == "":
 		return fail(ingestExitUsage, "--scope is required\n\n%s", usage)
 	}
@@ -184,6 +190,9 @@ func runIngest(args []string, stdout, stderr io.Writer) int {
 	if artifactFormat {
 		inputLimit = min(trivy.MaxInputBytes, cyclonedx.MaxInputBytes)
 	}
+	if model.IsRuntimeTool(f.format) {
+		inputLimit = min(falco.MaxInputBytes, tetragon.MaxInputBytes)
+	}
 	data, src, err := readIngestInput(f.file, inputLimit)
 	if err != nil {
 		return fail(ingestExitUsage, "%v", err)
@@ -204,6 +213,10 @@ func runIngest(args []string, stdout, stderr io.Writer) int {
 	if f.format == cyclonedx.Tool {
 		f.incomplete = true
 		_, _ = fmt.Fprintln(errw, "deckard ingest: note: CycloneDX SBOM inventory is not a CVE scan; complete=false, existing findings cannot resolve")
+	}
+	if model.IsRuntimeTool(f.format) {
+		f.incomplete = true
+		_, _ = fmt.Fprintln(errw, "deckard ingest: note: runtime events are not a clean assessment; complete=false, silence cannot resolve incidents")
 	}
 	req := &ingest.Request{Tool: f.tool, Scope: f.scope, Complete: !f.incomplete, ObservedAt: &observed, Findings: findings,
 		Artifacts: report.Artifacts, Relations: report.Relations}
