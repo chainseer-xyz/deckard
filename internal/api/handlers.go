@@ -429,9 +429,10 @@ func (s *Server) listSources(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, r, err)
 		return
 	}
-	lo := min(offset, len(all))
-	hi := min(lo+limit, len(all))
-	writeJSON(w, http.StatusOK, newList(all[lo:hi], len(all), limit, offset))
+	states := s.sourceStates(all)
+	lo := min(offset, len(states))
+	hi := min(lo+limit, len(states))
+	writeJSON(w, http.StatusOK, newList(states[lo:hi], len(states), limit, offset))
 }
 
 func (s *Server) listScans(w http.ResponseWriter, r *http.Request) {
@@ -483,6 +484,7 @@ var actionStatus = map[string]model.FindingStatus{
 	"suppress":       model.StatusSuppressed,
 	"false-positive": model.StatusFalsePositive,
 	"reopen":         model.StatusOpen,
+	"resolve":        model.StatusResolved,
 }
 
 func (s *Server) findingAction(action string) http.HandlerFunc {
@@ -507,6 +509,9 @@ func (s *Server) findingAction(action string) http.HandlerFunc {
 		case action == "suppress" && req.Note == "":
 			writeError(w, http.StatusBadRequest, "invalid_body", "suppress requires a note")
 			return
+		case action == "resolve" && req.Note == "":
+			writeError(w, http.StatusBadRequest, "invalid_body", "runtime resolution requires an investigation note")
+			return
 		case req.Until != nil && action != "suppress" && action != "acknowledge":
 			writeError(w, http.StatusBadRequest, "invalid_body", "until is only valid for suppress and acknowledge")
 			return
@@ -520,7 +525,13 @@ func (s *Server) findingAction(action string) http.HandlerFunc {
 			s.storeError(w, r, err)
 			return
 		}
-		if f.Status == model.StatusResolved {
+		tool := strings.TrimPrefix(f.Check, "ext.")
+		runtime := model.IsRuntimeTool(tool) && f.Source == model.IngestSource(tool) && f.IngestScope != ""
+		if action == "resolve" && !runtime {
+			writeError(w, http.StatusConflict, "conflict", "only runtime incidents support manual resolution")
+			return
+		}
+		if f.Status == model.StatusResolved && (!runtime || action != "reopen") {
 			writeError(w, http.StatusConflict, "conflict", "finding is resolved")
 			return
 		}
@@ -624,6 +635,12 @@ func (s *Server) syncSource(w http.ResponseWriter, r *http.Request) {
 	}
 	if newQuery(r).reject(w) {
 		return
+	}
+	for _, source := range s.d.Sources {
+		if source.Name == name && source.RemoteOnly {
+			writeError(w, 409, "remote_source", "this source receives reports from its scheduled collector; it cannot be polled by the server")
+			return
+		}
 	}
 	if err := s.d.Actions.TriggerSync(r.Context(), name); err != nil {
 		s.actionError(w, r, err)

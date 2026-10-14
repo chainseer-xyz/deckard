@@ -36,8 +36,12 @@ Commands:
   scan [--no-update] run one scan pass and exit (refreshes nuclei templates and reference data first; --no-update skips)
   findings          print current findings (--min-severity, --status, --format table|json)
   ingest            post an external scanner's output (prowler, kubescape, trufflehog, gitleaks,
-                    s3scanner, sarif) to a deckard API; see deckard ingest --help and docs/ingest.md
+                    s3scanner, sarif, trivy, cyclonedx, falco, tetragon) to a deckard API
                     (ingest prowler-app pulls the findings of a running Prowler App instead)
+  discovery ingest  import native BBOT discovery into a configured remote-only source
+  runtime collect   collect a bounded, incomplete Tetragon event window
+  images collect    scan immutable images from an explicit Kubernetes inventory
+  assessment        execute or upload an isolated assessment job report
   version           print version information
 
 Common flags:
@@ -70,6 +74,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runFindings(args[1:], stdout, stderr)
 	case "ingest":
 		return runIngest(args[1:], stdout, stderr)
+	case "discovery":
+		return runDiscovery(args[1:], stdout, stderr)
+	case "runtime":
+		return runRuntime(args[1:], stdout, stderr)
+	case "assessment":
+		return runAssessment(args[1:], stdout, stderr)
+	case "images":
+		return runImages(args[1:], stdout, stderr)
 	}
 	_, _ = fmt.Fprintf(stderr, "deckard: unknown command %q\n\n%s", args[0], usage)
 	return 2

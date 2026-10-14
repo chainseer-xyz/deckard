@@ -72,7 +72,7 @@ func TestCycloneDXPostsSuccessfullyWithoutResolvingFindings(t *testing.T) {
 			t.Error("missing normal bearer authentication")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(ingest.Response{Complete: false, Accepted: len(got.Findings)}); err != nil {
+		if err := json.NewEncoder(w).Encode(ingest.Response{Complete: false, Accepted: len(got.Findings), Rejected: []ingest.Rejection{}}); err != nil {
 			t.Error(err)
 		}
 	}))

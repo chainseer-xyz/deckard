@@ -49,6 +49,7 @@ type Config struct {
 	Auth         AuthConfig                `koanf:"auth"`
 	Vulnintel    VulnintelConfig           `koanf:"vulnintel"`
 	Intel        IntelConfig               `koanf:"intel"`
+	Assessment   AssessmentConfig          `koanf:"assessment"`
 
 	// intelKeyErrs are unknown keys found under intel.* at load (the block is
 	// closed; see unknownIntelKeys). Validate reports them.
@@ -78,6 +79,16 @@ type IngestConfig struct {
 	// Tools holds per-tool settings keyed by tool name. Tools not listed may
 	// still ingest with the defaults (external assets, 5000 findings).
 	Tools map[string]IngestToolConfig `koanf:"tools"`
+	// Credentials grant write-only access to exact producer scopes or remote
+	// discovery sources. Their tokens must differ from administrator tokens.
+	Credentials map[string]CollectorCredentialConfig `koanf:"credentials"`
+}
+
+type CollectorCredentialConfig struct {
+	TokenEnv         string   `koanf:"token_env"`
+	Tools            []string `koanf:"tools"`
+	Scopes           []string `koanf:"scopes"`
+	DiscoverySources []string `koanf:"discovery_sources"`
 }
 
 // IngestToolConfig is the per-tool ingest policy.
@@ -93,6 +104,9 @@ type IngestToolConfig struct {
 	// and DeckardIngestStale fires after twice that without one. 0 = no
 	// expectation.
 	ExpectedInterval time.Duration `koanf:"expected_interval"`
+	// ExpectedReportInterval tracks accepted reports, including partial and
+	// event-only producers. It never implies complete assessment coverage.
+	ExpectedReportInterval time.Duration `koanf:"expected_report_interval"`
 }
 
 // MaxIngestFindings is the hard per-request findings limit.
@@ -193,7 +207,9 @@ type SourceConfig struct {
 	Topology   bool     `koanf:"topology"`
 
 	// bbot: a read-only, non-authoritative NDJSON discovery report.
-	DiscoveryFile string `koanf:"discovery_file"`
+	DiscoveryFile  string        `koanf:"discovery_file"`
+	RemoteOnly     bool          `koanf:"remote_only"`
+	ReportInterval time.Duration `koanf:"report_interval"`
 
 	// static
 	Hostnames []string `koanf:"hostnames"`
@@ -489,6 +505,16 @@ func Defaults() map[string]any {
 		"ingest.max_concurrent":                   4,
 		"ingest.timeout":                          "2m",
 		"ingest.max_scopes_per_tool":              50,
+		"assessment.enabled":                      false,
+		"assessment.namespace":                    "deckard-assessments",
+		"assessment.broker_addr":                  "0.0.0.0:9092",
+		"assessment.broker_ip_env":                "DECKARD_POD_IP",
+		"assessment.max_sessions":                 16,
+		"assessment.max_running":                  2,
+		"assessment.timeout":                      "15m",
+		"assessment.max_requests":                 500,
+		"assessment.max_request_bytes":            8 << 20,
+		"assessment.max_response_bytes":           32 << 20,
 		"auth.mode":                               "token",
 		"auth.oidc.groups_claim":                  "groups",
 	}
@@ -643,6 +669,7 @@ func (c *Config) Validate() error {
 	c.validateVulnintel(add)
 	c.validateIntel(add)
 	c.validateIngest(add)
+	c.validateAssessment(add)
 	if c.Scheduling.ErrorRetry <= 0 {
 		add("scheduling.error_retry must be > 0")
 	}
@@ -873,7 +900,13 @@ func (c *Config) validateSources(add func(string, ...any)) {
 		if s.Type == "gcpdns" {
 			validateGCPDNS(s, add)
 		}
-		if s.Type == "bbot" && strings.TrimSpace(s.DiscoveryFile) == "" {
+		if s.RemoteOnly && (s.Type != "bbot" || s.DiscoveryFile != "" || strings.ContainsAny(s.Name, "/?#")) {
+			add("sources[%s]: remote_only requires a BBOT source without discovery_file or URL path characters", s.Name)
+		}
+		if s.ReportInterval < 0 {
+			add("sources[%s]: report_interval must be nonnegative", s.Name)
+		}
+		if s.Type == "bbot" && !s.RemoteOnly && strings.TrimSpace(s.DiscoveryFile) == "" {
 			add("sources[%s]: bbot requires discovery_file", s.Name)
 		}
 		if s.Type != "static" {
@@ -968,7 +1001,11 @@ func (c *Config) validateIngest(add func(string, ...any)) {
 		if t.ExpectedInterval < 0 {
 			add("ingest.tools.%s.expected_interval must be >= 0", name)
 		}
+		if t.ExpectedReportInterval < 0 {
+			add("ingest.tools.%s.expected_report_interval must be >= 0", name)
+		}
 	}
+	c.validateCollectorCredentials(add)
 }
 
 // validIngestTool mirrors model.ValidIngestTool (config does not import the

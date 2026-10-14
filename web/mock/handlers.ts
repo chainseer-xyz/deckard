@@ -39,12 +39,14 @@ const TRANSITION: Record<string, FindingStatus> = {
   suppress: 'suppressed',
   'false-positive': 'false_positive',
   reopen: 'open',
+  resolve: 'resolved',
 };
 
 /** Build msw handlers over a mutable state so actions are reflected in lists. */
 export function makeHandlers(state: MockState = { findings: d.makeFindings(), canWrite: true }) {
   const B = '*/api/v1';
   return [
+    http.get(`${B}/assessments`, () => HttpResponse.json({ enabled: false, tools: [], results_additive: true, timeout_seconds: 0 })),
     http.get(`${B}/me`, () => HttpResponse.json({ identity: 'mock@example.com', can_write: state.canWrite, csrf_token: d.mockCsrfToken })),
     http.get(`${B}/stats`, () => HttpResponse.json(computeStats(state.findings, state.assets))),
     http.get(`${B}/assets`, ({ request }) => {
@@ -128,6 +130,7 @@ export function makeHandlers(state: MockState = { findings: d.makeFindings(), ca
     }),
     http.get(`${B}/sources`, () => HttpResponse.json({ items: d.sources, total: d.sources.length, limit: 100, offset: 0 })),
     http.post(`${B}/sources/:name/sync`, () => HttpResponse.json({ started: true }, { status: 202 })),
+    http.get(`${B}/collectors`, ({ request }) => HttpResponse.json(page([], new URL(request.url)))),
     http.get(`${B}/scans`, ({ request }) => HttpResponse.json(page(state.scans ?? d.scans, new URL(request.url)))),
     http.get(`${B}/changes`, ({ request }) => {
       const u = new URL(request.url);

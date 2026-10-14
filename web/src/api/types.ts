@@ -2,6 +2,23 @@
 // internal/store/store.go. Timestamps are RFC 3339 strings.
 
 export type Severity = 'info' | 'low' | 'medium' | 'high' | 'critical';
+export type AssessmentTool = 'zgrab2' | 'zap' | 'strix';
+export interface AssessmentCapabilities {
+  enabled: boolean;
+  tools: AssessmentTool[];
+  results_additive: boolean;
+  timeout_seconds: number;
+}
+export interface AssessmentSession {
+  id: string;
+  tool: AssessmentTool;
+  asset_ids: number[];
+  status: 'starting' | 'running' | 'complete' | 'partial' | 'failed';
+  reason?: string;
+  cleanup_pending?: boolean;
+  created_at: string;
+  expires_at: string;
+}
 export const SEVERITIES: Severity[] = ['info', 'low', 'medium', 'high', 'critical'];
 export const severityRank = (s: string): number => SEVERITIES.indexOf(s as Severity);
 
@@ -176,6 +193,8 @@ export interface SyncStatus {
   warning?: string;
   asset_count: number;
   duration_ms: number;
+  remote_only?: boolean;
+  expected_interval_seconds?: number;
 }
 
 export interface ScanRun {
@@ -187,6 +206,17 @@ export interface ScanRun {
   duration_ms: number;
   error?: string;
   findings: number;
+}
+
+export interface CollectorState {
+  tool: string;
+  scope: string;
+  last_report?: string;
+  last_complete?: string;
+  expected_interval_seconds: number;
+  health: 'never' | 'healthy' | 'stale' | 'reporting';
+  coverage: 'never' | 'complete' | 'incomplete' | 'event_only';
+  open_findings: number;
 }
 
 export interface Stats {
@@ -211,7 +241,7 @@ export interface Page<T> {
   offset: number;
 }
 
-export type FindingAction = 'acknowledge' | 'suppress' | 'false-positive' | 'reopen';
+export type FindingAction = 'acknowledge' | 'suppress' | 'false-positive' | 'reopen' | 'resolve';
 export interface FindingActionBody {
   note: string;
   until?: string;

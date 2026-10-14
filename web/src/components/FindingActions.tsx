@@ -17,9 +17,10 @@ const META: Record<FindingAction, { label: string; Icon: typeof Check }> = {
   suppress: { label: 'Suppress', Icon: EyeOff },
   'false-positive': { label: 'False positive', Icon: ThumbsDown },
   reopen: { label: 'Reopen', Icon: RotateCcw },
+  resolve: { label: 'Resolve incident', Icon: Check },
 };
 
-type Pending = 'suppress' | 'false-positive' | null;
+type Pending = 'suppress' | 'false-positive' | 'resolve' | null;
 
 /** Status-changing actions for one finding. Suppress and false-positive need a reason. */
 export function FindingActions({ f }: { f: Finding }) {
@@ -27,10 +28,13 @@ export function FindingActions({ f }: { f: Finding }) {
   const mut = useFindingAction();
   const [pending, setPending] = useState<Pending>(null);
   const canWrite = me.data?.can_write ?? false;
-  const actions = ACTIONS[f.status];
+  const runtime = ['falco', 'tetragon'].some((tool) => f.check === `ext.${tool}` && f.source === `ingest:${tool}`);
+  const actions: FindingAction[] = runtime
+    ? f.status === 'resolved' ? ['reopen'] : [...ACTIONS[f.status], 'resolve']
+    : ACTIONS[f.status];
 
   const run = (a: FindingAction) => {
-    if (a === 'suppress' || a === 'false-positive') setPending(a);
+    if (a === 'suppress' || a === 'false-positive' || a === 'resolve') setPending(a);
     else mut.mutate({ id: f.id, action: a, body: { note: '' } });
   };
 
@@ -61,9 +65,9 @@ export function FindingActions({ f }: { f: Finding }) {
       )}
       {pending && (
         <SuppressModal
-          title={pending === 'suppress' ? 'Suppress finding' : 'Mark as false positive'}
+          title={pending === 'resolve' ? 'Resolve runtime incident' : pending === 'suppress' ? 'Suppress finding' : 'Mark as false positive'}
           subject={f.title}
-          submitLabel={pending === 'suppress' ? 'Suppress' : 'Mark false positive'}
+          submitLabel={pending === 'resolve' ? 'Resolve' : pending === 'suppress' ? 'Suppress' : 'Mark false positive'}
           withExpiry={pending === 'suppress'}
           busy={mut.isPending}
           error={mut.isError ? (mut.error as Error).message : undefined}

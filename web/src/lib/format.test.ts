@@ -14,6 +14,10 @@ describe('syncHealth', () => {
     expect(syncHealth({ last_ok: ago(5 * STALE_AFTER_MS), error: 'boom' }, NOW)).toBe('failing');
     expect(syncHealth({ last_ok: '0001-01-01T00:00:00Z' }, NOW)).toBe('never');
   });
+  it('uses the configured discovery report cadence', () => {
+    expect(syncHealth({ last_ok: ago(4 * 3600_000), expected_interval_seconds: 21600 }, NOW)).toBe('ok');
+    expect(syncHealth({ last_ok: ago(19 * 3600_000), expected_interval_seconds: 21600 }, NOW)).toBe('stale');
+  });
 });
 
 describe('isPartialSync', () => {

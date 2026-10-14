@@ -28,6 +28,8 @@ export const useFinding = (id: number | undefined, placeholder?: Finding) =>
     placeholderData: placeholder,
   });
 export const useSources = () => useQuery({ queryKey: ['sources'], queryFn: api.sources });
+export const useCollectors = (limit = 50, offset = 0) =>
+  useQuery({ queryKey: ['collectors', limit, offset], queryFn: () => api.collectors(limit, offset) });
 export const useScans = (limit: number, offset: number) =>
   useQuery({ queryKey: ['scans', limit, offset], queryFn: () => api.scans(limit, offset) });
 export const useChanges = (limit = 15) =>

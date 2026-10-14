@@ -66,7 +66,13 @@ func (s *Source) Discover(ctx context.Context) (*source.Discovery, error) {
 	if err != nil || !info.Mode().IsRegular() || info.Size() > maxReportBytes {
 		return nil, errors.New("bbot: discovery_file changed or exceeds 64 MiB")
 	}
-	return readReport(ctx, f, s.name)
+	return Parse(ctx, f, s.name)
+}
+
+// Parse imports a bounded native BBOT JSONL stream using the configured source
+// identity. It never declares ownership; every successful discovery is partial.
+func Parse(ctx context.Context, input io.Reader, sourceName string) (*source.Discovery, error) {
+	return readReport(ctx, input, sourceName)
 }
 
 type event struct {

@@ -211,6 +211,14 @@ func postWith(t *testing.T, fd *fakeDeckard, extra ...string) (int, string, stri
 
 func TestIngestPostOutcomes(t *testing.T) {
 	ok := `{"accepted":3,"opened":3,"reopened":0,"refreshed":0,"resolved_pending":0,"resolved":0,"complete":true,"replay":false,"rejected":[]}`
+	t.Run("incomplete uploads require a real receipt", func(t *testing.T) {
+		for _, body := range []string{`{}`, `null`, `{"complete":null}`, `{"complete":"false"}`} {
+			fd := &fakeDeckard{t: t, replies: []func(http.ResponseWriter){reply(200, body)}}
+			if code, _, _ := postWith(t, fd, "--incomplete"); code == ingestExitOK {
+				t.Fatalf("false delivery for %s", body)
+			}
+		}
+	})
 	t.Run("applied", func(t *testing.T) {
 		fd := &fakeDeckard{t: t, replies: []func(http.ResponseWriter){reply(200, ok)}}
 		code, out, errs := postWith(t, fd)

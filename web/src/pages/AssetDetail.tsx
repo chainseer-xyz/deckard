@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, Network, RefreshCw } from 'lucide-react';
 import { useAsset, useMe, useRescan } from '../api/hooks';
 import { isProbeTarget } from '../api/types';
 import { AssetProperties } from '../components/AssetProperties';
+import { AssessmentControls } from '../components/AssessmentControls';
 import { AssetSourceFacts } from '../components/AssetSourceFacts';
 import { DnsChainView } from '../components/DnsChainView';
 import { FindingDrawer } from '../components/FindingDrawer';
@@ -64,6 +65,8 @@ export default function AssetDetail() {
         <AssetProperties d={d} />
 
         <AssetSourceFacts asset={asset} />
+
+        <AssessmentControls key={asset.id} asset={asset} canWrite={canWrite} />
 
         {chain && <DnsChainView chain={chain} />}
 

@@ -182,6 +182,10 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_body", "malformed request: "+err.Error())
 		return
 	}
+	if !permitsIngest(ctx, req.Tool, req.Scope) {
+		writeError(w, http.StatusForbidden, "collector_scope", "collector credential does not grant this exact producer and scope")
+		return
+	}
 	tc := cfg.Tools[req.Tool]
 	if problems := ingest.Validate(req, ingest.Options{MaxFindings: tc.MaxFindings, Now: s.clock.Now()}); len(problems) > 0 {
 		s.countIngest(req.Tool, ingestRejected)

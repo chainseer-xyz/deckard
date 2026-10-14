@@ -1,10 +1,14 @@
 import { clearToken, getToken, markRejected } from './auth';
 import type {
   AssetDetail,
+  AssessmentCapabilities,
+  AssessmentSession,
+  AssessmentTool,
   Asset,
   AssetEdge,
   Baseline,
   ChangeEvent,
+  CollectorState,
   Finding,
   FindingGroup,
   FindingAction,
@@ -241,6 +245,9 @@ function normEdge(e: Record<string, unknown>): AssetEdge {
 }
 
 export const api = {
+  assessmentCapabilities: () => request<AssessmentCapabilities>('/assessments'),
+  startAssessment: (tool: AssessmentTool, assetIds: number[]) => request<AssessmentSession>('/assessments', { method: 'POST', body: { tool, asset_ids: assetIds } }),
+  assessment: (id: string) => request<AssessmentSession>(`/assessments/${encodeURIComponent(id)}`),
   me: async (signal?: AbortSignal) => {
     const me = await request<Me>('/me', { signal });
     setCsrfToken(me.csrf_token ?? null);
@@ -268,6 +275,7 @@ export const api = {
   syncSource: (name: string) =>
     request<unknown>(`/sources/${encodeURIComponent(name)}/sync`, { method: 'POST', body: {} }),
   sources: () => request<Page<SyncStatus>>('/sources'),
+  collectors: (limit = 50, offset = 0) => request<Page<CollectorState>>('/collectors', { query: { limit, offset } }),
   scans: (limit = 50, offset = 0) => request<Page<ScanRun>>('/scans', { query: { limit, offset } }),
   changes: (limit = 25, since?: string) =>
     request<Page<ChangeEvent>>('/changes', { query: { limit, since } }),

@@ -361,6 +361,15 @@ func ingestOutcome(status int, body []byte, f ingestFlags, out, errw io.Writer) 
 		}
 		return ingestExitRejected
 	}
+	var shape struct {
+		Complete *bool               `json:"complete"`
+		Accepted *int                `json:"accepted"`
+		Rejected *[]ingest.Rejection `json:"rejected"`
+	}
+	if json.Unmarshal(body, &shape) != nil || shape.Complete == nil || shape.Accepted == nil || *shape.Accepted < 0 || shape.Rejected == nil {
+		_, _ = fmt.Fprintln(errw, "deckard ingest: invalid delivery receipt; acceptance was not confirmed")
+		return ingestExitRejected
+	}
 	var r ingest.Response
 	if err := json.Unmarshal(body, &r); err != nil {
 		_, _ = fmt.Fprintf(errw, "deckard ingest: unexpected response body: %v\n", err)
