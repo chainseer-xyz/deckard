@@ -234,6 +234,10 @@ func IngestCheck(tool string) string { return IngestCheckPrefix + tool }
 // IngestSource is the source label of assets created by tool's ingest.
 func IngestSource(tool string) string { return IngestSourcePrefix + tool }
 
+// IsRuntimeTool identifies event streams, whose silence never proves that an
+// incident disappeared. Enforce this at both the wire and storage boundaries.
+func IsRuntimeTool(tool string) bool { return tool == "falco" || tool == "tetragon" }
+
 // ValidIngestTool reports whether name is a valid ingest tool name:
 // ^[a-z0-9][a-z0-9-]{1,31}$ (it becomes part of a check name, a source label,
 // an Alertmanager alertname and a metric label).

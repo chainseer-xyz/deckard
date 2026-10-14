@@ -36,6 +36,9 @@ func (s *Store) IngestFindings(_ context.Context, in store.IngestInput) (store.I
 		return res, nil
 	}
 	complete := in.Complete
+	if model.IsRuntimeTool(in.Tool) {
+		complete, res.NotCompleteReason = false, "runtime events cannot assert complete coverage"
+	}
 	if complete && st != nil && !in.ObservedAt.After(st.sc.ObservedAt) {
 		complete, res.NotCompleteReason = false, "observed_at is not after the newest run already accepted for this tool and scope"
 	}
