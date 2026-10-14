@@ -190,6 +190,10 @@ type SourceConfig struct {
 	Kubeconfig string   `koanf:"kubeconfig"`
 	Contexts   []string `koanf:"contexts"`
 	InCluster  bool     `koanf:"in_cluster"`
+	Topology   bool     `koanf:"topology"`
+
+	// bbot: a read-only, non-authoritative NDJSON discovery report.
+	DiscoveryFile string `koanf:"discovery_file"`
 
 	// static
 	Hostnames []string `koanf:"hostnames"`
@@ -601,7 +605,7 @@ func ParseRate(s string) (float64, error) {
 }
 
 var (
-	validSourceTypes = map[string]bool{"cloudflare": true, "route53": true, "aws": true, "gcpdns": true, "kubernetes": true, "static": true}
+	validSourceTypes = map[string]bool{"cloudflare": true, "route53": true, "aws": true, "gcpdns": true, "kubernetes": true, "static": true, "bbot": true}
 	validLevels      = map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
 	validTiers       = map[string]bool{"passive": true, "active": true, "intrusive": true}
 	validAuthModes   = map[string]bool{"none": true, "token": true, "oidc": true}
@@ -868,6 +872,9 @@ func (c *Config) validateSources(add func(string, ...any)) {
 		}
 		if s.Type == "gcpdns" {
 			validateGCPDNS(s, add)
+		}
+		if s.Type == "bbot" && strings.TrimSpace(s.DiscoveryFile) == "" {
+			add("sources[%s]: bbot requires discovery_file", s.Name)
 		}
 		if s.Type != "static" {
 			continue

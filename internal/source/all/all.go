@@ -4,6 +4,7 @@ package all
 
 import (
 	"github.com/chainseer-xyz/deckard/internal/source/aws"
+	"github.com/chainseer-xyz/deckard/internal/source/bbot"
 	"github.com/chainseer-xyz/deckard/internal/source/gcpdns"
 	"github.com/chainseer-xyz/deckard/internal/source/kubernetes"
 	"github.com/chainseer-xyz/deckard/internal/source/registry"
@@ -11,6 +12,7 @@ import (
 )
 
 func init() {
+	registry.Register("bbot", bbot.Constructor)
 	registry.Register("route53", route53.Constructor)
 	registry.Register("aws", aws.Constructor)
 	registry.Register("gcpdns", gcpdns.Constructor)
