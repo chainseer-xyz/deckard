@@ -81,6 +81,8 @@ docker compose --profile alerting up -d
 | Change detection | Learns stable observations and reports meaningful DNS, HTTP and TLS drift |
 | Fresh intelligence | Refreshes takeover fingerprints, shared-hosting ranges, Nuclei templates, CISA KEV and FIRST EPSS data |
 | External scanner ingest | Reconciles Prowler, Kubescape, trufflehog, gitleaks, s3scanner and SARIF results into the same lifecycle |
+| Artifact correlation | Imports Trivy image CVEs and CycloneDX inventory; joins versioned packages to exact Kubernetes runtime image digests |
+| Optional discovery | Imports bounded BBOT reports without executing BBOT or treating discovery as proof of ownership |
 | Operations built in | Exposes a web UI, REST API, SSE stream, Prometheus metrics, alert rules and a Grafana dashboard |
 
 ### Why continuous inventory matters
@@ -329,7 +331,7 @@ deckard ingest \
   --token-env DECKARD_TOKEN
 ```
 
-Supported parsers include Prowler, Kubescape, trufflehog, gitleaks, s3scanner and SARIF. `deckard ingest prowler-app` can pull every provider's latest complete scan from a running Prowler App. Read [Ingesting findings](docs/ingest.md) for reconciliation guarantees, limits and CronJob examples.
+Supported parsers include Prowler, Kubescape, Trivy, CycloneDX, trufflehog, gitleaks, s3scanner and SARIF. Strix v1.7.0 reports use the SARIF path; Deckard does not execute Strix. `deckard ingest prowler-app` can pull every provider's latest complete scan from a running Prowler App. Read [Ingesting findings](docs/ingest.md) for reconciliation guarantees, artifact identity requirements, limits and CronJob examples.
 
 ## CLI reference
 

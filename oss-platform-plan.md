@@ -25,7 +25,7 @@ Build the first release without paid APIs: exact resource correlation, opt-in Ku
 | Honest OSS coverage | Source health, ingest scope history and documented profiles | Source/example comparison |
 
 ## Later milestones
-Selective ZGrab2 requires enforced subprocess egress, not hostname preflight. Falco runtime events need an event lifecycle, not snapshot reconciliation. Authenticated ZAP needs explicit per-target authorization and credential isolation. Automated collector jobs need operator-selected scope, permissions and schedules. These remain separate releases; imported reports do not mean a collector is running.
+Selective ZGrab2 requires enforced subprocess egress, not hostname preflight. Falco runtime events need an event lifecycle, not snapshot reconciliation. Authenticated ZAP and optional Strix pentesting need explicit target authorization, credential isolation and budgets. Strix v1.7.0 SARIF compatibility is tested now; no agentic runner is enabled. Automated collector jobs need operator-selected scope, permissions and schedules. These remain separate releases; imported reports do not mean a collector is running.
 
 ## Done when
 The first release's actions pass and merge. The API and UI show shared digest identities and retained findings without enabling new probes. Remaining milestones stay explicit rather than appearing as implemented coverage.

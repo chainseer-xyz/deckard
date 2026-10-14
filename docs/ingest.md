@@ -62,6 +62,8 @@ can only open and refresh, never resolve.
 | `complete` | `true` asserts `findings` is everything the tool found in `scope`. Omitted means `false`. |
 | `observed_at` | Required, RFC 3339, at most 5 minutes in the future. When the run happened; it identifies the run. |
 | `findings` | Required (`[]` is an empty run), at most 5000 (or `ingest.tools.<tool>.max_findings`). |
+| `artifacts` | Optional additive inventory, at most 5000 canonical image/package nodes. See [Artifact reports](#artifact-reports). |
+| `relations` | At most 10000 `container_image` → `package` `contains` edges. Both endpoints must appear in `artifacts`. |
 | `findings[].key` | Required, 1 to 512 bytes, unique within the request. |
 | `findings[].asset` | Either `{kind, key}` or `{ref: {kind, key}}`, see [Assets](#assets-and-the-safety-rules). |
 | `findings[].title` | Required, at most 300 characters, one line. |
@@ -158,13 +160,15 @@ Every finding attaches to an asset:
 
 - `{"kind": "cloud_resource", "key": "..."}` uses the asset if it exists and creates it
   otherwise, with source `ingest:<tool>` and scope class `external`, or `owned` only if an
-  operator allow-listed the tool (`ingest.tools.<tool>.owned: true`). `cloud_resource` is the
-  only kind an ingest may create: it is not network-addressable, the scope guard never
-  classifies it owned, and no tier may probe it. A live asset of another source is
+  operator allow-listed the tool (`ingest.tools.<tool>.owned: true`). `cloud_resource`,
+  `container_image` and `package` are the only creatable kinds. None is network-addressable,
+  and no tier may probe them. Image keys require canonical manifest digests; package keys
+  require canonical versioned PURLs and a matching `artifacts` entry to retain
+  producer membership. A live asset of another source is
   attached to unchanged; a removed one is revived and claimed for `ingest:<tool>`.
 - `{"ref": {"kind": "hostname", "key": "www.example.com"}}` attaches to an **existing,
   live, owned** asset of any kind (hostname, ip, zone, service, url, certificate,
-  cloud_resource) and never modifies it. A ref that does not resolve to such an asset
+  cloud_resource, workload, container_image, package) and never modifies it. A ref that does not resolve to such an asset
   rejects the item (`rejected`) and keeps the run from resolving anything.
 
 The invariants, each enforced in code and covered by tests:
@@ -237,6 +241,90 @@ are never decoded. The gitleaks parser hashes `Secret` and never decodes `Match`
 errors never quote the input. Tests plant fake secrets in every one of those fields and fail
 if any reaches the request. Do not post a secret scanner's SARIF through the `sarif` parser:
 SARIF messages may contain the match; use the native parser.
+
+## Artifact reports
+
+`--tool trivy` imports SchemaVersion `2` container-image JSON. It retains image
+and versioned package inventory, `contains` relationships and package CVE findings.
+Clean reports retain inventory without manufacturing findings. Only vulnerability
+reports with `os-pkgs`/`lang-pkgs` results are supported. Nonempty secret,
+misconfiguration, license or modified-finding sections reject the report rather
+than silently disappearing. Raw image config, environment variables and secret
+matches never become artifact metadata.
+
+`Metadata.RepoDigests` must supply one unambiguous manifest digest. ImageID/config
+digests and mutable tags are not substitutes. Scan each platform's exact runtime
+digest; an OCI index digest is not silently equated with a child manifest.
+
+```sh
+trivy image --scanners vuln --list-all-pkgs --format json --output trivy.json "$IMAGE_DIGEST_REF" && \
+deckard ingest --tool trivy --scope "$IMAGE_DIGEST_REF" --file trivy.json \
+  --url https://deckard.example.com --token-env DECKARD_TOKEN
+```
+
+Post only after the scanner completes successfully. Keep scope, filters and
+scanner settings stable. Use `--incomplete` for filtered or partial coverage;
+report syntax alone cannot prove a complete vulnerability assessment. Scope is
+at most `200` bytes; use a stable digest-based scope if the registry reference is longer.
+
+`--tool cyclonedx` imports CycloneDX JSON `1.4`–`1.7` image inventory. The root
+`metadata.component` must be a `container` with a `pkg:oci` PURL whose version is
+the manifest `sha256` digest. A hash alone cannot establish manifest semantics.
+The CLI always posts CycloneDX as incomplete: an SBOM is not a vulnerability scan.
+Embedded vulnerabilities are not imported. Tool/format names cannot be reassigned
+for native artifact parsers, so an empty SBOM cannot impersonate a clean Trivy run.
+
+```sh
+deckard ingest --tool cyclonedx --scope image:release-digest --file image.cdx.json \
+  --url https://deckard.example.com --token-env DECKARD_TOKEN
+```
+
+Both formats are limited to `64 MiB` input, `5000` artifact nodes and `10000`
+relations. Components without versioned PURLs do not create package identities;
+their CVEs can still attach to the image. PURL qualifiers are limited to `arch`,
+`distro`, `epoch`, `os`, `os_version`, `goos`, `goarch`, `checksum`, `tag` and
+credential-free `repository_url`. Unsupported or credential-bearing PURLs reject
+the report. Artifact metadata allows only `digest`, `repositories`, `purl`,
+`name`, `version`, `type` and `scanner_version`, bounded to `16 KiB` per node.
+
+Artifact assets and relationships are additive. Neither an empty report nor
+finding completeness deletes them. Digest keys join Kubernetes runtime images
+with matching scanner reports. Each reporter retains separate source facts;
+foreign canonical metadata stays unchanged. A complete Kubernetes refresh cannot
+resolve image CVEs merely because metadata nodes have external scope.
+
+Cloud findings also join exact ARNs from current authoritative source facts.
+EC2 uses the API-reported owner and the AWS SDK partition registry; ELB and
+CloudFront provide explicit ARNs. Conflicting accounts, regions, partitions or
+multiple matching inventory IDs prevent correlation. Native keys/IDs and scope
+do not change. A later scanner run reattaches scanner-first findings with the
+same finding ID and adds an alias edge to the retained legacy resource node.
+
+## Strix reports
+
+[Strix](https://github.com/usestrix/strix/tree/v1.7.0) is an optional Apache-2.0
+application pentesting agent, not an inventory authority. Version `1.7.0` exports
+`findings.sarif`. Deckard's existing SARIF parser accepts its findings, severity
+scores and stable fingerprints, while ignoring non-failing coverage rows.
+An invocation declaring unsuccessful execution rejects the entire report.
+
+```sh
+deckard ingest --tool strix --format sarif --scope app:example:staging \
+  --file strix_runs/assessment/findings.sarif --incomplete \
+  --url https://deckard.example.com --token-env DECKARD_TOKEN
+```
+
+Use `--incomplete` unless an operator has independently established complete,
+comparable coverage. Agent claims and proof-of-concept claims are scanner evidence,
+not confirmation by Deckard. Review reports for credentials, cookies and sensitive
+request bodies before importing; SARIF messages are not a secret-redaction format.
+
+Strix supports local models as well as hosted providers. Hosted inference can cost
+money and send source or target evidence outside your environment. Its Docker
+runtime requests additional network capabilities and can access configured host
+mounts. Deckard does not install, execute, grant permissions to or schedule Strix.
+Any future runner needs explicit target authorization, isolated credentials,
+enforced egress, bounded runtime/model budget and no automatic fixes or PR writes.
 
 ## Configuration
 
