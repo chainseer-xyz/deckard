@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"time"
 
@@ -51,6 +52,9 @@ func ingestTx(ctx context.Context, tx pgx.Tx, in store.IngestInput, res *store.I
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "deckard.ingest|"+in.Tool+"|"+in.Scope); err != nil {
 		return fmt.Errorf("ingest lock: %w", err)
 	}
+	if err := lockInventoryIdentity(ctx, tx); err != nil {
+		return err
+	}
 
 	var lastDigest string
 	var lastObserved time.Time
@@ -72,12 +76,23 @@ func ingestTx(ctx context.Context, tx pgx.Tx, in store.IngestInput, res *store.I
 	if complete && known && !in.ObservedAt.After(lastObserved) {
 		complete, res.NotCompleteReason = false, "observed_at is not after the newest run already accepted for this tool and scope"
 	}
+	if err := ingestArtifacts(ctx, tx, in); err != nil {
+		return err
+	}
+	var aliases []model.RelationInput
+	in, aliases, err = correlateIngest(ctx, tx, in)
+	if err != nil {
+		return err
+	}
 
 	assetIDs, rejected, err := ingestAssets(ctx, tx, in)
 	if err != nil {
 		return err
 	}
 	res.Rejected = rejected
+	if err := syncRelations(ctx, tx, relationReporter{name: "identity:" + in.Tool + ":" + in.Scope}, aliases, false); err != nil {
+		return err
+	}
 	if complete && len(rejected) > 0 {
 		complete, res.NotCompleteReason = false, fmt.Sprintf("%d item(s) rejected", len(rejected))
 	}
@@ -120,6 +135,45 @@ func ingestTx(ctx context.Context, tx pgx.Tx, in store.IngestInput, res *store.I
 		return fmt.Errorf("ingest state: %w", err)
 	}
 	return nil
+}
+
+// Artifact inventory is additive: an SBOM's absence is never a clean CVE
+// observation. Only producer-owned canonical metadata changes; every reporter
+// retains its own facts. Network ownership is never inferred from this path.
+func ingestArtifacts(ctx context.Context, tx pgx.Tx, in store.IngestInput) error {
+	if len(in.Artifacts) == 0 {
+		return nil
+	}
+	artifacts := in
+	artifacts.AssetScope = model.ScopeExternal
+	artifacts.Items = make([]store.IngestItem, len(in.Artifacts))
+	for i, artifact := range in.Artifacts {
+		artifacts.Items[i] = store.IngestItem{Index: i, AssetKind: artifact.Kind, AssetKey: artifact.Key}
+	}
+	ids, _, err := ingestAssets(ctx, tx, artifacts)
+	if err != nil {
+		return err
+	}
+	for i, artifact := range in.Artifacts {
+		old, err := scanAsset(tx.QueryRow(ctx, `SELECT `+assetCols+` FROM assets a WHERE a.id = $1`, ids[i]))
+		if err != nil {
+			return err
+		}
+		updated, err := scanAsset(tx.QueryRow(ctx, `UPDATE assets a SET
+			attrs = CASE WHEN source = $2 THEN $3::jsonb ELSE attrs END,
+			source_facts = source_facts || jsonb_build_object($2::text, jsonb_build_object('attrs', $3::jsonb)),
+			reporters = CASE WHEN $2 = ANY(reporters) THEN reporters ELSE array_append(reporters, $2) END
+			WHERE id = $1 RETURNING `+assetCols, ids[i], in.Source, orEmpty(artifact.Attrs)))
+		if err != nil {
+			return fmt.Errorf("artifact metadata: %w", err)
+		}
+		if !reflect.DeepEqual(old.Attrs, updated.Attrs) || !reflect.DeepEqual(old.SourceFacts, updated.SourceFacts) || !reflect.DeepEqual(old.Reporters, updated.Reporters) {
+			if err := addEvent(ctx, tx, "asset_changed", updated.Key, assetEventData(updated), in.Now); err != nil {
+				return err
+			}
+		}
+	}
+	return syncRelations(ctx, tx, relationReporter{name: "artifact:" + in.Tool + ":" + in.Scope}, in.Relations, false)
 }
 
 // ingestAssets resolves every item's asset and returns the asset id per item

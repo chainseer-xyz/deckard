@@ -25,7 +25,7 @@ func ContainerImageKey(raw string) (string, bool) {
 		return "", false
 	}
 	for _, c := range digest[7:] {
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+		if !strings.ContainsRune("0123456789abcdef", c) {
 			return "", false
 		}
 	}
@@ -49,7 +49,7 @@ func PackageKey(raw string) (string, bool) {
 		case "repository_url":
 			if p.Type == "oci" && !strings.Contains(qualifier.Value, "://") {
 				ref, err := reference.ParseNormalizedNamed(qualifier.Value)
-				if err != nil || reference.IsNameOnly(ref) == false {
+				if err != nil || !reference.IsNameOnly(ref) {
 					return "", false
 				}
 				continue

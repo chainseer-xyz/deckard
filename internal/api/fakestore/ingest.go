@@ -3,6 +3,7 @@ package fakestore
 import (
 	"context"
 	"fmt"
+	"github.com/chainseer-xyz/deckard/internal/identity"
 	"sort"
 
 	"github.com/chainseer-xyz/deckard/internal/model"
@@ -38,6 +39,8 @@ func (s *Store) IngestFindings(_ context.Context, in store.IngestInput) (store.I
 	if complete && st != nil && !in.ObservedAt.After(st.sc.ObservedAt) {
 		complete, res.NotCompleteReason = false, "observed_at is not after the newest run already accepted for this tool and scope"
 	}
+	s.ingestArtifactsLocked(in)
+	in = s.correlateIngestLocked(in)
 
 	// One pass per asset, like postgres: create or claim it when any item
 	// names it without ref, then check ref items against the result.
@@ -107,6 +110,69 @@ func (s *Store) IngestFindings(_ context.Context, in store.IngestInput) (store.I
 	}
 	st.digest = in.Digest
 	return res, nil
+}
+
+func (s *Store) correlateIngestLocked(in store.IngestInput) store.IngestInput {
+	assets := make([]model.Asset, 0, len(s.Assets))
+	for _, asset := range s.Assets {
+		assets = append(assets, asset)
+	}
+	index := identity.NewIndex(assets)
+	in.Items = append([]store.IngestItem(nil), in.Items...)
+	for i, item := range in.Items {
+		if item.Ref || item.AssetKind != model.KindCloudResource {
+			continue
+		}
+		arn, ok := identity.FromProwler(item.AssetKey, item.Finding.Evidence)
+		if !ok {
+			continue
+		}
+		id, ok := index.Resolve(arn)
+		if !ok {
+			continue
+		}
+		if original, found := s.assetByKeyLocked(item.AssetKind, item.AssetKey); found && original.ID != id {
+			s.addArtifactRelationLocked(model.Relation{FromID: original.ID, ToID: id, Type: model.RelAliasTo})
+		}
+		in.Items[i].AssetKey = s.Assets[id].Key
+	}
+	return in
+}
+
+func (s *Store) ingestArtifactsLocked(in store.IngestInput) {
+	artifacts := in
+	artifacts.AssetScope = model.ScopeExternal
+	for _, artifact := range in.Artifacts {
+		a := s.claimLocked(artifacts, artifact.Kind, artifact.Key)
+		if a.Source == in.Source {
+			a.Attrs = cloneAttrs(artifact.Attrs)
+		}
+		if a.SourceFacts == nil {
+			a.SourceFacts = map[string]model.SourceFact{}
+		}
+		a.SourceFacts[in.Source] = model.SourceFact{Attrs: cloneAttrs(artifact.Attrs)}
+		if !assetHasSource(a, in.Source) || len(a.Reporters) == 0 {
+			a.Reporters = append(a.Reporters, in.Source)
+		}
+		s.Assets[a.ID] = a
+	}
+	for _, relation := range in.Relations {
+		from, foundFrom := s.assetByKeyLocked(relation.FromKind, relation.FromKey)
+		to, foundTo := s.assetByKeyLocked(relation.ToKind, relation.ToKey)
+		if !foundFrom || !foundTo || from.RemovedAt != nil || to.RemovedAt != nil {
+			continue
+		}
+		s.addArtifactRelationLocked(model.Relation{FromID: from.ID, ToID: to.ID, Type: relation.Type})
+	}
+}
+
+func (s *Store) addArtifactRelationLocked(relation model.Relation) {
+	for _, existing := range s.Rels {
+		if existing == relation {
+			return
+		}
+	}
+	s.Rels = append(s.Rels, relation)
 }
 
 // refProblem mirrors the postgres rule: a ref item needs an existing, live,

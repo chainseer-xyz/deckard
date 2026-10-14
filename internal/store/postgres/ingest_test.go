@@ -13,7 +13,12 @@ import (
 
 	"github.com/chainseer-xyz/deckard/internal/model"
 	"github.com/chainseer-xyz/deckard/internal/store"
+	"github.com/chainseer-xyz/deckard/internal/store/storetest"
 )
+
+func TestArtifactContract(t *testing.T) {
+	storetest.RunArtifacts(t, func(t *testing.T) store.Store { return newMigratedStore(t) })
+}
 
 func ingestInput(scope string, obs time.Time, complete bool, keys ...string) store.IngestInput {
 	in := store.IngestInput{

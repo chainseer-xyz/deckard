@@ -153,6 +153,10 @@ type IngestInput struct {
 	ObservedAt time.Time
 	Digest     string
 	Items      []IngestItem
+	// Artifacts and Relations are additive, non-probeable inventory. Finding
+	// completeness never removes artifact nodes or their immutable contents.
+	Artifacts []model.AssetInput
+	Relations []model.RelationInput
 	// ResolveAfter is findings.resolve_after (>= 1).
 	ResolveAfter int
 	Now          time.Time
