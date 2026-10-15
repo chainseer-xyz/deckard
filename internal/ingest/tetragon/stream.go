@@ -49,6 +49,11 @@ func (a *Accumulator) AddStream(ctx context.Context, reader io.Reader) error {
 		if err := ctx.Err(); err != nil {
 			return a.fail(err)
 		}
+		// Scanner can emit buffered data after a non-EOF reader error. Check
+		// that error before a partial final record masks it as malformed JSON.
+		if err := scanner.Err(); err != nil {
+			return a.fail(&streamReadError{cause: err})
+		}
 		if len(scanner.Bytes()) > MaxEventBytes {
 			return a.fail(errors.New("tetragon event record exceeds the limit"))
 		}
@@ -62,13 +67,29 @@ func (a *Accumulator) AddStream(ctx context.Context, reader io.Reader) error {
 	if err := ctx.Err(); err != nil {
 		return a.fail(err)
 	}
-	if scanner.Err() != nil {
-		return a.fail(errors.New("tetragon stream read failed or event record exceeds the limit"))
+	if err := scanner.Err(); err != nil {
+		return a.fail(&streamReadError{cause: err})
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.err
 }
+
+// Preserve machine-readable causes without echoing provider response bodies or
+// process data in CLI errors. Callers can distinguish their own bounded errors.
+type streamReadError struct{ cause error }
+
+func (e *streamReadError) Error() string {
+	if errors.Is(e.cause, bufio.ErrTooLong) {
+		return "tetragon event record exceeds the limit"
+	}
+	if errors.Is(e.cause, io.ErrUnexpectedEOF) {
+		return "tetragon log transport ended unexpectedly"
+	}
+	return "tetragon stream read failed"
+}
+
+func (e *streamReadError) Unwrap() error { return e.cause }
 
 func (a *Accumulator) preflight(ctx context.Context, reader io.Reader) error {
 	if a == nil {

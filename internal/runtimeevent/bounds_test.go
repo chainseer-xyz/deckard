@@ -28,7 +28,7 @@ func TestNewRejectsUnboundedOrAmbiguousConfiguration(t *testing.T) {
 		"excess timeout": func(s *Settings) { s.Timeout = 3 * time.Minute }, "negative timeout": func(s *Settings) { s.Timeout = -time.Second },
 		"excess pods": func(s *Settings) { s.MaxPods = 65 }, "negative pods": func(s *Settings) { s.MaxPods = -1 },
 		"excess concurrency": func(s *Settings) { s.Concurrency = 5 }, "negative concurrency": func(s *Settings) { s.Concurrency = -1 },
-		"excess pod bytes": func(s *Settings) { s.MaxPodBytes = (10 << 20) + 1 }, "negative pod bytes": func(s *Settings) { s.MaxPodBytes = -1 },
+		"excess pod bytes": func(s *Settings) { s.MaxPodBytes = MaxReadBytes + 1 }, "negative pod bytes": func(s *Settings) { s.MaxPodBytes = -1 },
 		"excess total bytes": func(s *Settings) { s.MaxTotalBytes = (256 << 20) + 1 }, "negative total bytes": func(s *Settings) { s.MaxTotalBytes = -1 },
 	} {
 		t.Run(name, func(t *testing.T) {

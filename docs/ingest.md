@@ -559,7 +559,7 @@ ingest` hashes the values before anything is sent.
 extend to `1h`. Collection uses at most `64` Pods and `4` concurrent log streams,
 with a `1m` default deadline and a `2m` hard maximum.
 
-Transport caps are `10 MiB` per Pod and `256 MiB` across the collection, with
+Transport caps are `32 MiB` per Pod and `256 MiB` across the collection, with
 at most `1 MiB` per native record. These are read bounds, not coverage claims.
 The collector parses each record before discarding it; it never buffers or saves
 the combined raw logs. The shared batch accepts at most `100000` records,
@@ -570,6 +570,9 @@ First/last event times and the highest observed severity survive stream ordering
 Every selected Pod must be readable. Invalid JSON, oversized records, byte/count
 overflow, transport failures, cancellation and reported drops/throttling reject
 the whole batch, even after valid policy events arrived. No prefix is uploaded.
+Reader errors take precedence over buffered fragments, so a transport or byte
+limit failure cannot masquerade as malformed JSON. Errors identify byte limits
+and oversized records without printing sensor payloads or provider error bodies.
 The sanitized envelope still has a `10 MiB` limit and always sets `complete=false`.
 Successful delivery does not prove sensor continuity or complete runtime coverage.
 See [Runtime delivery](collectors.md#runtime-delivery) for commands and identity requirements.
