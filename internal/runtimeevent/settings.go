@@ -11,13 +11,14 @@ import (
 )
 
 const (
-	MaxPods               = 64
-	MaxConcurrency        = 4
-	MaxReadBytes    int64 = 10 << 20
-	DefaultLookback       = 6 * time.Minute
-	MaxLookback           = time.Hour
-	DefaultTimeout        = time.Minute
-	MaxTimeout            = 2 * time.Minute
+	MaxPods                 = 64
+	MaxConcurrency          = 4
+	MaxReadBytes      int64 = 10 << 20
+	MaxTotalReadBytes int64 = 256 << 20
+	DefaultLookback         = 6 * time.Minute
+	MaxLookback             = time.Hour
+	DefaultTimeout          = time.Minute
+	MaxTimeout              = 2 * time.Minute
 )
 
 // Settings narrows read-only Kubernetes access. Zero bounds select defaults;
@@ -70,7 +71,7 @@ func defaults(s Settings) Settings {
 		s.MaxPodBytes = MaxReadBytes
 	}
 	if s.MaxTotalBytes == 0 {
-		s.MaxTotalBytes = MaxReadBytes
+		s.MaxTotalBytes = MaxTotalReadBytes
 	}
 	return s
 }
@@ -92,7 +93,7 @@ func validate(s Settings) error {
 			return errors.New("tetragon collector cluster UID is invalid")
 		}
 	}
-	if s.Lookback <= 0 || s.Lookback > MaxLookback || s.Timeout <= 0 || s.Timeout > MaxTimeout || s.MaxPods <= 0 || s.MaxPods > MaxPods || s.Concurrency <= 0 || s.Concurrency > MaxConcurrency || s.MaxPodBytes <= 0 || s.MaxPodBytes > MaxReadBytes || s.MaxTotalBytes <= 0 || s.MaxTotalBytes > MaxReadBytes {
+	if s.Lookback <= 0 || s.Lookback > MaxLookback || s.Timeout <= 0 || s.Timeout > MaxTimeout || s.MaxPods <= 0 || s.MaxPods > MaxPods || s.Concurrency <= 0 || s.Concurrency > MaxConcurrency || s.MaxPodBytes <= 0 || s.MaxPodBytes > MaxReadBytes || s.MaxTotalBytes <= 0 || s.MaxTotalBytes > MaxTotalReadBytes {
 		return errors.New("tetragon collector bounds must be positive and within hard caps")
 	}
 	return nil

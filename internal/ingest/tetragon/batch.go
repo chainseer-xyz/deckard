@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"sort"
 	"time"
 
 	"github.com/chainseer-xyz/deckard/internal/ingest"
@@ -29,61 +28,21 @@ type incidentGroup struct {
 }
 
 // batch counts are deduplicated within this input, never lifetime counters.
-func parseBatch(data []byte, o ingest.ParseOptions, parse func([]byte, ingest.ParseOptions) (observation, error)) ([]ingest.Finding, error) {
-	if o.Scope == "" || len(o.Scope) > ingest.MaxScopeLen || ingest.Line(o.Scope, ingest.MaxScopeLen) != o.Scope {
-		return nil, fmt.Errorf("%s requires a bounded operator-supplied scope", Tool)
+func parseBatch(data []byte, o ingest.ParseOptions) ([]ingest.Finding, error) {
+	accumulator, err := NewAccumulator(o)
+	if err != nil {
+		return nil, err
 	}
 	records, err := records(data)
 	if err != nil {
 		return nil, err
 	}
-	groups := map[string]*incidentGroup{}
-	for index, raw := range records {
-		observed, err := parse(raw, o)
-		if err != nil {
-			return nil, fmt.Errorf("%s event %d: %w", Tool, index, err)
-		}
-		if observed.finding.Key == "" {
-			continue
-		}
-		key := observed.finding.Key
-		group := groups[key]
-		if group == nil {
-			group = &incidentGroup{finding: observed.finding, first: observed.at, last: observed.at, counts: map[string]int64{}}
-			groups[key] = group
-			if len(groups) > ingest.MaxFindings {
-				return nil, fmt.Errorf("%s incident count exceeds the ingest limit", Tool)
-			}
-		}
-		if observed.at.Before(group.first) {
-			group.first = observed.at
-		}
-		if observed.at.After(group.last) {
-			group.last = observed.at
-		}
-		if observed.finding.Severity.Rank() > group.finding.Severity.Rank() {
-			group.finding.Severity = observed.finding.Severity
-		}
-		if observed.count > group.counts[observed.id] {
-			group.counts[observed.id] = observed.count
+	for _, raw := range records {
+		if err := accumulator.add(raw); err != nil {
+			return nil, err
 		}
 	}
-	out := make([]ingest.Finding, 0, len(groups))
-	for _, group := range groups {
-		var count int64
-		for _, n := range group.counts {
-			count += n
-		}
-		if count > 1000000000 {
-			return nil, fmt.Errorf("%s batch count exceeds the limit", Tool)
-		}
-		group.finding.Evidence["runtime_batch_count"] = count
-		group.finding.Evidence["runtime_first_seen"] = group.first.UTC().Format(time.RFC3339Nano)
-		group.finding.Evidence["runtime_last_seen"] = group.last.UTC().Format(time.RFC3339Nano)
-		out = append(out, group.finding)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
-	return out, nil
+	return accumulator.Findings()
 }
 
 func records(data []byte) ([]json.RawMessage, error) {
