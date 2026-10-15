@@ -4,7 +4,7 @@
 {{- range $job := $collectors.jobs -}}
 {{- if and (ne (toString $job.enabled) "false") (eq $job.type "tetragon") -}}
 {{- $ctx := dict "root" $root "job" $job -}}
-{{- $name := include "deckard.collectorName" $ctx -}}
+{{- $name := include "deckard.collectorName" $ctx }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

@@ -56,6 +56,20 @@ capabilities:
 {{- if hasKey $seen $name -}}{{- fail "collector names must be unique" -}}{{- end -}}
 {{- $_ := set $seen $name true -}}
 {{- if not (has $job.type (list "trivy" "trivy-runtime" "kubescape" "prowler-app" "bbot" "tetragon")) -}}{{- fail "collector type must be trivy, trivy-runtime, kubescape, prowler-app, bbot or tetragon" -}}{{- end -}}
+{{- $frameworks := list "nsa" "mitre" -}}
+{{- if and (eq $job.type "kubescape") (hasKey $job "frameworks") -}}
+{{- $frameworks = $job.frameworks -}}
+{{- end -}}
+{{- if eq $job.type "kubescape" -}}
+{{- if not (kindIs "slice" $frameworks) -}}{{- fail "Kubescape frameworks must be a nonempty unique subset of nsa, mitre" -}}{{- end -}}
+{{- if or (eq (len $frameworks) 0) (gt (len $frameworks) 2) -}}{{- fail "Kubescape frameworks must be a nonempty unique subset of nsa, mitre" -}}{{- end -}}
+{{- $seenFrameworks := dict -}}
+{{- range $framework := $frameworks -}}
+{{- if not (has $framework (list "nsa" "mitre")) -}}{{- fail "Kubescape frameworks must be a nonempty unique subset of nsa, mitre" -}}{{- end -}}
+{{- if hasKey $seenFrameworks $framework -}}{{- fail "Kubescape frameworks must be a nonempty unique subset of nsa, mitre" -}}{{- end -}}
+{{- $_ := set $seenFrameworks $framework true -}}
+{{- end -}}
+{{- end -}}
 {{- $image := default "" $job.image -}}
 {{- if eq $job.type "tetragon" -}}
 {{- $image = default $ingestImage $job.image -}}
@@ -103,13 +117,27 @@ capabilities:
 {{- range $resources := list ($job.resources | default dict) ($job.ingestResources | default dict) -}}
 {{- if hasKey ($resources.limits | default dict) "cpu" -}}{{- fail "collector resources.limits.cpu must not be set" -}}{{- end -}}
 {{- end -}}
+{{- $nodeSelector := $root.Values.nodeSelector | default dict -}}
+{{- $tolerations := $root.Values.tolerations | default list -}}
+{{- $affinity := $root.Values.affinity | default dict -}}
+{{- if hasKey $job "nodeSelector" -}}{{- $nodeSelector = $job.nodeSelector | default dict -}}{{- end -}}
+{{- if hasKey $job "tolerations" -}}{{- $tolerations = $job.tolerations | default list -}}{{- end -}}
+{{- if hasKey $job "affinity" -}}{{- $affinity = $job.affinity | default dict -}}{{- end -}}
+{{- if eq $job.type "bbot" -}}
+{{- if or (and (hasKey $nodeSelector "kubernetes.io/os") (ne (index $nodeSelector "kubernetes.io/os") "linux")) (and (hasKey $nodeSelector "kubernetes.io/arch") (ne (index $nodeSelector "kubernetes.io/arch") "amd64")) -}}
+{{- fail "BBOT placement requires kubernetes.io/os=linux and kubernetes.io/arch=amd64" -}}
+{{- end -}}
+{{- $nodeSelector = deepCopy $nodeSelector -}}
+{{- $_ := set $nodeSelector "kubernetes.io/os" "linux" -}}
+{{- $_ := set $nodeSelector "kubernetes.io/arch" "amd64" -}}
+{{- end -}}
 {{- $ctx := dict "root" $root "job" $job -}}
 {{- $resourceName := include "deckard.collectorName" $ctx -}}
 {{- $scannerResources := mergeOverwrite (dict "requests" (dict "cpu" "250m" "memory" "512Mi" "ephemeral-storage" "1Gi") "limits" (dict "memory" "2Gi" "ephemeral-storage" "5Gi")) ($job.resources | default dict) -}}
 {{- if eq $job.type "tetragon" -}}
 {{- $scannerResources = mergeOverwrite (dict "requests" (dict "cpu" "50m" "memory" "128Mi" "ephemeral-storage" "64Mi") "limits" (dict "memory" "512Mi" "ephemeral-storage" "256Mi")) ($job.resources | default dict) -}}
 {{- end -}}
-{{- $uploadResources := mergeOverwrite (dict "requests" (dict "cpu" "50m" "memory" "128Mi") "limits" (dict "memory" "512Mi")) ($job.ingestResources | default dict) -}}
+{{- $uploadResources := mergeOverwrite (dict "requests" (dict "cpu" "50m" "memory" "128Mi") "limits" (dict "memory" "512Mi")) ($job.ingestResources | default dict) }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -143,9 +171,14 @@ spec:
           automountServiceAccountToken: false
           restartPolicy: Never
           terminationGracePeriodSeconds: 30
-          {{- if eq $job.type "bbot" }}
-          # The pinned upstream BBOT 3.0.2 index publishes linux/amd64 only.
-          nodeSelector: {kubernetes.io/os: linux, kubernetes.io/arch: amd64}
+          {{- with $nodeSelector }}
+          nodeSelector: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $tolerations }}
+          tolerations: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $affinity }}
+          affinity: {{- toYaml . | nindent 12 }}
           {{- end }}
           {{- with $root.Values.imagePullSecrets }}
           imagePullSecrets: {{- toYaml . | nindent 12 }}
@@ -245,7 +278,7 @@ spec:
                 - kubescape
                 - scan
                 - framework
-                - nsa,mitre
+                - {{ join "," $frameworks | quote }}
                 - --use-default
                 - --keep-local
                 - --submit=false

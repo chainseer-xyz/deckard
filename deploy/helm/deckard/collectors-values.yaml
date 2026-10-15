@@ -33,6 +33,9 @@ collectors:
   # One entry per producer reconciliation scope. enabled defaults to true per job.
   # name is a unique DNS label, at most 20 characters. No arbitrary scanner args/env
   # are accepted: filters must not silently turn a partial scan into clean evidence.
+  # Pods inherit top-level nodeSelector, tolerations and affinity. A per-job field
+  # replaces the corresponding global field; explicit {} / [] clears it.
+  # BBOT still requires Linux/amd64 and rejects conflicting effective selectors.
   # jobs:
   #   - name: web-image
   #     type: trivy
@@ -61,6 +64,10 @@ collectors:
   #     failedJobsHistoryLimit: 2
   #     maxAgeSeconds: 86400
   #     suspend: false
+  #     # Optional placement overrides (omit to inherit chart globals):
+  #     # nodeSelector: {nodegroup: infrastructure}
+  #     # tolerations: [{key: nodegroup, operator: Equal, value: infrastructure, effect: NoSchedule}]
+  #     # affinity: {}
   #     egress: []
   #   - name: runtime-images
   #     type: trivy-runtime
@@ -90,12 +97,15 @@ collectors:
   #     schedule: "15 */6 * * *"
   #     image: quay.io/kubescape/kubescape-cli@sha256:d575d4f2281473ce539d41053d63482a4e9e07f35d987206b2bac79b2c9ad4bc # 4.0.16
   #     scope: k8s:your-cluster
+  #     frameworks: [nsa, mitre] # default; nonempty unique subset of these two
   #     tokenSecretRef: {name: kubescape-ingest, key: token}
   #     # Empty/missing means all namespaces. A list gives namespace RoleBindings
   #     # and --include-namespaces; cluster metadata remains separately read-only.
   #     namespaces: [apps, edge]
   #     # Secret/ConfigMap and host/image assessment are excluded. Every report is
   #     # incomplete: findings can open/refresh but never resolve missing findings.
+  #     # For large clusters, separate nsa and mitre jobs can share this same scope.
+  #     # Measure each report below the unchanged 5000-finding limit before enabling.
   #     # Policies are bundled in the pinned image; no SaaS upload or agent install.
   #     # Only this scanner receives a short-lived projected Kubernetes API token.
   #     egress:

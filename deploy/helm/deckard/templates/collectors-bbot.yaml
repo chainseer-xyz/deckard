@@ -3,7 +3,7 @@
 {{- if $collectors.enabled -}}
 {{- range $job := $collectors.jobs -}}
 {{- if and (ne (toString $job.enabled) "false") (eq $job.type "bbot") -}}
-{{- $ctx := dict "root" $root "job" $job -}}
+{{- $ctx := dict "root" $root "job" $job }}
 ---
 apiVersion: v1
 kind: ConfigMap

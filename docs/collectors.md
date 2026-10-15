@@ -69,6 +69,18 @@ deadline. Scanner success must precede upload. A successful Job includes accepte
 ingest, not merely scanner exit. Jobs run non-root with a read-only root filesystem,
 dropped capabilities, no host mounts and no CPU limits.
 
+Collector Pods inherit the chart's top-level `nodeSelector`, `tolerations` and
+`affinity`. A per-job field replaces that entire global field; explicit `{}` or
+`[]` clears it. BBOT always adds `kubernetes.io/os: linux` and
+`kubernetes.io/arch: amd64`, and rejects conflicting effective selectors. Its
+affinity must also permit those nodes.
+
+Kubescape jobs accept `frameworks: [nsa]`, `[mitre]` or both; the default is both.
+The list must be nonempty and unique. For large clusters, use separately named
+jobs with the same immutable cluster scope when combined reports approach the
+`5000`-finding limit. Measure each report first; every restricted report remains
+incomplete, so these jobs cannot resolve findings through absence.
+
 Only uploader containers receive Deckard producer tokens. Kubernetes scanners
 receive narrowly scoped projected API tokens. Registry credentials are explicit,
 read-only and scanner-only. Jobs do not inherit Deckard's IRSA, cloud credentials,
