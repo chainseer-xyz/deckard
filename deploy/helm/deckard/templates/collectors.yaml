@@ -56,6 +56,12 @@ capabilities:
 {{- if hasKey $seen $name -}}{{- fail "collector names must be unique" -}}{{- end -}}
 {{- $_ := set $seen $name true -}}
 {{- if not (has $job.type (list "trivy" "trivy-runtime" "kubescape" "prowler-app" "bbot" "tetragon")) -}}{{- fail "collector type must be trivy, trivy-runtime, kubescape, prowler-app, bbot or tetragon" -}}{{- end -}}
+{{- $backoffLimit := 0 -}}
+{{- if hasKey $job "backoffLimit" -}}
+{{- if or (not (or (kindIs "float64" $job.backoffLimit) (kindIs "int" $job.backoffLimit) (kindIs "int64" $job.backoffLimit))) (not (regexMatch "^[012]$" (toString $job.backoffLimit))) -}}{{- fail "collector backoffLimit must be an integer from 0 to 2" -}}{{- end -}}
+{{- $backoffLimit = int $job.backoffLimit -}}
+{{- end -}}
+{{- if and (ne $job.type "tetragon") (gt $backoffLimit 0) -}}{{- fail "only Tetragon collectors support nonzero backoffLimit" -}}{{- end -}}
 {{- $frameworks := list "nsa" "mitre" -}}
 {{- if and (eq $job.type "kubescape") (hasKey $job "frameworks") -}}
 {{- $frameworks = $job.frameworks -}}
@@ -160,7 +166,7 @@ spec:
   failedJobsHistoryLimit: {{ if hasKey $job "failedJobsHistoryLimit" }}{{ $job.failedJobsHistoryLimit }}{{ else }}2{{ end }}
   jobTemplate:
     spec:
-      backoffLimit: 0
+      backoffLimit: {{ $backoffLimit }}
       activeDeadlineSeconds: {{ default (ternary 300 (ternary 3000 1800 (eq $job.type "trivy-runtime")) (eq $job.type "tetragon")) $job.activeDeadlineSeconds }}
       ttlSecondsAfterFinished: {{ default 86400 $job.ttlSecondsAfterFinished }}
       template:

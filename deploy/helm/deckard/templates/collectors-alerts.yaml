@@ -32,10 +32,12 @@ spec:
             summary: {{ printf "Deckard collector %s has no recent successful ingest" $job.name | quote }}
             description: "Check the CronJob, scanner and ingest logs. Failed or incomplete work must not certify clean findings."
         - alert: DeckardCollectorFailed
+          # KSM emits one failed series per reason, including zero-valued
+          # reasons. Deduplicate reasons and scrape replicas before joining.
           expr: >-
-            max(kube_job_created{namespace={{ $root.Release.Namespace | quote }}}
-            * on(namespace,job_name) (kube_job_status_failed{namespace={{ $root.Release.Namespace | quote }}} > bool 0)
-            * on(namespace,job_name) group_left() kube_job_owner{namespace={{ $root.Release.Namespace | quote }},owner_kind="CronJob",owner_name={{ $name | quote }}})
+            max(max by(namespace,job_name) (kube_job_created{namespace={{ $root.Release.Namespace | quote }}})
+            * on(namespace,job_name) (max by(namespace,job_name) (kube_job_status_failed{namespace={{ $root.Release.Namespace | quote }}}) > bool 0)
+            * on(namespace,job_name) max by(namespace,job_name) (kube_job_owner{namespace={{ $root.Release.Namespace | quote }},owner_kind="CronJob",owner_name={{ $name | quote }}}))
             > (max(kube_cronjob_status_last_successful_time{namespace={{ $root.Release.Namespace | quote }},cronjob={{ $name | quote }}}) or vector(0))
           for: 5m
           labels: {severity: warning, namespace: {{ $root.Release.Namespace | quote }}, collector: {{ $job.name | quote }}}
