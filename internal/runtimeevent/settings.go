@@ -13,7 +13,7 @@ import (
 const (
 	MaxPods                 = 64
 	MaxConcurrency          = 4
-	MaxReadBytes      int64 = 10 << 20
+	MaxReadBytes      int64 = 32 << 20
 	MaxTotalReadBytes int64 = 256 << 20
 	DefaultLookback         = 6 * time.Minute
 	MaxLookback             = time.Hour

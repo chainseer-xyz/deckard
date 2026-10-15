@@ -103,6 +103,10 @@ Reuse an existing Tetragon sensor's `export-stdout` container. Deckard does not
 install another privileged sensor. The collector lists sensor Pods and reads a
 bounded `6m` log window every `5m`. All selected Pods must be readable; truncation,
 reported event drops, oversized output or a failed read fails the whole collection.
+Raw input is bounded to `32 MiB` per sensor and `256 MiB` across the collection.
+Streaming discards each raw record after parsing; the normalized report remains
+limited to `10 MiB`. Byte limits and transport failures remain explicit failures,
+not malformed-JSON warnings or successful prefix uploads.
 
 ```sh
 deckard runtime collect --namespace tetragon --selector app.kubernetes.io/name=tetragon \

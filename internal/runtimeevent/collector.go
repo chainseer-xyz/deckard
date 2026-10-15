@@ -152,6 +152,14 @@ func (c *Collector) readLog(ctx context.Context, pod string, since *metav1.Time,
 	defer func() { _ = stream.Close() }()
 	reader := &budgetReader{Reader: stream, total: total, limit: c.settings.MaxTotalBytes, podLimit: c.settings.MaxPodBytes}
 	if err := accumulator.AddStream(ctx, reader); err != nil {
+		// The accumulator shares its first error across sibling streams.
+		// Preserve a known budget cause even when another stream cancels us.
+		if errors.Is(err, errPodLogLimit) {
+			return fmt.Errorf("%w (%d bytes)", errPodLogLimit, c.settings.MaxPodBytes)
+		}
+		if errors.Is(err, errTotalLogLimit) {
+			return fmt.Errorf("%w (%d bytes)", errTotalLogLimit, c.settings.MaxTotalBytes)
+		}
 		if ctx.Err() != nil {
 			return requestError(ctx, "tetragon pod log read failed")
 		}
@@ -159,6 +167,15 @@ func (c *Collector) readLog(ctx context.Context, pod string, since *metav1.Time,
 	}
 	return nil
 }
+
+type logLimitError string
+
+func (e logLimitError) Error() string { return string(e) }
+
+const (
+	errPodLogLimit   logLimitError = "tetragon per-pod log bound exceeded"
+	errTotalLogLimit logLimitError = "tetragon aggregate log bound exceeded"
+)
 
 type budgetReader struct {
 	io.Reader
@@ -175,10 +192,10 @@ func (r *budgetReader) Read(p []byte) (int, error) {
 	n, err := r.Reader.Read(p)
 	r.podBytes += int64(n)
 	if r.podBytes > r.podLimit {
-		return n, errors.New("tetragon per-pod log bound exceeded")
+		return n, errPodLogLimit
 	}
 	if r.total.Add(int64(n)) > r.limit {
-		return n, errors.New("tetragon aggregate log bound exceeded")
+		return n, errTotalLogLimit
 	}
 	return n, err
 }

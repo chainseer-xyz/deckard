@@ -19,6 +19,8 @@ func TestCollectStreamsMoreThanWireLimitWithoutRetainingNativeLogs(t *testing.T)
 		pods, records int
 	}{
 		{"two sensors exceed normalized wire cap", 2, 768},
+		{"one busy sensor exceeds the old ten MiB raw cap", 1, 1536},
+		{"one busy sensor retains headroom below the raw cap", 1, 3072},
 		{"34 sensor production-sized burst", 34, 256},
 	} {
 		t.Run(tc.name, func(t *testing.T) { collectLargeTelemetryWindow(t, tc.pods, tc.records) })
