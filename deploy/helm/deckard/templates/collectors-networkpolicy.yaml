@@ -4,7 +4,7 @@
 {{- if and $collectors.enabled (ne (toString $network.enabled) "false") -}}
 {{- range $job := $collectors.jobs -}}
 {{- if ne (toString $job.enabled) "false" -}}
-{{- $ctx := dict "root" $root "job" $job -}}
+{{- $ctx := dict "root" $root "job" $job }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
