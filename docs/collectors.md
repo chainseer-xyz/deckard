@@ -128,9 +128,13 @@ delivery, not that the sensor saw every event.
 Scheduled Tetragon collectors may set `backoffLimit: 1` or `2` to retry a failed
 whole-Pod attempt during node churn. The default remains `0`. Each retry uses a
 fresh report volume and re-reads every selected sensor. A failed attempt uploads
-nothing; retries never skip unreadable sensors or assert complete coverage.
-The Job's existing deadline and `Forbid` concurrency still bound all attempts.
-Retries cannot recover logs already lost to rotation or node removal.
+nothing when collection fails; retries never skip unreadable sensors or assert
+complete coverage.
+
+An upload receipt failure can follow an accepted ingest. Event keys and
+timestamps deduplicate delivery retries. The Job's existing deadline and
+`Forbid` concurrency still bound all attempts. Retries cannot recover logs
+already lost to rotation or node removal.
 
 ## Runtime images
 
