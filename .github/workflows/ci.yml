@@ -82,6 +82,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: release runner naming with GitHub reserved environment
+        run: python3 -m unittest discover -s deploy/assessment/tests -p test_release_workflow.py -v
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
       - run: helm lint deploy/helm/deckard --set database.cnpg.enabled=true
       - run: sudo apt-get update && sudo apt-get install -y zsh

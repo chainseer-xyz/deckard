@@ -30,7 +30,9 @@ Green reviewed source and infra changes; immutable release digest; generated man
 - Contention fixture: `144` transactions, `3200` finding updates and `800` inventory rows in `17.935s`; p95 `1.398s`. This is local regression evidence, not Marina capacity.
 - Actual native ZGrab2/ZAP/Strix interoperability passed with no skips. ZAP native TLS preconnections and foreign-origin probes remain conservatively partial. Strix missing-model and local protocol tests do not claim live-model coverage.
 - Optional runner images retain upstream notices. Strix applies five exact hashed security upgrades and excludes unused pip vendors. ZAP excludes unused Python/Webswing components.
-- Full application/Nuclei, ZAP, Strix and patched ZGrab candidate scans have no fixable high/critical vulnerabilities. CI, merge and signed release are pending.
+- Full application/Nuclei, ZAP, Strix and patched ZGrab candidate scans have no fixable high/critical vulnerabilities.
+- PR #67 merged at `399cd63`; all 19 final PR checks and merged-main CI passed. Both `v0.4.0` application indexes passed signature, multi-architecture, SBOM and provenance verification.
+- The `v0.4.0` runner publication failed because GitHub's reserved `RUNNER_NAME` replaced the matrix name. The regression test reproduced the invalid tags. The workflow now uses a validated `DECKARD_RUNNER_NAME`; publish a patch release rather than move the signed tag.
 - Native browser desktop/mobile checks use local mock data, not live Marina evidence. Producer freshness and controller-restart recovery have UI regression tests.
 
 ## Deployment blocker
@@ -38,3 +40,5 @@ Green reviewed source and infra changes; immutable release digest; generated man
 `marina-staging-superuser` AWS SSO is expired. Read-only STS verification still fails; no live Kubernetes write, CNI check or deployment is claimed.
 Continue source delivery and prepare immutable staging configuration, but do not invent cluster UIDs, scoped Secrets, CNI enforcement or model credentials.
 The new API assessment ServiceAccount needs an exact-subject IRSA trust update before it performs AWS inventory work. Resolve its final rendered name before changing trust.
+
+Anonymous GHCR pulls also fail. GitHub package settings confirm that organization policy disables public visibility; no organization-wide policy change was made. Marina retains its existing image-pull Secret. Public registry installs require organization-admin action, not copied credentials or an alternate publication path.
