@@ -20,7 +20,7 @@ const MaxInputBytes = 64 << 20
 // Parse returns incidents only. Callers must always submit Complete=false:
 // silence in an event stream is never a clean observation.
 func Parse(data []byte, o ingest.ParseOptions) ([]ingest.Finding, error) {
-	return parseBatch(data, o, parseEvent)
+	return parseBatch(data, o)
 }
 
 func parseEvent(data []byte, o ingest.ParseOptions) (observation, error) {

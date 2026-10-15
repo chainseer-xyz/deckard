@@ -2,7 +2,6 @@
 package runtimeevent
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -44,11 +43,15 @@ func (c *Collector) Collect(ctx context.Context) (ingest.Request, error) {
 	if err != nil {
 		return ingest.Request{}, err
 	}
-	logs, err := c.fetchLogs(ctx, pods, &since)
+	accumulator, err := tetragon.NewAccumulator(ingest.ParseOptions{Scope: c.settings.ClusterScope})
 	if err != nil {
 		return ingest.Request{}, err
 	}
-	findings, err := tetragon.Parse(logs, ingest.ParseOptions{Scope: c.settings.ClusterScope})
+	err = c.fetchLogs(ctx, pods, &since, accumulator)
+	if err != nil {
+		return ingest.Request{}, err
+	}
+	findings, err := accumulator.Findings()
 	if err != nil {
 		return ingest.Request{}, err
 	}
@@ -120,57 +123,49 @@ func (c *Collector) podPages(ctx context.Context) ([]corev1.Pod, error) {
 	return nil, errors.New("tetragon pod list pagination exceeds the limit")
 }
 
-func (c *Collector) fetchLogs(ctx context.Context, pods []corev1.Pod, since *metav1.Time) ([]byte, error) {
+func (c *Collector) fetchLogs(ctx context.Context, pods []corev1.Pod, since *metav1.Time, accumulator *tetragon.Accumulator) error {
 	var total atomic.Int64
-	logs := make([][]byte, len(pods))
 	group, workerCtx := errgroup.WithContext(ctx)
 	group.SetLimit(c.settings.Concurrency)
-	for i, pod := range pods {
+	for _, pod := range pods {
 		if workerCtx.Err() != nil {
 			break
 		}
 		group.Go(func() error {
-			body, err := c.readLog(workerCtx, pod.Name, since, &total)
-			if err == nil {
-				logs[i] = body
-			}
-			return err
+			return c.readLog(workerCtx, pod.Name, since, &total, accumulator)
 		})
 	}
 	if err := group.Wait(); err != nil {
-		return nil, err
+		return err
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return err
 	}
-	combined := bytes.Join(logs, []byte("\n"))
-	if int64(len(combined)) > c.settings.MaxTotalBytes {
-		return nil, errors.New("tetragon aggregate log bound exceeded")
-	}
-	return combined, nil
+	return nil
 }
 
-func (c *Collector) readLog(ctx context.Context, pod string, since *metav1.Time, total *atomic.Int64) ([]byte, error) {
+func (c *Collector) readLog(ctx context.Context, pod string, since *metav1.Time, total *atomic.Int64, accumulator *tetragon.Accumulator) error {
 	stream, err := c.client.CoreV1().Pods(c.settings.Namespace).GetLogs(pod, &corev1.PodLogOptions{Container: c.settings.Container, SinceTime: since}).Stream(ctx)
 	if err != nil {
-		return nil, requestError(ctx, "tetragon pod log request failed")
+		return requestError(ctx, "tetragon pod log request failed")
 	}
 	defer func() { _ = stream.Close() }()
-	reader := &budgetReader{Reader: stream, total: total, limit: c.settings.MaxTotalBytes}
-	data, err := io.ReadAll(io.LimitReader(reader, c.settings.MaxPodBytes+1))
-	if err != nil {
-		return nil, requestError(ctx, "tetragon pod log read failed or aggregate bound exceeded")
+	reader := &budgetReader{Reader: stream, total: total, limit: c.settings.MaxTotalBytes, podLimit: c.settings.MaxPodBytes}
+	if err := accumulator.AddStream(ctx, reader); err != nil {
+		if ctx.Err() != nil {
+			return requestError(ctx, "tetragon pod log read failed")
+		}
+		return err
 	}
-	if int64(len(data)) > c.settings.MaxPodBytes {
-		return nil, errors.New("tetragon per-pod log bound exceeded")
-	}
-	return data, nil
+	return nil
 }
 
 type budgetReader struct {
 	io.Reader
-	total *atomic.Int64
-	limit int64
+	total    *atomic.Int64
+	limit    int64
+	podLimit int64
+	podBytes int64
 }
 
 func (r *budgetReader) Read(p []byte) (int, error) {
@@ -178,6 +173,10 @@ func (r *budgetReader) Read(p []byte) (int, error) {
 		p = p[:32<<10]
 	}
 	n, err := r.Reader.Read(p)
+	r.podBytes += int64(n)
+	if r.podBytes > r.podLimit {
+		return n, errors.New("tetragon per-pod log bound exceeded")
+	}
 	if r.total.Add(int64(n)) > r.limit {
 		return n, errors.New("tetragon aggregate log bound exceeded")
 	}

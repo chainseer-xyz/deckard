@@ -552,6 +552,28 @@ trufflehog's output file contains the raw secrets while the pod runs. It stays i
 pod's memory-backed `emptyDir` (gone with the pod, never on the node's disk), and `deckard
 ingest` hashes the values before anything is sent.
 
+## Tetragon runtime collection
+
+`deckard runtime collect` streams native NDJSON from every selected sensor Pod's
+`export-stdout` container. The default lookback is `6m`; an explicit backfill may
+extend to `1h`. Collection uses at most `64` Pods and `4` concurrent log streams,
+with a `1m` default deadline and a `2m` hard maximum.
+
+Transport caps are `10 MiB` per Pod and `256 MiB` across the collection, with
+at most `1 MiB` per native record. These are read bounds, not coverage claims.
+The collector parses each record before discarding it; it never buffers or saves
+the combined raw logs. The shared batch accepts at most `100000` records,
+including ordinary process telemetry and duplicates, and `5000` incidents.
+Cross-sensor duplicates contribute only their largest reported aggregation count.
+First/last event times and the highest observed severity survive stream ordering.
+
+Every selected Pod must be readable. Invalid JSON, oversized records, byte/count
+overflow, transport failures, cancellation and reported drops/throttling reject
+the whole batch, even after valid policy events arrived. No prefix is uploaded.
+The sanitized envelope still has a `10 MiB` limit and always sets `complete=false`.
+Successful delivery does not prove sensor continuity or complete runtime coverage.
+See [Runtime delivery](collectors.md#runtime-delivery) for commands and identity requirements.
+
 ## Prowler App
 
 If you already run **Prowler App** (its API, UI, worker and database, typically in
@@ -588,13 +610,24 @@ that echo the server's text are scrubbed of every credential the command knows).
 | `--email-env` and `--password-env` | a Prowler user; deckard exchanges them for a JWT at `POST /api/v1/tokens` (use instead of a key) |
 | `--token-env` | the deckard API token (not needed with `--dry-run`) |
 
-To create the API key, sign in to Prowler App as a user who may manage API keys, open your
-profile, create an API key and copy it when it is shown (it is shown once; revoke it there
-to cut access). Give the key a **read-only role**: a role with none of the `manage_*`
-permissions (users, account, billing, providers, integrations, scans) and with
-`unlimited_visibility`, or with access to exactly the provider groups you want pulled.
-deckard only issues `GET` requests (and the login `POST` for the JWT path). Menu and
-permission labels vary a little between Prowler versions.
+Prowler API keys inherit their creator's **current** roles; keys have no separate
+role. In Prowler `5.17`, creating a key requires `MANAGE_ACCOUNT`. Sign in as the
+dedicated automation user and create its key under **Profile → Account**, or through
+`POST /api/v1/api-keys`. Copy it once into your normal secret store; it cannot be
+retrieved later.
+
+For a read-only automation key, temporarily grant that user `MANAGE_ACCOUNT` to
+issue the key. Have another tenant administrator replace its role afterward with
+a reader role: no `manage_*` permissions, and access to exactly the intended
+provider groups. Permission changes immediately apply to the key. Keep another
+tenant administrator throughout; do not downgrade the sole administrator or use
+its unrestricted key. `unlimited_visibility` reads every provider in the tenant;
+use it only when that scope is intended.
+
+The CLI alternatively supports an ordinary reader user's email/password JWT login.
+The scheduled Helm `prowler-app` collector requires an API-key Secret. Deckard only
+issues `GET` requests, plus the login `POST` for JWT authentication. See
+[Prowler's API-key documentation](https://docs.prowler.com/user-guide/tutorials/prowler-app-api-keys).
 
 ### Flags
 
