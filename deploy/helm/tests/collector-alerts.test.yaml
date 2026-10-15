@@ -1,0 +1,212 @@
+rule_files: [collectors-rules.yaml]
+evaluation_interval: 1m
+tests:
+  - name: HA replicas and failure reasons collapse before joins
+    interval: 1m
+    input_series:
+      - series: kube_job_created{namespace="deckard",job_name="runtime-failed",instance="ksm-a"}
+        values: 60x10
+      - series: kube_job_created{namespace="deckard",job_name="runtime-failed",instance="ksm-b"}
+        values: 60x10
+      - series: kube_job_status_failed{namespace="deckard",job_name="runtime-failed",instance="ksm-a",reason="BackoffLimitExceeded"}
+        values: 1x10
+      - series: kube_job_status_failed{namespace="deckard",job_name="runtime-failed",instance="ksm-b",reason="BackoffLimitExceeded"}
+        values: 1x10
+      - series: kube_job_status_failed{namespace="deckard",job_name="runtime-failed",instance="ksm-a",reason="DeadlineExceeded"}
+        values: 0x10
+      - series: kube_job_status_failed{namespace="deckard",job_name="runtime-failed",instance="ksm-b",reason="DeadlineExceeded"}
+        values: 0x10
+      - series: kube_job_owner{namespace="deckard",job_name="runtime-failed",instance="ksm-a",owner_kind="CronJob",owner_name="deckard-collect-tetragon-events"}
+        values: 1x10
+      - series: kube_job_owner{namespace="deckard",job_name="runtime-failed",instance="ksm-b",owner_kind="CronJob",owner_name="deckard-collect-tetragon-events"}
+        values: 1x10
+      - series: kube_cronjob_status_last_successful_time{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-a"}
+        values: 10x10
+      - series: kube_cronjob_status_last_successful_time{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-b"}
+        values: 10x10
+    promql_expr_test:
+      - expr: ALERTS{alertname="DeckardCollectorFailed",alertstate="pending"}
+        eval_time: 4m
+        exp_samples:
+          - labels: ALERTS{alertname="DeckardCollectorFailed",alertstate="pending",collector="tetragon-events",namespace="deckard",severity="warning"}
+            value: 1
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: DeckardCollectorFailed
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: DeckardCollectorFailed
+        exp_alerts: &failed_alert
+          - exp_labels: {collector: tetragon-events, namespace: deckard, severity: warning}
+            exp_annotations:
+              summary: Deckard collector tetragon-events failed after its last successful ingest
+              description: A scanner or upload failed. Inspect the Job; no fresh complete report has been applied.
+
+  - name: one KSM exporter with multiple failure reasons still fires once
+    interval: 1m
+    input_series:
+      - series: kube_job_created{namespace="deckard",job_name="runtime-failed"}
+        values: 60x10
+      - series: kube_job_status_failed{namespace="deckard",job_name="runtime-failed",reason="BackoffLimitExceeded"}
+        values: 1x10
+      - series: kube_job_status_failed{namespace="deckard",job_name="runtime-failed",reason="DeadlineExceeded"}
+        values: 0x10
+      - series: kube_job_owner{namespace="deckard",job_name="runtime-failed",owner_kind="CronJob",owner_name="deckard-collect-tetragon-events"}
+        values: 1x10
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: DeckardCollectorFailed
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: DeckardCollectorFailed
+        exp_alerts: *failed_alert
+
+  - name: zero-only reasons are not failures even before first success
+    interval: 1m
+    input_series:
+      - series: kube_job_created{namespace="deckard",job_name="runtime-ok",instance="ksm-a"}
+        values: 60x10
+      - series: kube_job_created{namespace="deckard",job_name="runtime-ok",instance="ksm-b"}
+        values: 60x10
+      - series: kube_job_status_failed{namespace="deckard",job_name="runtime-ok",reason="BackoffLimitExceeded",instance="ksm-a"}
+        values: 0x10
+      - series: kube_job_status_failed{namespace="deckard",job_name="runtime-ok",reason="DeadlineExceeded",instance="ksm-b"}
+        values: 0x10
+      - series: kube_job_owner{namespace="deckard",job_name="runtime-ok",owner_kind="CronJob",owner_name="deckard-collect-tetragon-events",instance="ksm-a"}
+        values: 1x10
+      - series: kube_job_owner{namespace="deckard",job_name="runtime-ok",owner_kind="CronJob",owner_name="deckard-collect-tetragon-events",instance="ksm-b"}
+        values: 1x10
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: DeckardCollectorFailed
+        exp_alerts: []
+
+  - name: failed Jobs from another owner do not fire this collector
+    interval: 1m
+    input_series:
+      - series: kube_job_created{namespace="deckard",job_name="foreign-failed"}
+        values: 100x10
+      - series: kube_job_status_failed{namespace="deckard",job_name="foreign-failed",reason="BackoffLimitExceeded"}
+        values: 1x10
+      - series: kube_job_status_failed{namespace="deckard",job_name="foreign-failed",reason="DeadlineExceeded"}
+        values: 0x10
+      - series: kube_job_owner{namespace="deckard",job_name="foreign-failed",owner_kind="CronJob",owner_name="another-collector"}
+        values: 1x10
+      - series: kube_job_created{namespace="deckard",job_name="runtime-ok"}
+        values: 60x10
+      - series: kube_job_status_failed{namespace="deckard",job_name="runtime-ok",reason="BackoffLimitExceeded"}
+        values: 0x10
+      - series: kube_job_owner{namespace="deckard",job_name="runtime-ok",owner_kind="CronJob",owner_name="deckard-collect-tetragon-events"}
+        values: 1x10
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: DeckardCollectorFailed
+        exp_alerts: []
+
+  - name: a newer successful report clears an old failed Job
+    interval: 1m
+    input_series:
+      - series: kube_job_created{namespace="deckard",job_name="runtime-failed"}
+        values: 60x10
+      - series: kube_job_status_failed{namespace="deckard",job_name="runtime-failed",reason="BackoffLimitExceeded"}
+        values: 1x10
+      - series: kube_job_owner{namespace="deckard",job_name="runtime-failed",owner_kind="CronJob",owner_name="deckard-collect-tetragon-events"}
+        values: 1x10
+      - series: kube_cronjob_status_last_successful_time{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-a"}
+        values: 10x5 120x4
+      - series: kube_cronjob_status_last_successful_time{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-b"}
+        values: 10x10
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: DeckardCollectorFailed
+        exp_alerts: *failed_alert
+      - eval_time: 6m
+        alertname: DeckardCollectorFailed
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: DeckardCollectorFailed
+        exp_alerts: []
+
+  - name: failure before any heartbeat fires after the five-minute hold
+    interval: 1m
+    input_series:
+      - series: kube_job_created{namespace="deckard",job_name="first-run-failed"}
+        values: 60x10
+      - series: kube_job_status_failed{namespace="deckard",job_name="first-run-failed",reason="BackoffLimitExceeded"}
+        values: 1x10
+      - series: kube_job_owner{namespace="deckard",job_name="first-run-failed",owner_kind="CronJob",owner_name="deckard-collect-tetragon-events"}
+        values: 1x10
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: DeckardCollectorFailed
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: DeckardCollectorFailed
+        exp_alerts: *failed_alert
+
+  - name: zero-valued never-success heartbeat does not suppress a failure
+    interval: 1m
+    input_series:
+      - series: kube_job_created{namespace="deckard",job_name="first-run-failed"}
+        values: 60x10
+      - series: kube_job_status_failed{namespace="deckard",job_name="first-run-failed",reason="BackoffLimitExceeded"}
+        values: 1x10
+      - series: kube_job_owner{namespace="deckard",job_name="first-run-failed",owner_kind="CronJob",owner_name="deckard-collect-tetragon-events"}
+        values: 1x10
+      - series: kube_cronjob_status_last_successful_time{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x10
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: DeckardCollectorFailed
+        exp_alerts: *failed_alert
+
+  - name: identical CronJob owner names in another namespace are excluded
+    interval: 1m
+    input_series:
+      - series: kube_job_created{namespace="another-namespace",job_name="foreign-failed",instance="ksm-a"}
+        values: 60x10
+      - series: kube_job_status_failed{namespace="another-namespace",job_name="foreign-failed",reason="BackoffLimitExceeded",instance="ksm-a"}
+        values: 1x10
+      - series: kube_job_owner{namespace="another-namespace",job_name="foreign-failed",owner_kind="CronJob",owner_name="deckard-collect-tetragon-events",instance="ksm-a"}
+        values: 1x10
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: DeckardCollectorFailed
+        exp_alerts: []
+
+  - name: stale delivery falls back to CronJob creation before first success
+    interval: 1m
+    input_series:
+      - series: kube_cronjob_created{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-a"}
+        values: 1x30
+      - series: kube_cronjob_created{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-b"}
+        values: 1x30
+      - series: kube_cronjob_spec_suspend{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-a"}
+        values: 0x30
+      - series: kube_cronjob_spec_suspend{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-b"}
+        values: 0x30
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: DeckardCollectorStale
+        exp_alerts: []
+      - eval_time: 26m
+        alertname: DeckardCollectorStale
+        exp_alerts:
+          - exp_labels: {collector: tetragon-events, namespace: deckard, severity: warning}
+            exp_annotations:
+              summary: Deckard collector tetragon-events has no recent successful ingest
+              description: Check the CronJob, scanner and ingest logs. Failed or incomplete work must not certify clean findings.
+
+  - name: suspended collectors do not emit stale-delivery alerts
+    interval: 1m
+    input_series:
+      - series: kube_cronjob_created{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-a"}
+        values: 1x30
+      - series: kube_cronjob_spec_suspend{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-a"}
+        values: 1x30
+      - series: kube_cronjob_spec_suspend{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-b"}
+        values: 1x30
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: DeckardCollectorStale
+        exp_alerts: []

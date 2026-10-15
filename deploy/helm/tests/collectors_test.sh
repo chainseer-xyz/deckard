@@ -145,6 +145,14 @@ reject 'Tetragon requires explicit sensor namespace' 'Tetragon sensorNamespace m
 reject 'Tetragon requires explicit sensor label selector' 'Tetragon sensorSelector is required' 'del(.collectors.jobs[0].sensorSelector)' "$tetragon_values"
 reject 'Tetragon cannot collect arbitrary sensor container logs' 'Tetragon sensorContainer must be export-stdout' '.collectors.jobs[0].sensorContainer="tetragon"' "$tetragon_values"
 reject 'Tetragon requires immutable cluster UID scope' 'Tetragon clusterScope must use k8s:uid:<UUID>' '.collectors.jobs[0].clusterScope="k8s:mutable-name"' "$tetragon_values"
+for retries in 0 1 2; do
+  retried=$(render_mutation ".collectors.jobs[0].backoffLimit=$retries" "$tetragon_values")
+  assert "Tetragon permits exactly $retries bounded whole-Pod retries" "[.[]|select(.kind==\"CronJob\")]|first|.spec.jobTemplate.spec.backoffLimit==$retries and .spec.jobTemplate.spec.activeDeadlineSeconds==300 and .spec.concurrencyPolicy==\"Forbid\" and .spec.jobTemplate.spec.template.spec.restartPolicy==\"Never\"" "$retried"
+done
+for retries in '-1' '3' '1.5' '"2"' 'true' 'null' '[]' '{}'; do
+  reject "invalid Tetragon retry limit $retries is refused" 'collector backoffLimit must be an integer from 0 to 2' ".collectors.jobs[0].backoffLimit=$retries" "$tetragon_values"
+done
+reject 'posture collectors cannot opt into runtime retries' 'only Tetragon collectors support nonzero backoffLimit' '.collectors.jobs[0].backoffLimit=1' "$kube_values"
 for placement_base in "$values" "$kube_values" "$tetragon_values" "$runtime_values" "$prowler_values"; do
   platform_values=$(jq '.nodeSelector={nodegroup:"infrastructure"}|.tolerations=[{key:"nodegroup",operator:"Equal",value:"infrastructure",effect:"NoSchedule"}]|.affinity={nodeAffinity:{requiredDuringSchedulingIgnoredDuringExecution:{nodeSelectorTerms:[{matchExpressions:[{key:"nodegroup",operator:"In",values:["infrastructure"]}]}]}}}' <<< "$placement_base")
   platform=$(render "$platform_values")
