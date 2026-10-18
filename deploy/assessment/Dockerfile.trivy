@@ -4,6 +4,8 @@ FROM ${DECKARD_IMAGE} AS deckard
 
 # Official Trivy 0.76.0. No Docker socket, host filesystem or cloud identity.
 FROM ghcr.io/aquasecurity/trivy@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222
+# Alpine's CVE-2026-77214 fix, without changing the scanner or upgrading the OS.
+RUN apk add --no-cache --upgrade 'libexpat>=2.9.0-r0'
 COPY --from=deckard /usr/local/bin/deckard /usr/local/bin/deckard
 ENV HOME=/tmp \
     TRIVY_CACHE_DIR=/tmp/trivy \

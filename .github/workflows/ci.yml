@@ -160,6 +160,11 @@ jobs:
         run: |
           python3 -m unittest discover -s deploy/assessment/tests -p 'test_zgrab_security.py' -v
           python3 -m unittest discover -s deploy/assessment/tests -p 'test_runner_licenses.py' -v
+      - name: targeted Trivy library fix and runtime security contracts
+        if: matrix.tool == 'trivy'
+        env:
+          TRIVY_SECURITY_IMAGE: deckard:runner-candidate
+        run: python3 -m unittest discover -s deploy/assessment/tests -p 'test_trivy_security.py' -v
       - name: actual registry-only runtime image scan
         if: matrix.tool == 'trivy'
         run: |
