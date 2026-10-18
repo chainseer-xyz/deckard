@@ -54,7 +54,19 @@ groups:
           description: "Workers are not keeping up; check worker replicas and rate limits."
 
       - alert: DeckardQueueStuck
-        expr: sum(deckard_queue_depth) > 0 and on() sum(increase(deckard_checks_run_total[1h])) == 0
+        # Only native scan queues produce check-run progress. Expansion, source
+        # sync and housekeeping work can wait while scheduled scans are idle.
+        # Check counters are lazy: a new series first sampled at one proves a
+        # run even though increase() cannot see it. Give it the full hour before
+        # starting the existing one-hour hold. Missing counters alone are zero
+        # progress; missing queue metrics never establish a scan backlog.
+        expr: |
+          (
+            sum(deckard_queue_depth{queue=~"passive|active|intrusive|intel"}) > 0
+            and on()
+            (sum(increase(deckard_checks_run_total[1h])) or vector(0)) == 0
+          )
+          unless on() count(present_over_time(deckard_checks_run_total[1h]) unless deckard_checks_run_total offset 1h) > 0
         for: 1h
         labels:
           severity: high

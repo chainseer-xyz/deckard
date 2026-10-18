@@ -1,6 +1,250 @@
 rule_files: [prometheus-rules.yml]
 evaluation_interval: 1m
 tests:
+  - name: expansion and housekeeping queues do not require native scan progress
+    interval: 1m
+    input_series:
+      - series: deckard_queue_depth{queue="expand"}
+        values: 53+0x180
+      - series: deckard_queue_depth{queue="default"}
+        values: 5+0x180
+      - series: deckard_queue_depth{queue="sync"}
+        values: 2+0x180
+      - series: deckard_queue_depth{queue="passive-extra"}
+        values: 1+0x180
+      - series: deckard_checks_run_total{check="http.headers",tier="passive"}
+        values: 5+0x180
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: DeckardQueueStuck
+        exp_alerts: []
+
+  - name: housekeeping without any native check counters is not a stalled scan queue
+    interval: 1m
+    input_series:
+      - series: deckard_queue_depth{queue="expand"}
+        values: 53+0x180
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: DeckardQueueStuck
+        exp_alerts: []
+
+  - name: passive scans stalled before their first execution alert after the hold
+    interval: 1m
+    input_series:
+      - series: deckard_queue_depth{queue="passive"}
+        values: 1+0x180
+    alert_rule_test:
+      - eval_time: 59m
+        alertname: DeckardQueueStuck
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: DeckardQueueStuck
+        exp_alerts: &queue_stuck
+          - exp_labels: {severity: high}
+            exp_annotations:
+              summary: deckard queue is non-empty but no checks have run in an hour
+
+  - name: active scans stalled before their first execution alert after the hold
+    interval: 1m
+    input_series:
+      - series: deckard_queue_depth{queue="active"}
+        values: 1+0x180
+    alert_rule_test:
+      - eval_time: 59m
+        alertname: DeckardQueueStuck
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: DeckardQueueStuck
+        exp_alerts: *queue_stuck
+
+  - name: intrusive scans stalled before their first execution alert after the hold
+    interval: 1m
+    input_series:
+      - series: deckard_queue_depth{queue="intrusive"}
+        values: 1+0x180
+    alert_rule_test:
+      - eval_time: 59m
+        alertname: DeckardQueueStuck
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: DeckardQueueStuck
+        exp_alerts: *queue_stuck
+
+  - name: intel scans stalled before their first execution alert after the hold
+    interval: 1m
+    input_series:
+      - series: deckard_queue_depth{queue="intel"}
+        values: 1+0x180
+    alert_rule_test:
+      - eval_time: 59m
+        alertname: DeckardQueueStuck
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: DeckardQueueStuck
+        exp_alerts: *queue_stuck
+
+  - name: passive scan backlog with a flat established counter still alerts
+    interval: 1m
+    input_series:
+      - series: deckard_queue_depth{queue="passive"}
+        values: 0+0x59 1+0x121
+      - series: deckard_checks_run_total{check="http.headers",tier="passive"}
+        values: 5+0x180
+    alert_rule_test:
+      - eval_time: 119m
+        alertname: DeckardQueueStuck
+        exp_alerts: []
+      - eval_time: 120m
+        alertname: DeckardQueueStuck
+        exp_alerts: *queue_stuck
+
+  - name: active scan backlog with a flat established counter still alerts
+    interval: 1m
+    input_series:
+      - series: deckard_queue_depth{queue="active"}
+        values: 0+0x59 1+0x121
+      - series: deckard_checks_run_total{check="http.headers",tier="passive"}
+        values: 5+0x180
+    alert_rule_test:
+      - eval_time: 119m
+        alertname: DeckardQueueStuck
+        exp_alerts: []
+      - eval_time: 120m
+        alertname: DeckardQueueStuck
+        exp_alerts: *queue_stuck
+
+  - name: intrusive scan backlog with a flat established counter still alerts
+    interval: 1m
+    input_series:
+      - series: deckard_queue_depth{queue="intrusive"}
+        values: 0+0x59 1+0x121
+      - series: deckard_checks_run_total{check="http.headers",tier="passive"}
+        values: 5+0x180
+    alert_rule_test:
+      - eval_time: 119m
+        alertname: DeckardQueueStuck
+        exp_alerts: []
+      - eval_time: 120m
+        alertname: DeckardQueueStuck
+        exp_alerts: *queue_stuck
+
+  - name: intel scan backlog with a flat established counter still alerts
+    interval: 1m
+    input_series:
+      - series: deckard_queue_depth{queue="intel"}
+        values: 0+0x59 1+0x121
+      - series: deckard_checks_run_total{check="http.headers",tier="passive"}
+        values: 5+0x180
+    alert_rule_test:
+      - eval_time: 119m
+        alertname: DeckardQueueStuck
+        exp_alerts: []
+      - eval_time: 120m
+        alertname: DeckardQueueStuck
+        exp_alerts: *queue_stuck
+
+  - name: native scan progress prevents a stuck alert despite queued scans
+    interval: 1m
+    input_series:
+      - series: deckard_queue_depth{queue="passive"}
+        values: 1+0x240
+      - series: deckard_checks_run_total{check="http.headers",tier="passive"}
+        values: 1+1x240
+    alert_rule_test:
+      - eval_time: 180m
+        alertname: DeckardQueueStuck
+        exp_alerts: []
+
+  - name: a late first counter sampled at one resets the full stuck hold
+    interval: 1m
+    input_series:
+      - series: deckard_queue_depth{queue="passive"}
+        values: 1+0x240
+      - series: deckard_checks_run_total{check="http.headers",tier="passive"}
+        values: _x90 1+0x150
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: DeckardQueueStuck
+        exp_alerts: *queue_stuck
+      - eval_time: 90m
+        alertname: DeckardQueueStuck
+        exp_alerts: []
+      - eval_time: 180m
+        alertname: DeckardQueueStuck
+        exp_alerts: []
+      - eval_time: 209m
+        alertname: DeckardQueueStuck
+        exp_alerts: []
+      - eval_time: 210m
+        alertname: DeckardQueueStuck
+        exp_alerts: *queue_stuck
+
+  - name: resetting an established counter to zero is not execution evidence
+    interval: 1m
+    input_series:
+      - series: deckard_queue_depth{queue="passive"}
+        values: 0+0x59 1+0x181
+      - series: deckard_checks_run_total{check="http.headers",tier="passive"}
+        values: 10+0x89 0+0x151
+    alert_rule_test:
+      - eval_time: 119m
+        alertname: DeckardQueueStuck
+        exp_alerts: []
+      - eval_time: 120m
+        alertname: DeckardQueueStuck
+        exp_alerts: *queue_stuck
+
+  - name: replacement replica first sampled at one is real execution evidence
+    interval: 1m
+    input_series:
+      - series: deckard_queue_depth{queue="intel",instance="api"}
+        values: 0+0x59 1+0x181
+      - series: deckard_checks_run_total{check="domain.expiry",tier="passive",instance="old"}
+        values: 10+0x89 stale
+      - series: deckard_checks_run_total{check="domain.expiry",tier="passive",instance="new"}
+        values: _x90 1+0x150
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: DeckardQueueStuck
+        exp_alerts: []
+      - eval_time: 180m
+        alertname: DeckardQueueStuck
+        exp_alerts: []
+      - eval_time: 210m
+        alertname: DeckardQueueStuck
+        exp_alerts: *queue_stuck
+
+  - name: actual progress after a counter reset still prevents a stuck alert
+    interval: 1m
+    input_series:
+      - series: deckard_queue_depth{queue="passive"}
+        values: 0+0x59 1+0x181
+      - series: deckard_checks_run_total{check="http.headers",tier="passive",instance="worker"}
+        values: 10+0x89 0+0x9 1+1x140
+    alert_rule_test:
+      - eval_time: 180m
+        alertname: DeckardQueueStuck
+        exp_alerts: []
+
+  - name: missing queue metrics do not assert a backlog
+    interval: 1m
+    input_series:
+      - series: deckard_checks_run_total{check="http.headers",tier="passive"}
+        values: 5+0x180
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: DeckardQueueStuck
+        exp_alerts: []
+
+  - name: no metrics do not assert a stalled scan queue
+    interval: 1m
+    input_series: []
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: DeckardQueueStuck
+        exp_alerts: []
+
   - interval: 1m
     input_series:
       - series: deckard_source_last_success_timestamp{source="native",instance="api"}
