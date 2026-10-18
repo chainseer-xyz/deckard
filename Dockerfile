@@ -34,7 +34,7 @@ ARG BUILDARCH
 ARG TARGETOS
 ARG TARGETARCH
 ARG NUCLEI_VERSION=v3.11.1
-ARG NUCLEI_GO_GET_PINS="golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.60.0 golang.org/x/mod@v0.41.0 google.golang.org/grpc@v1.83.2 github.com/go-git/go-git/v5@v5.19.2"
+ARG NUCLEI_GO_GET_PINS="golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.60.0 golang.org/x/mod@v0.41.0 google.golang.org/grpc@v1.83.2 github.com/go-git/go-git/v5@v5.19.2 github.com/getkin/kin-openapi@v0.149.0"
 RUN apk add --no-cache git
 WORKDIR /src
 RUN git clone --quiet --depth 1 --branch ${NUCLEI_VERSION} https://github.com/projectdiscovery/nuclei.git .
