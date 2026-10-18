@@ -115,8 +115,10 @@ a transient outage only delays enrichment.
   against the asset, and it resolves only after the template has run and
   stopped matching `findings.resolve_after` times.
 - Staleness metric: `deckard_vulnintel_age_seconds{feed}`; the
-  `DeckardVulnintelFeedStale` rule fires after 18h (3x the default
-  `vulnintel.interval` of 6h).
+  `DeckardVulnintelFeedStale` rule covers KEV and fires after 18h (3x the
+  default `vulnintel.interval` of 6h). EPSS fetches only CVEs needing scores;
+  its age can grow during healthy inactivity. `DeckardVulnintelRefreshFailing`
+  still reports repeated fetch errors from either feed.
 
 ### Writable state
 
