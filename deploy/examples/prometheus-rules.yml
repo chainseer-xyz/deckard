@@ -134,8 +134,10 @@ groups:
       # deckard itself. The age counts from the last time the updater confirmed
       # the templates current, so a quiet upstream does not trigger it: only a
       # broken updater does.
+      # Both gauges use the same scrape labels. Match each replica to its own
+      # threshold; on() would fail when more than one target exports the gauges.
       - alert: DeckardNucleiTemplatesStale
-        expr: deckard_nuclei_templates_age_seconds > on() deckard_nuclei_templates_max_age_warn_seconds
+        expr: deckard_nuclei_templates_age_seconds > deckard_nuclei_templates_max_age_warn_seconds
         for: 15m
         labels:
           severity: high
@@ -195,11 +197,13 @@ groups:
 
   - name: deckard-vulnintel
     rules:
-      # Ages are relative to the last successful fetch. The threshold (18h) is 3x
-      # the default vulnintel.interval of 6h: tune it if you changed the interval.
+      # KEV refreshes on vulnintel.interval. EPSS is fetched only for CVEs needing
+      # scores, so a quiet EPSS cache is not a failed scheduled refresh. Actual
+      # EPSS errors still fire DeckardVulnintelRefreshFailing below.
+      # The threshold (18h) is 3x the default interval of 6h: tune it if changed.
       # Air-gapped deployments (vulnintel.enabled=false) never export these series.
       - alert: DeckardVulnintelFeedStale
-        expr: deckard_vulnintel_age_seconds > 3 * 6 * 3600
+        expr: deckard_vulnintel_age_seconds{feed="kev"} > 3 * 6 * 3600
         for: 30m
         labels:
           severity: medium

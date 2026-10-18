@@ -37,3 +37,143 @@ tests:
           - exp_labels: {source: unseen, severity: medium}
             exp_annotations:
               summary: deckard source unseen has never synced successfully
+
+  - name: stale worker is not hidden by a fresh API replica
+    interval: 1m
+    input_series:
+      - series: deckard_nuclei_templates_age_seconds{job="deckard",instance="api"}
+        values: 1800+0x40
+      - series: deckard_nuclei_templates_age_seconds{job="deckard",instance="worker"}
+        values: 7200+0x40
+      - series: deckard_nuclei_templates_max_age_warn_seconds{job="deckard",instance="api"}
+        values: 3600+0x40
+      - series: deckard_nuclei_templates_max_age_warn_seconds{job="deckard",instance="worker"}
+        values: 3600+0x40
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: DeckardNucleiTemplatesStale
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: DeckardNucleiTemplatesStale
+        exp_alerts:
+          - exp_labels: {job: deckard, instance: worker, severity: high}
+            exp_annotations: &nuclei_stale_2h
+              summary: deckard's nuclei templates have not been refreshed for 2h 0m 0s
+              description: "New CVE templates are not being fetched, so new vulnerabilities (for example the next React2Shell) will not be tested. Check the update_templates job, the nuclei.update.dir volume and egress to github.com."
+
+  - name: each replica uses its own configured template threshold
+    interval: 1m
+    input_series:
+      - series: deckard_nuclei_templates_age_seconds{job="deckard",instance="api"}
+        values: 7200+0x40
+      - series: deckard_nuclei_templates_age_seconds{job="deckard",instance="worker"}
+        values: 7200+0x40
+      - series: deckard_nuclei_templates_max_age_warn_seconds{job="deckard",instance="api"}
+        values: 3600+0x40
+      - series: deckard_nuclei_templates_max_age_warn_seconds{job="deckard",instance="worker"}
+        values: 10800+0x40
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: DeckardNucleiTemplatesStale
+        exp_alerts:
+          - exp_labels: {job: deckard, instance: api, severity: high}
+            exp_annotations: *nuclei_stale_2h
+
+  - name: both stale replicas alert independently
+    interval: 1m
+    input_series:
+      - series: deckard_nuclei_templates_age_seconds{job="deckard",instance="api"}
+        values: 7200+0x40
+      - series: deckard_nuclei_templates_age_seconds{job="deckard",instance="worker"}
+        values: 7200+0x40
+      - series: deckard_nuclei_templates_max_age_warn_seconds{job="deckard",instance="api"}
+        values: 3600+0x40
+      - series: deckard_nuclei_templates_max_age_warn_seconds{job="deckard",instance="worker"}
+        values: 3600+0x40
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: DeckardNucleiTemplatesStale
+        exp_alerts:
+          - exp_labels: {job: deckard, instance: api, severity: high}
+            exp_annotations: *nuclei_stale_2h
+          - exp_labels: {job: deckard, instance: worker, severity: high}
+            exp_annotations: *nuclei_stale_2h
+
+  - name: threshold-only replica cannot break another replica's age alert
+    interval: 1m
+    input_series:
+      - series: deckard_nuclei_templates_age_seconds{job="deckard",instance="worker"}
+        values: 7200+0x40
+      - series: deckard_nuclei_templates_max_age_warn_seconds{job="deckard",instance="api"}
+        values: 3600+0x40
+      - series: deckard_nuclei_templates_max_age_warn_seconds{job="deckard",instance="worker"}
+        values: 3600+0x40
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: DeckardNucleiTemplatesStale
+        exp_alerts:
+          - exp_labels: {job: deckard, instance: worker, severity: high}
+            exp_annotations: *nuclei_stale_2h
+
+  - name: absent template age and exact threshold do not assert stale templates
+    interval: 1m
+    input_series:
+      - series: deckard_nuclei_templates_age_seconds{job="deckard",instance="worker"}
+        values: 3600+0x40
+      - series: deckard_nuclei_templates_max_age_warn_seconds{job="deckard",instance="api"}
+        values: 3600+0x40
+      - series: deckard_nuclei_templates_max_age_warn_seconds{job="deckard",instance="worker"}
+        values: 3600+0x40
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: DeckardNucleiTemplatesStale
+        exp_alerts: []
+
+  - name: on-demand EPSS inactivity is not a stale scheduled feed
+    interval: 1m
+    input_series:
+      - series: deckard_vulnintel_age_seconds{feed="epss"}
+        values: 400000+0x90
+      - series: deckard_vulnintel_age_seconds{feed="kev"}
+        values: 3600+0x90
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: DeckardVulnintelFeedStale
+        exp_alerts: []
+
+  - name: scheduled KEV refresh still alerts after its stale hold
+    interval: 1m
+    input_series:
+      - series: deckard_vulnintel_age_seconds{feed="kev"}
+        values: 72000+0x90
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: DeckardVulnintelFeedStale
+        exp_alerts: []
+      - eval_time: 31m
+        alertname: DeckardVulnintelFeedStale
+        exp_alerts:
+          - exp_labels: {feed: kev, severity: medium}
+            exp_annotations:
+              summary: deckard kev exploit-intelligence feed is stale
+              description: "No successful kev fetch for 20h 0m 0s. Findings keep using the last good copy, but new KEV additions are not being noticed. Air-gapped? Set vulnintel.enabled: false."
+
+  - name: actual EPSS and KEV refresh errors both remain actionable
+    interval: 1m
+    input_series:
+      - series: deckard_vulnintel_refresh_total{feed="epss",result="error"}
+        values: 0+0x10 3+0x60
+      - series: deckard_vulnintel_refresh_total{feed="kev",result="error"}
+        values: 0+0x10 3+0x60
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: DeckardVulnintelRefreshFailing
+        exp_alerts:
+          - exp_labels: {feed: epss, severity: medium}
+            exp_annotations:
+              summary: deckard epss feed refresh keeps failing
+              description: "3 failed refreshes in 6h. Check egress to www.cisa.gov / api.first.org and the deckard logs."
+          - exp_labels: {feed: kev, severity: medium}
+            exp_annotations:
+              summary: deckard kev feed refresh keeps failing
+              description: "3 failed refreshes in 6h. Check egress to www.cisa.gov / api.first.org and the deckard logs."
