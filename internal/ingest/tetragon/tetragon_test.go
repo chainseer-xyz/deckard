@@ -30,6 +30,63 @@ func TestPolicyEventBecomesNonprobeableIncident(t *testing.T) {
 	}
 }
 
+func TestNativePodNameIsSafeDisplayMetadataNotIncidentIdentity(t *testing.T) {
+	base, err := Parse([]byte(policyEvent), ingest.ParseOptions{Scope: "k8s:uid:cluster-123"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base[0].Evidence["runtime_pod_name"] != "web-abc" {
+		t.Error("native Pod display name was not retained")
+	}
+	for _, name := range []string{"replacement-name", "", "bad\nSECRET-NAME", strings.Repeat("a", 254)} {
+		t.Run(name[:min(len(name), 30)], func(t *testing.T) {
+			encoded, _ := json.Marshal(name)
+			raw := strings.Replace(policyEvent, `"name":"web-abc"`, `"name":`+string(encoded), 1)
+			got, err := Parse([]byte(raw), ingest.ParseOptions{Scope: "k8s:uid:cluster-123"})
+			if err != nil || len(got) != 1 {
+				t.Fatalf("optional display metadata changed event acceptance: %v", err)
+			}
+			if got[0].Key != base[0].Key || got[0].Asset != base[0].Asset {
+				t.Error("Pod display name changed the UID-based incident identity or attachment")
+			}
+			if name == "replacement-name" {
+				if got[0].Evidence["runtime_pod_name"] != name {
+					t.Error("valid native Pod display name was not retained")
+				}
+			} else if _, exists := got[0].Evidence["runtime_pod_name"]; exists {
+				t.Error("empty, malformed or oversized optional Pod name should be omitted")
+			}
+			output, err := json.Marshal(got)
+			if err != nil || strings.Contains(string(output), "SECRET") {
+				t.Error("native process arguments, environment or event secrets leaked into the incident")
+			}
+		})
+	}
+}
+
+func TestNativePodDisplayNamesAreOrderIndependentAndRefuseConflicts(t *testing.T) {
+	for _, tc := range []struct{ name, want string }{{"", "web-abc"}, {"other-name", ""}} {
+		t.Run(tc.name, func(t *testing.T) {
+			encoded, _ := json.Marshal(tc.name)
+			other := strings.Replace(policyEvent, `"name":"web-abc"`, `"name":`+string(encoded), 1)
+			a, err := Parse([]byte(policyEvent+"\n"+other+"\n"+policyEvent), ingest.ParseOptions{Scope: "k8s:uid:cluster-123"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, err := Parse([]byte(other+"\n"+policyEvent+"\n"+other), ingest.ParseOptions{Scope: "k8s:uid:cluster-123"})
+			if err != nil || !reflect.DeepEqual(a, b) || len(a) != 1 {
+				t.Fatalf("Pod display metadata depends on sensor order: %v", err)
+			}
+			if got, _ := a[0].Evidence["runtime_pod_name"].(string); got != tc.want {
+				t.Errorf("Pod display name=%q, want %q", got, tc.want)
+			}
+			if a[0].Evidence["runtime_batch_count"] != int64(1) {
+				t.Error("Pod display metadata changed event deduplication")
+			}
+		})
+	}
+}
+
 func TestNativeAggregationAndSimultaneousHooksCountEvents(t *testing.T) {
 	first := strings.Replace(policyEvent, `"node_name"`, `"aggregation_info":{"count":"3"},"node_name"`, 1)
 	second := strings.ReplaceAll(policyEvent, "security_file_permission", "security_inode_permission")

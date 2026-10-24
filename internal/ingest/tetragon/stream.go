@@ -150,6 +150,7 @@ func (a *Accumulator) add(raw []byte) error {
 		group = &incidentGroup{finding: observed.finding, first: observed.at, last: observed.at, counts: map[string]int64{}}
 		a.groups[observed.finding.Key] = group
 	}
+	group.observePodName(observed.finding.Evidence)
 	if observed.at.Before(group.first) {
 		group.first = observed.at
 	}
