@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"sort"
 	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
@@ -105,7 +107,7 @@ func (c *Collector) podPages(ctx context.Context) ([]corev1.Pod, error) {
 		opts.Limit = int64(c.settings.MaxPods + 1 - len(pods))
 		page, err := c.client.CoreV1().Pods(c.settings.Namespace).List(ctx, opts)
 		if err != nil {
-			return nil, requestError(ctx, "tetragon pod listing failed")
+			return nil, requestError(ctx, fmt.Sprintf("tetragon pod listing failed (namespace=%q)", c.settings.Namespace), err)
 		}
 		pods = append(pods, page.Items...)
 		if len(pods) > c.settings.MaxPods {
@@ -145,27 +147,15 @@ func (c *Collector) fetchLogs(ctx context.Context, pods []corev1.Pod, since *met
 }
 
 func (c *Collector) readLog(ctx context.Context, pod string, since *metav1.Time, total *atomic.Int64, accumulator *tetragon.Accumulator) error {
+	source := fmt.Sprintf("namespace=%s pod=%s container=%s", c.settings.Namespace, pod, c.settings.Container)
 	stream, err := c.client.CoreV1().Pods(c.settings.Namespace).GetLogs(pod, &corev1.PodLogOptions{Container: c.settings.Container, SinceTime: since}).Stream(ctx)
 	if err != nil {
-		return requestError(ctx, "tetragon pod log request failed")
+		failure := requestError(ctx, "tetragon pod log request failed", err)
+		return accumulator.RejectFrom(source, failure.Error(), failure)
 	}
 	defer func() { _ = stream.Close() }()
 	reader := &budgetReader{Reader: stream, total: total, limit: c.settings.MaxTotalBytes, podLimit: c.settings.MaxPodBytes}
-	if err := accumulator.AddStream(ctx, reader); err != nil {
-		// The accumulator shares its first error across sibling streams.
-		// Preserve a known budget cause even when another stream cancels us.
-		if errors.Is(err, errPodLogLimit) {
-			return fmt.Errorf("%w (%d bytes)", errPodLogLimit, c.settings.MaxPodBytes)
-		}
-		if errors.Is(err, errTotalLogLimit) {
-			return fmt.Errorf("%w (%d bytes)", errTotalLogLimit, c.settings.MaxTotalBytes)
-		}
-		if ctx.Err() != nil {
-			return requestError(ctx, "tetragon pod log read failed")
-		}
-		return err
-	}
-	return nil
+	return accumulator.AddStreamFrom(ctx, reader, source)
 }
 
 type logLimitError string
@@ -192,17 +182,36 @@ func (r *budgetReader) Read(p []byte) (int, error) {
 	n, err := r.Reader.Read(p)
 	r.podBytes += int64(n)
 	if r.podBytes > r.podLimit {
-		return n, errPodLogLimit
+		return n, &tetragon.ReadLimitError{LimitBytes: r.podLimit, Cause: errPodLogLimit}
 	}
 	if r.total.Add(int64(n)) > r.limit {
-		return n, errTotalLogLimit
+		return n, &tetragon.ReadLimitError{LimitBytes: r.limit, Aggregate: true, Cause: errTotalLogLimit}
 	}
 	return n, err
 }
 
-func requestError(ctx context.Context, message string) error {
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("%s: %w", message, err)
+// The API error retains machine-readable status/context, never response text.
+type requestFailure struct {
+	message string
+	cause   error
+}
+
+func (e *requestFailure) Error() string { return e.message }
+func (e *requestFailure) Unwrap() error { return e.cause }
+
+func requestError(ctx context.Context, message string, cause error) error {
+	cause = errors.Join(cause, ctx.Err())
+	reason := "transport"
+	var timeout net.Error
+	switch {
+	case apierrors.IsForbidden(cause):
+		reason = "forbidden"
+	case apierrors.IsNotFound(cause):
+		reason = "notfound"
+	case errors.Is(cause, context.DeadlineExceeded), apierrors.IsTimeout(cause), apierrors.IsServerTimeout(cause), errors.As(cause, &timeout) && timeout.Timeout():
+		reason = "timeout"
+	case errors.Is(cause, context.Canceled):
+		reason = "canceled"
 	}
-	return errors.New(message)
+	return &requestFailure{message: message + " (" + reason + ")", cause: cause}
 }

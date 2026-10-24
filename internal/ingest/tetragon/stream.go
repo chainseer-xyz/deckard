@@ -10,6 +10,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/chainseer-xyz/deckard/internal/ingest"
 )
@@ -40,35 +42,41 @@ func NewAccumulator(options ingest.ParseOptions) (*Accumulator, error) {
 // AddStream consumes native NDJSON, not a JSON array. The reader must unblock
 // when ctx is canceled (Kubernetes HTTP streams do). No raw read error is echoed.
 func (a *Accumulator) AddStream(ctx context.Context, reader io.Reader) error {
-	if err := a.preflight(ctx, reader); err != nil {
+	return a.AddStreamFrom(ctx, reader, "")
+}
+
+// AddStreamFrom attributes the first batch failure to bounded sensor metadata.
+// source must contain metadata only, never event data or provider responses.
+func (a *Accumulator) AddStreamFrom(ctx context.Context, reader io.Reader, source string) error {
+	if err := a.preflight(ctx, reader, source); err != nil {
 		return err
 	}
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 32<<10), MaxEventBytes+2)
 	for scanner.Scan() {
-		if err := ctx.Err(); err != nil {
-			return a.fail(err)
-		}
 		// Scanner can emit buffered data after a non-EOF reader error. Check
-		// that error before a partial final record masks it as malformed JSON.
+		// that error before parsing or cancellation can hide its original cause.
 		if err := scanner.Err(); err != nil {
-			return a.fail(&streamReadError{cause: err})
+			return a.failFrom(source, &streamReadError{cause: err})
+		}
+		if err := ctx.Err(); err != nil {
+			return a.failFrom(source, err)
 		}
 		if len(scanner.Bytes()) > MaxEventBytes {
-			return a.fail(errors.New("tetragon event record exceeds the limit"))
+			return a.failFrom(source, errors.New("tetragon event record exceeds the limit"))
 		}
 		raw := bytes.Trim(scanner.Bytes(), " \t\r") // Only JSON whitespace; not form feeds or Unicode spaces.
 		if len(raw) != 0 {
-			if err := a.add(raw); err != nil {
+			if err := a.addFrom(raw, source); err != nil {
 				return err
 			}
 		}
 	}
-	if err := ctx.Err(); err != nil {
-		return a.fail(err)
-	}
 	if err := scanner.Err(); err != nil {
-		return a.fail(&streamReadError{cause: err})
+		return a.failFrom(source, &streamReadError{cause: err})
+	}
+	if err := ctx.Err(); err != nil {
+		return a.failFrom(source, err)
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -80,6 +88,10 @@ func (a *Accumulator) AddStream(ctx context.Context, reader io.Reader) error {
 type streamReadError struct{ cause error }
 
 func (e *streamReadError) Error() string {
+	var limit *ReadLimitError
+	if errors.As(e.cause, &limit) {
+		return limit.Error()
+	}
 	if errors.Is(e.cause, bufio.ErrTooLong) {
 		return "tetragon event record exceeds the limit"
 	}
@@ -91,52 +103,128 @@ func (e *streamReadError) Error() string {
 
 func (e *streamReadError) Unwrap() error { return e.cause }
 
-func (a *Accumulator) preflight(ctx context.Context, reader io.Reader) error {
+// ReadLimitError carries a transport budget without printing its hidden cause.
+// Aggregate identifies the shared batch budget, not volume from one sensor.
+type ReadLimitError struct {
+	LimitBytes int64
+	Aggregate  bool
+	Cause      error
+}
+
+func (e *ReadLimitError) Error() string {
+	if e.Aggregate {
+		return fmt.Sprintf("tetragon aggregate log bound exceeded (%d bytes, across all selected sensors)", e.LimitBytes)
+	}
+	return fmt.Sprintf("tetragon per-pod log bound exceeded (%d bytes)", e.LimitBytes)
+}
+
+func (e *ReadLimitError) Unwrap() error { return e.Cause }
+
+// SourceError preserves the first failing stream and its machine-readable cause.
+// Error deliberately prints only a safe message and quoted metadata.
+type SourceError struct {
+	Source  string
+	message string
+	cause   error
+}
+
+func (e *SourceError) Error() string {
+	if e.Source == "" {
+		return e.message
+	}
+	return fmt.Sprintf("%s (source=%q)", e.message, e.Source)
+}
+
+func (e *SourceError) Unwrap() error { return e.cause }
+
+// RejectFrom poisons the batch on failures before a stream opens. safeMessage
+// must be fixed, non-sensitive diagnostic text; cause.Error is never rendered.
+// Every caller receives the identical first error, including canceled siblings.
+func (a *Accumulator) RejectFrom(source, safeMessage string, cause error) error {
 	if a == nil {
 		return errors.New("tetragon event accumulator is unavailable")
 	}
-	if err := ctx.Err(); err != nil {
-		return a.fail(err)
-	}
-	if reader == nil {
-		return a.fail(errors.New("tetragon event stream is unavailable"))
-	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.groups == nil && a.err == nil {
-		a.err = errors.New("tetragon event accumulator is not initialized")
+	return a.rejectLocked(source, safeMessage, cause)
+}
+
+func boundedDiagnostic(value string) bool {
+	if len(value) > 512 || !utf8.ValidString(value) {
+		return false
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+			return false
+		}
+	}
+	return true
+}
+
+// Caller holds mu. Source attribution happens only when the first error is set.
+func (a *Accumulator) rejectLocked(source, message string, cause error) error {
+	if a.err == nil {
+		if !boundedDiagnostic(source) {
+			source, message = "", "tetragon stream source is invalid"
+		} else if message == "" || !boundedDiagnostic(message) {
+			message = "tetragon stream failed"
+		}
+		a.err = &SourceError{Source: source, message: message, cause: cause}
 	}
 	return a.err
 }
 
-func (a *Accumulator) fail(err error) error {
+func (a *Accumulator) preflight(ctx context.Context, reader io.Reader, source string) error {
+	if a == nil {
+		return errors.New("tetragon event accumulator is unavailable")
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.err == nil {
-		a.err = err
+	if a.err != nil {
+		return a.err
 	}
-	return a.err
+	var err error
+	switch {
+	case !boundedDiagnostic(source):
+		err = errors.New("tetragon stream source is invalid")
+	case ctx.Err() != nil:
+		err = ctx.Err()
+	case reader == nil:
+		err = errors.New("tetragon event stream is unavailable")
+	case a.groups == nil:
+		err = errors.New("tetragon event accumulator is not initialized")
+	}
+	if err != nil {
+		return a.rejectLocked(source, err.Error(), err)
+	}
+	return nil
+}
+
+// Only package-owned safe errors enter here; raw reader errors use streamReadError.
+func (a *Accumulator) failFrom(source string, err error) error {
+	return a.RejectFrom(source, err.Error(), err)
 }
 
 func (a *Accumulator) add(raw []byte) error {
+	return a.addFrom(raw, "")
+}
+
+func (a *Accumulator) addFrom(raw []byte, source string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.err != nil {
 		return a.err
 	}
 	if a.groups == nil {
-		a.err = errors.New("tetragon event accumulator is not initialized")
-		return a.err
+		return a.rejectLocked(source, "tetragon event accumulator is not initialized", nil)
 	}
 	a.events++ // Includes ordinary telemetry and duplicate records across sensors.
 	if a.events > maxEvents {
-		a.err = errors.New("tetragon event count exceeds the limit")
-		return a.err
+		return a.rejectLocked(source, "tetragon event count exceeds the limit across all selected sensors", nil)
 	}
 	observed, err := parseEvent(raw, a.options)
 	if err != nil {
-		a.err = fmt.Errorf("tetragon event %d: %w", a.events, err)
-		return a.err
+		return a.rejectLocked(source, fmt.Sprintf("tetragon event %d: %s", a.events, err), err)
 	}
 	if observed.finding.Key == "" {
 		return nil
@@ -144,8 +232,7 @@ func (a *Accumulator) add(raw []byte) error {
 	group := a.groups[observed.finding.Key]
 	if group == nil {
 		if len(a.groups) >= ingest.MaxFindings {
-			a.err = errors.New("tetragon incident count exceeds the ingest limit")
-			return a.err
+			return a.rejectLocked(source, "tetragon incident count exceeds the ingest limit across all selected sensors", nil)
 		}
 		group = &incidentGroup{finding: observed.finding, first: observed.at, last: observed.at, counts: map[string]int64{}}
 		a.groups[observed.finding.Key] = group
