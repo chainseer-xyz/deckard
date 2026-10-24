@@ -96,6 +96,8 @@ jobs:
             dockerfile: deploy/assessment/Dockerfile.strix
           - name: collector-trivy
             dockerfile: deploy/assessment/Dockerfile.trivy
+          - name: collector-kubescape
+            dockerfile: deploy/collectors/Dockerfile.kubescape
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -114,7 +116,7 @@ jobs:
         run: |
           set -euo pipefail
           # RUNNER_* belongs to GitHub and cannot carry our matrix values.
-          [[ "$DECKARD_RUNNER_NAME" =~ ^(assessment-(zgrab2|zap|strix)|collector-trivy)$ ]]
+          [[ "$DECKARD_RUNNER_NAME" =~ ^(assessment-(zgrab2|zap|strix)|collector-(trivy|kubescape))$ ]]
           app="ghcr.io/${OWNER,,}/deckard"
           digest=$(docker buildx imagetools inspect "$app:${GITHUB_REF_NAME#v}-slim" --format '{{.Manifest.Digest}}')
           [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
