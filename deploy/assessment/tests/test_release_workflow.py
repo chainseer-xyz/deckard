@@ -58,7 +58,7 @@ class ReleaseNamingTests(unittest.TestCase):
         self.assertFalse([key for key in mappings if key.startswith(("RUNNER_", "GITHUB_"))])
 
     def test_each_runner_uses_matrix_name_not_host_name(self):
-        for name in ("assessment-zgrab2", "assessment-zap", "assessment-strix", "collector-trivy"):
+        for name in ("assessment-zgrab2", "assessment-zap", "assessment-strix", "collector-trivy", "collector-kubescape"):
             with self.subTest(name=name):
                 result, outputs = self.run_step(name)
                 self.assertEqual(result.returncode, 0, result.stderr)

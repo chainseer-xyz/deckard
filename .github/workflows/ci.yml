@@ -121,6 +121,8 @@ jobs:
             dockerfile: deploy/assessment/Dockerfile.strix
           - tool: trivy
             dockerfile: deploy/assessment/Dockerfile.trivy
+          - tool: kubescape
+            dockerfile: deploy/collectors/Dockerfile.kubescape
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -130,13 +132,17 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: build candidate with the current application
+        if: matrix.tool != 'kubescape'
         env:
           DOCKERFILE: ${{ matrix.dockerfile }}
         run: |
           docker build --target slim -t deckard:runner-base .
           docker build -f "$DOCKERFILE" --build-arg DECKARD_IMAGE=deckard:runner-base -t deckard:runner-candidate .
+      - name: build native Kubescape collector
+        if: matrix.tool == 'kubescape'
+        run: docker build -f deploy/collectors/Dockerfile.kubescape -t deckard:runner-candidate .
       - name: actual scanner interoperability and denied fixtures
-        if: matrix.tool != 'trivy'
+        if: matrix.tool != 'trivy' && matrix.tool != 'kubescape'
         env:
           DECKARD_ASSESSMENT_NATIVE_INTEGRATION: "1"
           DECKARD_ASSESSMENT_NATIVE_TOOL: ${{ matrix.tool }}
@@ -165,6 +171,11 @@ jobs:
         env:
           TRIVY_SECURITY_IMAGE: deckard:runner-candidate
         run: python3 -m unittest discover -s deploy/assessment/tests -p 'test_trivy_security.py' -v
+      - name: actual Kubescape safety flags, offline frameworks, build metadata and notices
+        if: matrix.tool == 'kubescape'
+        env:
+          KUBESCAPE_SECURITY_IMAGE: deckard:runner-candidate
+        run: python3 -m unittest discover -s deploy/collectors/tests -p 'test_kubescape_security.py' -v
       - name: actual registry-only runtime image scan
         if: matrix.tool == 'trivy'
         run: |
