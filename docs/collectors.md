@@ -81,6 +81,31 @@ jobs with the same immutable cluster scope when combined reports approach the
 `5000`-finding limit. Measure each report first; every restricted report remains
 incomplete, so these jobs cannot resolve findings through absence.
 
+### Collector failures
+
+Check collection, upload and report freshness separately. Application readiness
+only proves that the service can reach its database; it does not prove collection.
+Find the collector Pods with the alert's `diagnostic_command`. Inspect the failed
+Pod's `scanner` logs first. If scanning succeeded, inspect its `ingest` logs and
+validate the delivery receipt. A report must be accepted, not merely return HTTP `200`.
+
+An `unknown flag` error means the pinned scanner does not support the rendered
+command. Validate every rendered argument against that exact binary before an
+image update. Do not remove host/image/Secrets exclusions to make it run. Pin an
+explicit version and digest; an unversioned digest update can select an older CLI.
+
+`DeckardCollectorFailed` identifies a failed run after the last accepted upload.
+`DeckardCollectorStale` identifies delivery beyond its configured age limit.
+A newer successful accepted upload clears the failed-run condition. Old failed
+Jobs may remain for diagnosis and affect Argo health until their lifecycle ends.
+Do not delete them merely to hide a real coverage gap.
+
+Runtime findings remain durable even when their Alertmanager notifications expire.
+Notification clearance, event silence and Pod removal do not prove remediation.
+Runtime presentation uses reported namespace, Pod and policy metadata without
+changing incident identity or granting ownership. Batch event times and counts do
+not claim lifetime counts or complete sensor coverage.
+
 Only uploader containers receive Deckard producer tokens. Kubernetes scanners
 receive narrowly scoped projected API tokens. Registry credentials are explicit,
 read-only and scanner-only. Jobs do not inherit Deckard's IRSA, cloud credentials,
