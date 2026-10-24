@@ -6,8 +6,10 @@ import type { Finding } from '../api/types';
 import { absTime, relTime } from '../lib/format';
 import { intelOf, pctile } from '../lib/intel';
 import { findingMarkdown, isKev, isNew24h } from '../lib/triage';
+import { runtimeContext } from '../lib/runtimeFinding';
 import { EvidenceTable } from './Evidence';
 import { FindingActions } from './FindingActions';
+import { RuntimeIncident } from './RuntimeIncident';
 import { EpssChip, ErrorBox, KevBadge, Loading, NewBadge, ReopenedBadge, SeverityBadge, StatusChip } from './ui';
 
 function IntelDetail({ f }: { f: Finding }) {
@@ -106,6 +108,7 @@ export function FindingDrawer({ id, seed, onClose }: { id: number; seed?: Findin
   const f = q.data;
   const canWrite = me.data?.can_write ?? false;
   const scannerFinding = f?.check.startsWith('ext.') ?? false;
+  const runtime = f ? runtimeContext(f) : undefined;
 
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
@@ -174,6 +177,7 @@ export function FindingDrawer({ id, seed, onClose }: { id: number; seed?: Findin
         {q.isError && !f && <ErrorBox error={q.error} onRetry={() => void q.refetch()} />}
         {f && (
           <div className="space-y-4 p-4">
+            {runtime && <RuntimeIncident context={runtime} />}
             <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
               <div>
                 <dt className="text-xs text-muted">Asset</dt>
@@ -205,10 +209,12 @@ export function FindingDrawer({ id, seed, onClose }: { id: number; seed?: Findin
                 <dt className="text-xs text-muted">Reopened</dt>
                 <dd className="text-xs">{f.reopened_count}x</dd>
               </div>
-              <div>
-                <dt className="text-xs text-muted">Missed runs</dt>
-                <dd className="text-xs">{f.missed_runs}</dd>
-              </div>
+              {!runtime && (
+                <div>
+                  <dt className="text-xs text-muted">Missed runs</dt>
+                  <dd className="text-xs">{f.missed_runs}</dd>
+                </div>
+              )}
               {f.suppressed_until && (
                 <div>
                   <dt className="text-xs text-muted">Suppressed until</dt>
@@ -239,7 +245,7 @@ export function FindingDrawer({ id, seed, onClose }: { id: number; seed?: Findin
                 </button>
               </div>
               <div role="status" aria-live="polite" className="min-h-4 text-xs">
-                {scannerFinding && <span className="text-muted">Refresh this finding through its external scanner.</span>}
+                {scannerFinding && !runtime && <span className="text-muted">Refresh this finding through its external scanner.</span>}
                 {rescan.isSuccess && <span className="text-ok">Rescan queued for {f.asset_key}.</span>}
                 {rescan.isError && <span role="alert" className="text-bad">Rescan failed: {(rescan.error as Error).message}</span>}
                 {copied === 'ok' && <span className="text-ok">Copied to clipboard.</span>}
