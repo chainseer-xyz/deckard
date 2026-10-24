@@ -3,7 +3,7 @@
 ARG DECKARD_IMAGE
 FROM ${DECKARD_IMAGE} AS deckard
 
-FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine AS scanner
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS scanner
 ARG TARGETOS
 ARG TARGETARCH
 SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
