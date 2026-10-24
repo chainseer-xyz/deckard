@@ -30,7 +30,9 @@ spec:
           labels: {severity: warning, namespace: {{ $root.Release.Namespace | quote }}, collector: {{ $job.name | quote }}}
           annotations:
             summary: {{ printf "Deckard collector %s has no recent successful ingest" $job.name | quote }}
-            description: "Check the CronJob, scanner and ingest logs. Failed or incomplete work must not certify clean findings."
+            description: {{ printf "No accepted upload within %v seconds. Schedule: %s. Check the collector Pods and scanner/ingest logs. Existing findings remain stored; this alert does not assert remediation or complete coverage." (default (default 172800 $alerts.maxAgeSeconds) $job.maxAgeSeconds) $job.schedule | quote }}
+            diagnostic_command: {{ printf "kubectl -n %s get pods -l deckard.io/collector=%s" $root.Release.Namespace $job.name | quote }}
+            runbook_url: "https://github.com/chainseer-xyz/deckard/blob/main/docs/collectors.md#collector-failures"
         - alert: DeckardCollectorFailed
           # KSM emits one failed series per reason, including zero-valued
           # reasons. Deduplicate reasons and scrape replicas before joining.
@@ -43,7 +45,9 @@ spec:
           labels: {severity: warning, namespace: {{ $root.Release.Namespace | quote }}, collector: {{ $job.name | quote }}}
           annotations:
             summary: {{ printf "Deckard collector %s failed after its last successful ingest" $job.name | quote }}
-            description: "A scanner or upload failed. Inspect the Job; no fresh complete report has been applied."
+            description: "A scanner or upload failed. Inspect scanner logs first, then ingest logs if scanning succeeded. No accepted report from that run; report delivery does not prove complete coverage."
+            diagnostic_command: {{ printf "kubectl -n %s get pods -l deckard.io/collector=%s" $root.Release.Namespace $job.name | quote }}
+            runbook_url: "https://github.com/chainseer-xyz/deckard/blob/main/docs/collectors.md#collector-failures"
         {{- end }}
         {{- end }}
 {{- end }}
