@@ -22,9 +22,26 @@ type observation struct {
 }
 
 type incidentGroup struct {
-	finding     ingest.Finding
-	first, last time.Time
-	counts      map[string]int64
+	finding         ingest.Finding
+	first, last     time.Time
+	counts          map[string]int64
+	podNameConflict bool
+}
+
+// observePodName combines optional display metadata without selecting an
+// arbitrary sensor's conflicting claim. This never changes incident identity.
+func (g *incidentGroup) observePodName(evidence map[string]any) {
+	name, _ := evidence["runtime_pod_name"].(string)
+	current, _ := g.finding.Evidence["runtime_pod_name"].(string)
+	if g.podNameConflict || name == "" {
+		return
+	}
+	if current == "" {
+		g.finding.Evidence["runtime_pod_name"] = name
+	} else if current != name {
+		delete(g.finding.Evidence, "runtime_pod_name")
+		g.podNameConflict = true
+	}
 }
 
 // batch counts are deduplicated within this input, never lifetime counters.

@@ -177,6 +177,7 @@ func buildAlert(f model.Finding, endsAt time.Time, baseURL string) postableAlert
 	setAnn(a, "description", f.Description)
 	setAnn(a, "remediation", f.Remediation)
 	setAnn(a, "evidence", evidenceJSON(f.Evidence))
+	addRuntimeAnnotations(a, f)
 	if !f.FirstSeen.IsZero() {
 		setAnn(a, "first_seen", f.FirstSeen.UTC().Format(time.RFC3339))
 	}
@@ -190,7 +191,7 @@ func buildAlert(f model.Finding, endsAt time.Time, baseURL string) postableAlert
 	}
 	pa := postableAlert{Labels: l, Annotations: a, StartsAt: f.FirstSeen.UTC(), EndsAt: endsAt.UTC()}
 	if baseURL != "" {
-		u := strings.TrimRight(baseURL, "/") + "/findings/" + strconv.FormatInt(f.ID, 10)
+		u := strings.TrimRight(baseURL, "/") + "/findings?finding=" + strconv.FormatInt(f.ID, 10)
 		setAnn(a, "url", u)
 		pa.GeneratorURL = u
 	}

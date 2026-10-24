@@ -89,6 +89,11 @@ func parseEvent(data []byte, o ingest.ParseOptions) (observation, error) {
 		severity = model.SeverityHigh
 	}
 	f := incident(o.Scope, subject, pod.Namespace, pod.UID, hit.PolicyName, at.UTC().Format(time.RFC3339Nano), severity)
+	// Display metadata is optional and never participates in UID-based identity.
+	// Omit malformed names without rejecting an otherwise valid policy event.
+	if pod.Name != "" && identityPart(pod.Name, 253) {
+		f.Evidence["runtime_pod_name"] = pod.Name
+	}
 	count := int64(1)
 	if e.Aggregation != nil {
 		count, err = aggregateCount(e.Aggregation.Count)

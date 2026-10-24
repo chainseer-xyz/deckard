@@ -70,7 +70,7 @@ func TestBuildPayloadLabelsAnnotations(t *testing.T) {
 	wantA := map[string]string{
 		"summary": "Dangling CNAME", "description": "points nowhere", "remediation": "delete it",
 		"evidence": `{"n":1,"target":"x.example.net"}`, "first_seen": "2026-09-30T12:00:00Z",
-		"url": "https://deckard.example.com/findings/42",
+		"url": "https://deckard.example.com/findings?finding=42",
 	}
 	for k, v := range wantA {
 		if a.Annotations[k] != v {
@@ -79,6 +79,19 @@ func TestBuildPayloadLabelsAnnotations(t *testing.T) {
 	}
 	if !a.StartsAt.Equal(f.FirstSeen) {
 		t.Errorf("startsAt = %v", a.StartsAt)
+	}
+}
+
+func TestFindingURLsOpenTheDrawerForOpenAndResolvedFindings(t *testing.T) {
+	for _, base := range []string{"https://deckard.example.com", "https://deckard.example.com/", "https://example.com/deckard/"} {
+		t.Run(base, func(t *testing.T) {
+			want := strings.TrimRight(base, "/") + "/findings?finding=42"
+			for _, alert := range buildPayload([]model.Finding{finding(nil)}, []model.Finding{finding(nil)}, t0, time.Minute, base) {
+				if alert.Annotations["url"] != want || alert.GeneratorURL != want {
+					t.Errorf("url=%q generatorURL=%q, want %q", alert.Annotations["url"], alert.GeneratorURL, want)
+				}
+			}
+		})
 	}
 }
 
