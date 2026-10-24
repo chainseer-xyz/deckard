@@ -4,6 +4,7 @@ import type { Finding } from '../api/types';
 import { absTime, relTime } from '../lib/format';
 import type { SortDir, SortKey } from '../lib/findingsFilter';
 import { isKev, isNew24h } from '../lib/triage';
+import { runtimeContext, runtimeSubject } from '../lib/runtimeFinding';
 import { Empty, KevBadge, NewBadge, ReopenedBadge, SeverityBadge, StatusChip } from './ui';
 
 function SortTh({
@@ -75,7 +76,9 @@ export function FindingsTable({
           </tr>
         </thead>
         <tbody>
-          {items.map((f) => (
+          {items.map((f) => {
+            const runtime = runtimeContext(f);
+            return (
             <tr
               key={f.id}
               aria-current={f.id === selectedId ? 'true' : undefined}
@@ -97,11 +100,16 @@ export function FindingsTable({
                   {isNew24h(f, now) && <NewBadge />}
                   <ReopenedBadge count={f.reopened_count} />
                 </span>
+                {runtime && (
+                  <div className="mt-1 text-xs text-muted">
+                    Event-only{runtime.policy ? ` · ${runtime.policy}` : ''}
+                  </div>
+                )}
               </td>
               {!compact && (
                 <td className="td font-mono text-xs">
-                  <Link className="text-accent hover:underline" to={`/assets/${f.asset_id}`}>
-                    {f.asset_key}
+                  <Link className="text-accent hover:underline" to={`/assets/${f.asset_id}`} title={f.asset_key}>
+                    {runtime ? runtimeSubject(runtime) : f.asset_key}
                   </Link>
                 </td>
               )}
@@ -117,7 +125,8 @@ export function FindingsTable({
                 {relTime(f.last_seen, now)}
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>

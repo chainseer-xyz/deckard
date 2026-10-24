@@ -1,6 +1,6 @@
 import { lazy } from 'react';
 import type { ReactNode } from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiError, configureClient } from './api/client';
 import { useMe } from './api/hooks';
@@ -41,6 +41,16 @@ export function AuthGate({ children }: { children: ReactNode }) {
   return <LiveProvider>{children}</LiveProvider>;
 }
 
+/** Keep notification links from earlier releases inside the canonical drawer route. */
+function LegacyFindingRedirect() {
+  const { id = '' } = useParams();
+  const location = useLocation();
+  const query = new URLSearchParams(location.search);
+  query.delete('finding');
+  if (/^[1-9]\d*$/.test(id) && Number.isSafeInteger(Number(id))) query.set('finding', id);
+  return <Navigate to={{ pathname: '/findings', search: query.toString(), hash: location.hash }} replace />;
+}
+
 export function AppRoutes() {
   return (
     <Routes>
@@ -48,6 +58,7 @@ export function AppRoutes() {
         <Route index element={<Dashboard />} />
         <Route path="inventory" element={<Inventory />} />
         <Route path="findings" element={<Findings />} />
+        <Route path="findings/:id" element={<LegacyFindingRedirect />} />
         <Route path="assets/:id" element={<AssetDetail />} />
         <Route path="sources" element={<Sources />} />
         <Route path="*" element={<Navigate to="/" replace />} />
