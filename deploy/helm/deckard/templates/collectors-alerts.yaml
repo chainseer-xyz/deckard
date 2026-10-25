@@ -36,11 +36,18 @@ spec:
         - alert: DeckardCollectorFailed
           # KSM emits one failed series per reason, including zero-valued
           # reasons. Deduplicate reasons and scrape replicas before joining.
+          # Retain an idle unsuccessful schedule after Job TTL cleanup. Missing
+          # active/suspend metrics cannot establish this fallback's state.
           expr: >-
-            max(max by(namespace,job_name) (kube_job_created{namespace={{ $root.Release.Namespace | quote }}})
+            (max(max by(namespace,job_name) (kube_job_created{namespace={{ $root.Release.Namespace | quote }}})
             * on(namespace,job_name) (max by(namespace,job_name) (kube_job_status_failed{namespace={{ $root.Release.Namespace | quote }}}) > bool 0)
             * on(namespace,job_name) max by(namespace,job_name) (kube_job_owner{namespace={{ $root.Release.Namespace | quote }},owner_kind="CronJob",owner_name={{ $name | quote }}}))
+            > (max(kube_cronjob_status_last_successful_time{namespace={{ $root.Release.Namespace | quote }},cronjob={{ $name | quote }}}) or vector(0)))
+            or
+            (max(kube_cronjob_status_last_schedule_time{namespace={{ $root.Release.Namespace | quote }},cronjob={{ $name | quote }}})
             > (max(kube_cronjob_status_last_successful_time{namespace={{ $root.Release.Namespace | quote }},cronjob={{ $name | quote }}}) or vector(0))
+            and on() max(kube_cronjob_status_active{namespace={{ $root.Release.Namespace | quote }},cronjob={{ $name | quote }}}) == 0
+            and on() max(kube_cronjob_spec_suspend{namespace={{ $root.Release.Namespace | quote }},cronjob={{ $name | quote }}}) == 0)
           for: 5m
           labels: {severity: warning, namespace: {{ $root.Release.Namespace | quote }}, collector: {{ $job.name | quote }}}
           annotations:

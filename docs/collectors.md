@@ -97,8 +97,18 @@ explicit version and digest; an unversioned digest update can select an older CL
 `DeckardCollectorFailed` identifies a failed run after the last accepted upload.
 `DeckardCollectorStale` identifies delivery beyond its configured age limit.
 A newer successful accepted upload clears the failed-run condition. Old failed
-Jobs may remain for diagnosis and affect Argo health until their lifecycle ends.
-Do not delete them merely to hide a real coverage gap.
+Jobs may remain for diagnosis and keep generic Kubernetes alerts firing after
+recovery. Argo evaluates the CronJob's latest schedule and success timestamps.
+
+`DeckardCollectorFailed` also detects an idle, nonsuspended CronJob whose latest
+scheduled run has no successful ingest. This condition persists after finished
+Jobs and their metrics expire. Active runs, missing scheduling state and
+suspended CronJobs cannot establish this fallback. The five-minute hold remains.
+
+Use `ttlSecondsAfterFinished: 600` for short Job retention when collector alerts
+are enabled and diagnostic logs persist outside Pods. Capture failed Job logs
+and verify a later accepted upload before retiring historical failures. Job
+cleanup never resolves durable security findings or establishes complete coverage.
 
 Runtime findings remain durable even when their Alertmanager notifications expire.
 Notification clearance, event silence and Pod removal do not prove remediation.
@@ -154,16 +164,21 @@ reviewed incident from the finding drawer with an audit note. Deleting a Pod or
 receiving no events cannot resolve an incident. Collector report freshness proves
 delivery, not that the sensor saw every event.
 
-Scheduled Tetragon collectors may set `backoffLimit: 1` or `2` to retry a failed
-whole-Pod attempt during node churn. The default remains `0`. Each retry uses a
-fresh report volume and re-reads every selected sensor. A failed attempt uploads
-nothing when collection fails; retries never skip unreadable sensors or assert
-complete coverage.
+Scheduled Tetragon collectors may set an integer `backoffLimit` from `0` to `4`
+to retry failed whole-Pod attempts during node churn. The default remains `0`.
+The maximum allows four retries, or five total Pod attempts; other collectors
+cannot opt into nonzero retries. Each retry uses a fresh report volume and
+re-reads every selected sensor. A failed attempt uploads nothing when collection
+fails; retries never skip unreadable sensors or assert complete coverage.
 
 An upload receipt failure can follow an accepted ingest. Event keys and
 timestamps deduplicate delivery retries. The Job's existing deadline and
-`Forbid` concurrency still bound all attempts. Retries cannot recover logs
-already lost to rotation or node removal.
+`Forbid` concurrency still bound all attempts. The default deadline remains
+`300` seconds and can prevent all retries from starting or completing. A higher
+retry limit does not extend that deadline. Retries cannot recover logs already
+lost to rotation or node removal. Each retry uses the current six-minute lookback,
+not the original attempt's window. Long retry delays can leave an earlier gap
+even when a later attempt succeeds.
 
 ## Runtime images
 

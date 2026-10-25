@@ -58,7 +58,7 @@ capabilities:
 {{- if not (has $job.type (list "trivy" "trivy-runtime" "kubescape" "prowler-app" "bbot" "tetragon")) -}}{{- fail "collector type must be trivy, trivy-runtime, kubescape, prowler-app, bbot or tetragon" -}}{{- end -}}
 {{- $backoffLimit := 0 -}}
 {{- if hasKey $job "backoffLimit" -}}
-{{- if or (not (or (kindIs "float64" $job.backoffLimit) (kindIs "int" $job.backoffLimit) (kindIs "int64" $job.backoffLimit))) (not (regexMatch "^[012]$" (toString $job.backoffLimit))) -}}{{- fail "collector backoffLimit must be an integer from 0 to 2" -}}{{- end -}}
+{{- if or (not (or (kindIs "float64" $job.backoffLimit) (kindIs "int" $job.backoffLimit) (kindIs "int64" $job.backoffLimit))) (not (regexMatch "^[01234]$" (toString $job.backoffLimit))) -}}{{- fail "collector backoffLimit must be an integer from 0 to 4" -}}{{- end -}}
 {{- $backoffLimit = int $job.backoffLimit -}}
 {{- end -}}
 {{- if and (ne $job.type "tetragon") (gt $backoffLimit 0) -}}{{- fail "only Tetragon collectors support nonzero backoffLimit" -}}{{- end -}}

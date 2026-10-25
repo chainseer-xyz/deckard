@@ -100,6 +100,14 @@ tests:
         values: 0x10
       - series: kube_job_owner{namespace="deckard",job_name="runtime-ok",owner_kind="CronJob",owner_name="deckard-collect-tetragon-events"}
         values: 1x10
+      - series: kube_cronjob_status_last_schedule_time{namespace="deckard",cronjob="another-collector"}
+        values: 60x10
+      - series: kube_cronjob_status_last_successful_time{namespace="deckard",cronjob="another-collector"}
+        values: 10x10
+      - series: kube_cronjob_status_active{namespace="deckard",cronjob="another-collector"}
+        values: 0x10
+      - series: kube_cronjob_spec_suspend{namespace="deckard",cronjob="another-collector"}
+        values: 0x10
     alert_rule_test:
       - eval_time: 10m
         alertname: DeckardCollectorFailed
@@ -171,6 +179,14 @@ tests:
         values: 1x10
       - series: kube_job_owner{namespace="another-namespace",job_name="foreign-failed",owner_kind="CronJob",owner_name="deckard-collect-tetragon-events",instance="ksm-a"}
         values: 1x10
+      - series: kube_cronjob_status_last_schedule_time{namespace="another-namespace",cronjob="deckard-collect-tetragon-events"}
+        values: 60x10
+      - series: kube_cronjob_status_last_successful_time{namespace="another-namespace",cronjob="deckard-collect-tetragon-events"}
+        values: 10x10
+      - series: kube_cronjob_status_active{namespace="another-namespace",cronjob="deckard-collect-tetragon-events"}
+        values: 0x10
+      - series: kube_cronjob_spec_suspend{namespace="another-namespace",cronjob="deckard-collect-tetragon-events"}
+        values: 0x10
     alert_rule_test:
       - eval_time: 10m
         alertname: DeckardCollectorFailed
@@ -213,4 +229,234 @@ tests:
     alert_rule_test:
       - eval_time: 30m
         alertname: DeckardCollectorStale
+        exp_alerts: []
+
+  - name: failure stays firing after TTL removes all failed Job metrics
+    interval: 1m
+    input_series:
+      - series: kube_job_created{namespace="deckard",job_name="runtime-failed"}
+        values: 60x6 stale
+      - series: kube_job_status_failed{namespace="deckard",job_name="runtime-failed",reason="BackoffLimitExceeded"}
+        values: 1x6 stale
+      - series: kube_job_owner{namespace="deckard",job_name="runtime-failed",owner_kind="CronJob",owner_name="deckard-collect-tetragon-events"}
+        values: 1x6 stale
+      - series: kube_cronjob_status_last_schedule_time{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 60x30
+      - series: kube_cronjob_status_last_successful_time{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 10x30
+      - series: kube_cronjob_status_active{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x30
+      - series: kube_cronjob_spec_suspend{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x30
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: DeckardCollectorFailed
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: DeckardCollectorFailed
+        exp_alerts: *failed_alert
+      - eval_time: 7m
+        alertname: DeckardCollectorFailed
+        exp_alerts: *failed_alert
+      - eval_time: 30m
+        alertname: DeckardCollectorFailed
+        exp_alerts: *failed_alert
+
+  - name: idle scheduled first failure survives without a success or Job metrics
+    interval: 1m
+    input_series:
+      - series: kube_cronjob_status_last_schedule_time{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 60x10
+      - series: kube_cronjob_status_active{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x10
+      - series: kube_cronjob_spec_suspend{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x10
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: DeckardCollectorFailed
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: DeckardCollectorFailed
+        exp_alerts: *failed_alert
+
+  - name: a zero first-success timestamp still permits durable failure
+    interval: 1m
+    input_series:
+      - series: kube_cronjob_status_last_schedule_time{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 60x10
+      - series: kube_cronjob_status_last_successful_time{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x10
+      - series: kube_cronjob_status_active{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x10
+      - series: kube_cronjob_spec_suspend{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x10
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: DeckardCollectorFailed
+        exp_alerts: *failed_alert
+
+  - name: HA durable failure clears when one exporter observes an accepted report
+    interval: 1m
+    input_series:
+      - series: kube_cronjob_status_last_schedule_time{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-a"}
+        values: 60x12
+      - series: kube_cronjob_status_last_schedule_time{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-b"}
+        values: 60x12
+      - series: kube_cronjob_status_last_successful_time{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-a"}
+        values: 10x6 60x5
+      - series: kube_cronjob_status_last_successful_time{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-b"}
+        values: 10x12
+      - series: kube_cronjob_status_active{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-a"}
+        values: 0x12
+      - series: kube_cronjob_status_active{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-b"}
+        values: 0x12
+      - series: kube_cronjob_spec_suspend{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-a"}
+        values: 0x12
+      - series: kube_cronjob_spec_suspend{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-b"}
+        values: 0x12
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: DeckardCollectorFailed
+        exp_alerts: *failed_alert
+      - eval_time: 7m
+        alertname: DeckardCollectorFailed
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: DeckardCollectorFailed
+        exp_alerts: []
+
+  - name: an active first run does not fail even with a lagging idle HA exporter
+    interval: 1m
+    input_series:
+      - series: kube_cronjob_status_last_schedule_time{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 60x10
+      - series: kube_cronjob_status_active{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-a"}
+        values: 1x10
+      - series: kube_cronjob_status_active{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-b"}
+        values: 0x10
+      - series: kube_cronjob_spec_suspend{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x10
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: DeckardCollectorFailed
+        exp_alerts: []
+
+  - name: an active daily run does not fail after the previous accepted report
+    interval: 1m
+    input_series:
+      - series: kube_cronjob_status_last_schedule_time{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 60x10
+      - series: kube_cronjob_status_last_successful_time{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 10x10
+      - series: kube_cronjob_status_active{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 1x10
+      - series: kube_cronjob_spec_suspend{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x10
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: DeckardCollectorFailed
+        exp_alerts: []
+
+  - name: an unsuccessful run must be idle for five minutes before fallback fires
+    interval: 1m
+    input_series:
+      - series: kube_cronjob_status_last_schedule_time{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 60x15
+      - series: kube_cronjob_status_last_successful_time{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 10x15
+      - series: kube_cronjob_status_active{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 1x5 0x9
+      - series: kube_cronjob_spec_suspend{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x15
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: DeckardCollectorFailed
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: DeckardCollectorFailed
+        exp_alerts: *failed_alert
+
+  - name: a never-scheduled CronJob does not have a durable failure
+    interval: 1m
+    input_series:
+      - series: kube_cronjob_status_last_schedule_time{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x10
+      - series: kube_cronjob_status_active{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x10
+      - series: kube_cronjob_spec_suspend{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x10
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: DeckardCollectorFailed
+        exp_alerts: []
+
+  - name: a missing schedule metric does not synthesize a failure
+    interval: 1m
+    input_series:
+      - series: kube_cronjob_status_active{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x10
+      - series: kube_cronjob_spec_suspend{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x10
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: DeckardCollectorFailed
+        exp_alerts: []
+
+  - name: a missing active metric does not imply an idle collector
+    interval: 1m
+    input_series:
+      - series: kube_cronjob_status_last_schedule_time{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 60x10
+      - series: kube_cronjob_status_active{namespace="another-namespace",cronjob="deckard-collect-tetragon-events"}
+        values: 0x10
+      - series: kube_cronjob_spec_suspend{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x10
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: DeckardCollectorFailed
+        exp_alerts: []
+
+  - name: a missing suspension metric does not imply an enabled collector
+    interval: 1m
+    input_series:
+      - series: kube_cronjob_status_last_schedule_time{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 60x10
+      - series: kube_cronjob_status_active{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x10
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: DeckardCollectorFailed
+        exp_alerts: []
+
+  - name: a suspended collector stays quiet despite an unsuspended HA exporter
+    interval: 1m
+    input_series:
+      - series: kube_cronjob_status_last_schedule_time{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 60x10
+      - series: kube_cronjob_status_active{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x10
+      - series: kube_cronjob_spec_suspend{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-a"}
+        values: 1x10
+      - series: kube_cronjob_spec_suspend{namespace="deckard",cronjob="deckard-collect-tetragon-events",instance="ksm-b"}
+        values: 0x10
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: DeckardCollectorFailed
+        exp_alerts: []
+
+  - name: operator suspension clears an existing durable failure
+    interval: 1m
+    input_series:
+      - series: kube_cronjob_status_last_schedule_time{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 60x12
+      - series: kube_cronjob_status_active{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x12
+      - series: kube_cronjob_spec_suspend{namespace="deckard",cronjob="deckard-collect-tetragon-events"}
+        values: 0x6 1x5
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: DeckardCollectorFailed
+        exp_alerts: *failed_alert
+      - eval_time: 7m
+        alertname: DeckardCollectorFailed
         exp_alerts: []
