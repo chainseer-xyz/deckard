@@ -143,6 +143,18 @@ Streaming discards each raw record after parsing; the normalized report remains
 limited to `10 MiB`. Byte limits and transport failures remain explicit failures,
 not malformed-JSON warnings or successful prefix uploads.
 
+Malformed JSON diagnostics name the first failing sensor and its `stream_line`
+and `stream_record`. Lines count blank lines; records count only nonempty lines.
+The batch's event number can vary with concurrent sensor ordering. Diagnostics
+include trimmed record `bytes`, a one-based JSON syntax `offset` (`0` when
+unavailable), fixed first/last byte classes and whether a newline ended the record.
+They retain no input excerpts, keys, commands, environment or payload hashes.
+An endpoint class or missing final newline does not prove rotation or truncation.
+A malformed record still rejects every sensor's findings in that collection.
+Capture diagnostics promptly: [Kubernetes log reads](https://kubernetes.io/docs/concepts/cluster-administration/logging/#log-rotation)
+expose only the latest rotated container log file. A requested lookback may no
+longer be available.
+
 ```sh
 deckard runtime collect --namespace tetragon --selector app.kubernetes.io/name=tetragon \
   --container export-stdout --cluster-scope k8s:uid:<kube-system-namespace-UID> \

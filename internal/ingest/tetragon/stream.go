@@ -53,6 +53,12 @@ func (a *Accumulator) AddStreamFrom(ctx context.Context, reader io.Reader, sourc
 	}
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 32<<10), MaxEventBytes+2)
+	var position recordPosition
+	scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
+		advance, token, err := bufio.ScanLines(data, atEOF)
+		position.newline = advance > 0 && data[advance-1] == '\n'
+		return advance, token, err
+	})
 	for scanner.Scan() {
 		// Scanner can emit buffered data after a non-EOF reader error. Check
 		// that error before parsing or cancellation can hide its original cause.
@@ -65,9 +71,11 @@ func (a *Accumulator) AddStreamFrom(ctx context.Context, reader io.Reader, sourc
 		if len(scanner.Bytes()) > MaxEventBytes {
 			return a.failFrom(source, errors.New("tetragon event record exceeds the limit"))
 		}
+		position.line++
 		raw := bytes.Trim(scanner.Bytes(), " \t\r") // Only JSON whitespace; not form feeds or Unicode spaces.
 		if len(raw) != 0 {
-			if err := a.addFrom(raw, source); err != nil {
+			position.record++
+			if err := a.addFrom(raw, source, position); err != nil {
 				return err
 			}
 		}
@@ -206,10 +214,10 @@ func (a *Accumulator) failFrom(source string, err error) error {
 }
 
 func (a *Accumulator) add(raw []byte) error {
-	return a.addFrom(raw, "")
+	return a.addFrom(raw, "", recordPosition{})
 }
 
-func (a *Accumulator) addFrom(raw []byte, source string) error {
+func (a *Accumulator) addFrom(raw []byte, source string, position recordPosition) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.err != nil {
@@ -224,6 +232,10 @@ func (a *Accumulator) addFrom(raw []byte, source string) error {
 	}
 	observed, err := parseEvent(raw, a.options)
 	if err != nil {
+		var malformed *malformedRecordError
+		if errors.As(err, &malformed) {
+			malformed.position = position
+		}
 		return a.rejectLocked(source, fmt.Sprintf("tetragon event %d: %s", a.events, err), err)
 	}
 	if observed.finding.Key == "" {
