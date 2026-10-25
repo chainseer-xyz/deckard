@@ -20,7 +20,12 @@ import (
 
 func running(t *testing.T, bound assessmentjob.Settings) (*assessmentjob.Manager, assessmentjob.Session, *k8sfake.Clientset, *corev1.Secret, <-chan assessmentjob.Completion) {
 	t.Helper()
-	kube := fakeKube()
+	return runningWithKube(t, bound, fakeKube())
+}
+
+// Configure fake reactors before starting the manager's concurrent watchers.
+func runningWithKube(t *testing.T, bound assessmentjob.Settings, kube *k8sfake.Clientset) (*assessmentjob.Manager, assessmentjob.Session, *k8sfake.Clientset, *corev1.Secret, <-chan assessmentjob.Completion) {
+	t.Helper()
 	completed := make(chan assessmentjob.Completion, 4)
 	m, err := assessmentjob.NewManager(bound, assets{1: {ID: 1, Kind: model.KindURL, Key: "https://app.example.com", Scope: model.ScopeOwned}}, managerGuard(t), kube, func(_ context.Context, c assessmentjob.Completion) error { completed <- c; return nil })
 	if err != nil {

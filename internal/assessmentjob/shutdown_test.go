@@ -63,16 +63,19 @@ func TestCloseCancelsReportCallbackRatherThanWaitingThirtySeconds(t *testing.T) 
 }
 
 func TestCleanupFailureCannotBeReportedAsCleaned(t *testing.T) {
-	m, session, kube, secret, _ := running(t, settings())
+	kube := fakeKube()
+	var deleteAttempts atomic.Int32
 	kube.PrependReactor("delete", "jobs", func(k8stesting.Action) (bool, runtime.Object, error) {
+		deleteAttempts.Add(1)
 		return true, nil, errors.New("private Kubernetes credential details")
 	})
+	m, session, kube, secret, _ := runningWithKube(t, settings(), kube)
 	if submit(t, m, session, string(secret.Data["upload-token"])) != 202 {
 		t.Fatal("report refused")
 	}
 	endJob(t, kube, session, true)
 	result := wait(t, m, session.ID)
-	if result.Status != "failed" || result.Reason != "cleanup_pending" {
+	if deleteAttempts.Load() == 0 || !result.CleanupPending || result.Status != "failed" || result.Reason != "cleanup_pending" {
 		t.Fatalf("failed cleanup looked successful: %#v", result)
 	}
 }
