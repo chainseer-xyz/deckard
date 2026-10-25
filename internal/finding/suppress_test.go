@@ -71,6 +71,76 @@ func TestMatchGrammar(t *testing.T) {
 	}
 }
 
+func TestControlIDMatchesStructuredKubescapeEvidence(t *testing.T) {
+	now := time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC)
+	until := now.Add(24 * time.Hour)
+	s, err := NewSuppressor([]config.Suppression{{
+		Match: "check=ext.kubescape control_id=C-0270", Reason: "CPU limits intentionally omitted", Until: &until,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name     string
+		check    string
+		title    string
+		evidence map[string]any
+		want     bool
+	}{
+		{"exact control without title hint", "ext.kubescape", "Unrelated wording", map[string]any{"control_id": "C-0270"}, true},
+		{"case insensitive", "EXT.KUBESCAPE", "", map[string]any{"control_id": "c-0270"}, true},
+		{"wrong control despite title", "ext.kubescape", "CPU limits (C-0270)", map[string]any{"control_id": "C-0012"}, false},
+		{"title only", "ext.kubescape", "CPU limits (C-0270)", nil, false},
+		{"other evidence key", "ext.kubescape", "CPU limits (C-0270)", map[string]any{"rule_id": "C-0270"}, false},
+		{"empty control", "ext.kubescape", "", map[string]any{"control_id": ""}, false},
+		{"substring", "ext.kubescape", "", map[string]any{"control_id": "prefix C-0270 suffix"}, false},
+		{"longer control", "ext.kubescape", "", map[string]any{"control_id": "C-02700"}, false},
+		{"whitespace", "ext.kubescape", "", map[string]any{"control_id": " C-0270 "}, false},
+		{"number", "ext.kubescape", "", map[string]any{"control_id": 270}, false},
+		{"array", "ext.kubescape", "", map[string]any{"control_id": []string{"C-0270"}}, false},
+		{"object", "ext.kubescape", "", map[string]any{"control_id": map[string]string{"id": "C-0270"}}, false},
+		{"other check", "ext.prowler", "CPU limits (C-0270)", map[string]any{"control_id": "C-0270"}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := model.Finding{Check: tc.check, Title: tc.title, Evidence: tc.evidence, Tags: []string{"C-0270"}}
+			reason, gotUntil, ok := s.Match(f, now)
+			if ok != tc.want {
+				t.Fatalf("Match = %v, want %v", ok, tc.want)
+			}
+			if ok && (reason != "CPU limits intentionally omitted" || gotUntil == nil || !gotUntil.Equal(until)) {
+				t.Fatalf("suppression reason or expiry changed: %q %v", reason, gotUntil)
+			}
+		})
+	}
+}
+
+func TestControlIDRequiresExactKubescapeScope(t *testing.T) {
+	for _, match := range []string{
+		"check=ext.kubescape control_id=C-0270",
+		"CONTROL_ID=c-0270 CHECK=EXT.KUBESCAPE asset=k8s://*",
+	} {
+		if err := ValidateSuppressions([]config.Suppression{{Match: match}}); err != nil {
+			t.Errorf("valid control selector %q: %v", match, err)
+		}
+	}
+	for _, match := range []string{
+		"control_id=C-0270",
+		"check=ext.prowler control_id=C-0270",
+		"check=ext.* control_id=C-0270",
+	} {
+		if err := ValidateSuppressions([]config.Suppression{{Match: match}}); err == nil || !strings.Contains(err.Error(), "requires check=ext.kubescape") {
+			t.Errorf("unscoped selector %q: %v", match, err)
+		}
+	}
+	for _, id := range []string{"*", "C-*", "C-027?", "C0270", "C-02700", "C-027", "C-02x0", "C-0270 "} {
+		match := `check=ext.kubescape control_id="` + id + `"`
+		if err := ValidateSuppressions([]config.Suppression{{Match: match}}); err == nil || !strings.Contains(err.Error(), "exact Kubescape control ID") {
+			t.Errorf("invalid control selector %q: %v", match, err)
+		}
+	}
+}
+
 func TestMatchErrors(t *testing.T) {
 	tests := []struct{ match, errSub string }{
 		{"", "empty match"},

@@ -987,6 +987,33 @@ suppressions:
   - { match: "check=http.headers asset=blog.example.com", reason: "accepted risk", until: 2026-12-31 }
 ```
 
+Suppression terms are ANDed. Existing keys (`check`, `asset`, `zone`, `source`,
+`severity`, `fingerprint`, `title`) retain case-insensitive glob matching.
+For a reviewed Kubescape policy exception, use the structured control ID:
+
+```yaml
+suppressions:
+  - match: "check=ext.kubescape control_id=C-0270 asset=k8s://k8s:uid:11111111-1111-4111-8111-111111111111/*"
+    reason: "CPU limits intentionally omitted for this cluster"
+```
+
+Replace the example cluster UID with the intended cluster's immutable UID.
+`control_id` requires the exact `check=ext.kubescape` term and a literal ID
+(`C-` followed by four digits), compared case-insensitively. Wildcards are refused
+for this key. Only string `evidence.control_id` matches; missing or malformed
+evidence never falls back to titles, descriptions or tags. Other controls,
+including credential findings, remain unaffected by the example.
+
+The dispatcher filters matching open findings immediately. Stored status changes
+when a fresh accepted observation next includes the finding; replayed reports
+and unseen historical findings do not apply the new status. Config suppression
+preserves the record and stores its reason with a `[config]` prefix. Removing or
+expiring the rule lifts that config decision during subsequent processing.
+Manual suppressions remain separate. The audited per-finding suppress API can
+apply an operator decision immediately, but it does not become config-owned or
+automatically lift when this rule is removed. The `[config]` note prefix is
+reserved; use a manual note without that prefix for an operator decision.
+
 ## Ingest (external scanners)
 
 Account-level and secret scanners that run elsewhere (Prowler, Kubescape, trufflehog,
