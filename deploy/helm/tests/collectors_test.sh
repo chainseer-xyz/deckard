@@ -136,7 +136,7 @@ reject 'runtime collector requires immutable cluster UID scope' 'trivy-runtime c
 tetragon_values=$(jq '.collectors.jobs=[{name:"tetragon-events",type:"tetragon",schedule:"*/5 * * * *",sensorNamespace:"tetragon",sensorSelector:"app.kubernetes.io/name=tetragon",clusterScope:"k8s:uid:11111111-1111-4111-8111-111111111111",maxAgeSeconds:900}]' <<< "$values")
 if tetragon=$(render "$tetragon_values"); then
   assert 'Tetragon uses native credentialless collection followed by incomplete-only upload' '[.[]|select(.kind=="CronJob").spec.jobTemplate.spec.template.spec]|first|.initContainers[0].command==["/usr/local/bin/deckard"] and .initContainers[0].args[0:2]==["runtime","collect"] and (.initContainers[0].args|index("export-stdout")!=null and index("6m")!=null and index("/report/request.json")!=null and index("--token-env")==null) and .containers[0].args[0:2]==["runtime","upload"] and .initContainers[0].image==.containers[0].image' "$tetragon"
-  assert 'Tetragon collection expires within its five-minute schedule' '[.[]|select(.kind=="CronJob")]|first|.spec.schedule=="*/5 * * * *" and .spec.concurrencyPolicy=="Forbid" and .spec.jobTemplate.spec.activeDeadlineSeconds==300' "$tetragon"
+  assert 'Tetragon defaults to no retries and expires within its five-minute schedule' '[.[]|select(.kind=="CronJob")]|first|.spec.schedule=="*/5 * * * *" and .spec.concurrencyPolicy=="Forbid" and .spec.jobTemplate.spec.backoffLimit==0 and .spec.jobTemplate.spec.activeDeadlineSeconds==300' "$tetragon"
   assert 'Tetragon RBAC allows only Pod listing and Pod log reads in sensor namespace' '[.[]|select(.kind=="Role" and .metadata.labels."app.kubernetes.io/component"=="collector")]|length==1 and (.[0].metadata.namespace=="tetragon") and (.[0].rules==[{apiGroups:[""],resources:["pods"],verbs:["list"]},{apiGroups:[""],resources:["pods/log"],verbs:["get"]}])' "$tetragon"
   assert 'Tetragon creates no global permissions or sensor workloads' '[.[]|select(.metadata.labels."app.kubernetes.io/component"=="collector" and (.kind=="ClusterRole" or .kind=="ClusterRoleBinding" or .kind=="DaemonSet"))]|length==0' "$tetragon"
   assert 'Tetragon raw log reader has projected API token but never uploader credential' '[.[]|select(.kind=="CronJob").spec.jobTemplate.spec.template.spec]|first|(.initContainers[0].env|map(.name))==["HOME"] and (.initContainers[0].volumeMounts|map(.name)|sort)==["kube-api","report","scratch"] and (.containers[0].volumeMounts|map(.name))==["report"] and .containers[0].volumeMounts[0].readOnly==true and (.volumes[]|select(.name=="kube-api").projected.sources[0].serviceAccountToken.expirationSeconds)==3600' "$tetragon"
@@ -145,14 +145,19 @@ reject 'Tetragon requires explicit sensor namespace' 'Tetragon sensorNamespace m
 reject 'Tetragon requires explicit sensor label selector' 'Tetragon sensorSelector is required' 'del(.collectors.jobs[0].sensorSelector)' "$tetragon_values"
 reject 'Tetragon cannot collect arbitrary sensor container logs' 'Tetragon sensorContainer must be export-stdout' '.collectors.jobs[0].sensorContainer="tetragon"' "$tetragon_values"
 reject 'Tetragon requires immutable cluster UID scope' 'Tetragon clusterScope must use k8s:uid:<UUID>' '.collectors.jobs[0].clusterScope="k8s:mutable-name"' "$tetragon_values"
-for retries in 0 1 2; do
+for retries in 4 0 1 2 3; do
   retried=$(render_mutation ".collectors.jobs[0].backoffLimit=$retries" "$tetragon_values")
   assert "Tetragon permits exactly $retries bounded whole-Pod retries" "[.[]|select(.kind==\"CronJob\")]|first|.spec.jobTemplate.spec.backoffLimit==$retries and .spec.jobTemplate.spec.activeDeadlineSeconds==300 and .spec.concurrencyPolicy==\"Forbid\" and .spec.jobTemplate.spec.template.spec.restartPolicy==\"Never\"" "$retried"
 done
-for retries in '-1' '3' '1.5' '"2"' 'true' 'null' '[]' '{}'; do
-  reject "invalid Tetragon retry limit $retries is refused" 'collector backoffLimit must be an integer from 0 to 2' ".collectors.jobs[0].backoffLimit=$retries" "$tetragon_values"
+for retries in '-1' '5' '1.5' '4.5' '"4"' 'true' 'null' '[]' '{}'; do
+  reject "invalid Tetragon retry limit $retries is refused" 'collector backoffLimit must be an integer from 0 to 4' ".collectors.jobs[0].backoffLimit=$retries" "$tetragon_values"
 done
-reject 'posture collectors cannot opt into runtime retries' 'only Tetragon collectors support nonzero backoffLimit' '.collectors.jobs[0].backoffLimit=1' "$kube_values"
+for other_values in "$values" "$kube_values" "$runtime_values" "$prowler_values" "$bbot_values"; do
+  other_type=$(jq -r '.collectors.jobs[0].type' <<< "$other_values")
+  for retries in 1 4; do
+    reject "$other_type collectors cannot opt into $retries runtime retries" 'only Tetragon collectors support nonzero backoffLimit' ".collectors.jobs[0].backoffLimit=$retries" "$other_values"
+  done
+done
 for placement_base in "$values" "$kube_values" "$tetragon_values" "$runtime_values" "$prowler_values"; do
   platform_values=$(jq '.nodeSelector={nodegroup:"infrastructure"}|.tolerations=[{key:"nodegroup",operator:"Equal",value:"infrastructure",effect:"NoSchedule"}]|.affinity={nodeAffinity:{requiredDuringSchedulingIgnoredDuringExecution:{nodeSelectorTerms:[{matchExpressions:[{key:"nodegroup",operator:"In",values:["infrastructure"]}]}]}}}' <<< "$placement_base")
   platform=$(render "$platform_values")
