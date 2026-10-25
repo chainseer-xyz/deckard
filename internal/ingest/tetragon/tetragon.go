@@ -25,8 +25,8 @@ func Parse(data []byte, o ingest.ParseOptions) ([]ingest.Finding, error) {
 
 func parseEvent(data []byte, o ingest.ParseOptions) (observation, error) {
 	var raw map[string]json.RawMessage
-	if json.Unmarshal(data, &raw) != nil || raw == nil {
-		return observation{}, fmt.Errorf("tetragon event is not valid JSON")
+	if err := json.Unmarshal(data, &raw); err != nil || raw == nil {
+		return observation{}, malformedRecord(data, err)
 	}
 	if err := canonicalize(raw, [][2]string{{"processKprobe", "process_kprobe"}, {"processTracepoint", "process_tracepoint"}, {"processUprobe", "process_uprobe"}, {"processLsm", "process_lsm"}, {"processUsdt", "process_usdt"}, {"processExec", "process_exec"}, {"processExit", "process_exit"}, {"processLoader", "process_loader"}, {"processThrottle", "process_throttle"}, {"rateLimitInfo", "rate_limit_info"}, {"nodeName", "node_name"}, {"aggregationInfo", "aggregation_info"}}); err != nil {
 		return observation{}, err
