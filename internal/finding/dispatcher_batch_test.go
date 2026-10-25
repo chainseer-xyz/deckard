@@ -26,6 +26,26 @@ func TestFlushSkipsFindingsMatchingConfigSuppression(t *testing.T) {
 	}
 }
 
+func TestFlushFiltersExistingKubescapeControlWithoutTitleFallback(t *testing.T) {
+	st := &dstore{open: []model.Finding{
+		{ID: 1, Check: "ext.kubescape", Status: model.StatusOpen, Severity: model.SeverityHigh, Evidence: map[string]any{"control_id": "C-0270"}},
+		{ID: 2, Check: "ext.kubescape", Status: model.StatusOpen, Severity: model.SeverityHigh, Title: "CPU limits (C-0270)", Evidence: map[string]any{"control_id": "C-0271"}},
+		{ID: 3, Check: "ext.kubescape", Status: model.StatusOpen, Severity: model.SeverityHigh, Title: "CPU limits (C-0270)"},
+	}}
+	n := &fnotifier{name: "am"}
+	d := finding.NewDispatcher(st, notifyN{n}.list(), 4*time.Minute, quiet,
+		finding.WithSuppressions([]config.Suppression{{Match: "check=ext.kubescape control_id=C-0270", Reason: "intentional CPU policy"}}))
+	if err := d.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n.calls() != 1 || !eq(n.open[0], []int64{2, 3}) {
+		t.Fatalf("only the exact structured control should be filtered: %v", n.open)
+	}
+	if len(st.open) != 3 || st.open[0].Status != model.StatusOpen {
+		t.Fatal("notification filtering must preserve stored findings")
+	}
+}
+
 func TestFlushOnlySuppressedOpenSendsNothing(t *testing.T) {
 	st := &dstore{open: []model.Finding{{ID: 1, Check: "c", AssetKey: "a.example.com", Status: model.StatusOpen}}}
 	n := &fnotifier{name: "am"}

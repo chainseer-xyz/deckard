@@ -80,3 +80,83 @@ func TestProcessorIngestAppliesSuppressionsIntelAndResolveAfter(t *testing.T) {
 		t.Fatalf("second miss: %+v %v", r, err)
 	}
 }
+
+func TestProcessorIngestControlSuppressionPreservesStoredDecisions(t *testing.T) {
+	ctx := context.Background()
+	st := pgtest.New(t)
+	clk := &clock{epoch}
+	items := []store.IngestItem{
+		crItem(0, model.FindingInput{Key: "cpu", Severity: model.SeverityHigh, Title: "CPU limits", Evidence: map[string]any{"control_id": "C-0270"}}),
+		crItem(1, model.FindingInput{Key: "memory", Severity: model.SeverityHigh, Title: "Misleading title (C-0270)", Evidence: map[string]any{"control_id": "C-0271"}}),
+		crItem(2, model.FindingInput{Key: "title-only", Severity: model.SeverityHigh, Title: "Title only (C-0270)"}),
+		crItem(3, model.FindingInput{Key: "manual", Severity: model.SeverityHigh, Title: "Operator decision", Evidence: map[string]any{"control_id": "C-0270"}}),
+	}
+	for i := range items {
+		items[i].AssetKey = "k8s://fixture/apps/v1/default/Deployment/control-fixture"
+	}
+	run := func(p *finding.Processor, digest string) store.IngestResult {
+		t.Helper()
+		clk.advance(time.Minute)
+		result, err := p.Ingest(ctx, store.IngestInput{
+			Tool: "kubescape", Scope: "k8s:fixture", Check: "ext.kubescape", Source: "ingest:kubescape",
+			AssetScope: model.ScopeExternal, Complete: false, ObservedAt: clk.now(), Digest: digest, Items: items,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	plain := finding.NewProcessor(st, finding.ProcessorConfig{ResolveAfter: 2}, quiet, finding.WithClock(clk.now))
+	initial := run(plain, "before-rule")
+	if len(initial.Opened) != 4 {
+		t.Fatalf("expected four durable findings: %+v", initial)
+	}
+	byTitle := map[string]model.Finding{}
+	for _, f := range initial.Opened {
+		byTitle[f.Title] = f
+	}
+	manual := byTitle["Operator decision"]
+	if err := st.ChangeFindingStatus(ctx, manual.ID, store.StatusChange{
+		Status: model.StatusSuppressed, Note: "reviewed by operator", Actor: "alice",
+	}, clk.now()); err != nil {
+		t.Fatal(err)
+	}
+	until := clk.now().Add(24 * time.Hour)
+	configured := finding.NewProcessor(st, finding.ProcessorConfig{ResolveAfter: 2, Suppressions: []config.Suppression{{
+		Match: "check=ext.kubescape control_id=C-0270", Reason: "CPU limits intentionally omitted", Until: &until,
+	}}}, quiet, finding.WithClock(clk.now))
+	observed := run(configured, "fresh-observation")
+	if len(observed.Resolved) != 0 || len(observed.Updated) != 3 {
+		t.Fatalf("fresh additive observation must retain the existing records: %+v", observed)
+	}
+	for title, original := range byTitle {
+		stored, err := st.GetFinding(ctx, original.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stored.ID != original.ID || stored.Fingerprint != original.Fingerprint || stored.ResolvedAt != nil {
+			t.Fatalf("finding identity or lifecycle changed: %+v", stored)
+		}
+		switch title {
+		case "CPU limits":
+			if stored.Status != model.StatusSuppressed || stored.SuppressionNote != finding.ConfigNotePrefix+"CPU limits intentionally omitted" || stored.SuppressedUntil == nil || !stored.SuppressedUntil.Equal(until) || stored.Evidence["control_id"] != "C-0270" {
+				t.Fatalf("structured suppression must preserve evidence and recorded reason/expiry: %+v", stored)
+			}
+		case "Operator decision":
+			if stored.Status != model.StatusSuppressed || stored.SuppressionNote != "reviewed by operator" || stored.SuppressedUntil != nil {
+				t.Fatalf("config must preserve the operator decision: %+v", stored)
+			}
+		default:
+			if stored.Status != model.StatusOpen {
+				t.Fatalf("wrong or absent control must stay open: %+v", stored)
+			}
+		}
+	}
+	run(plain, "rule-removed")
+	for title, want := range map[string]model.FindingStatus{"CPU limits": model.StatusOpen, "Operator decision": model.StatusSuppressed} {
+		stored, err := st.GetFinding(ctx, byTitle[title].ID)
+		if err != nil || stored.Status != want {
+			t.Fatalf("rule removal must distinguish config and manual decisions for %s: %+v %v", title, stored, err)
+		}
+	}
+}
