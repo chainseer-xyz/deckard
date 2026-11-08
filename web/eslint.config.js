@@ -9,7 +9,9 @@ export default tseslint.config(
   {
     plugins: { 'react-hooks': reactHooks },
     rules: {
-      ...reactHooks.configs.recommended.rules,
+      // Keep the Hooks checks used before v7 added React Compiler rules.
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
       '@typescript-eslint/no-explicit-any': 'error',
     },
   },
