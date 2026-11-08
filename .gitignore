@@ -8,6 +8,7 @@ internal/api/ui/dist/*
 !internal/api/ui/dist/.gitkeep
 coverage.*
 .claude/
+/.worktrees/
 !.env.example
 
 # Local execution plans and session logs.
