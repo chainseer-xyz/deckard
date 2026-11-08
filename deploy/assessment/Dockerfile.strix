@@ -28,7 +28,8 @@ LABEL org.opencontainers.image.title="Deckard constrained Strix assessment" \
 # Debian security updates are chosen at build; scan and pin the resulting image.
 # hadolint ignore=DL3008
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash curl ca-certificates libssl3 \
+    && apt-get install -y --no-install-recommends bash curl ca-certificates libssl3 apt libapt-pkg6.0 \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' apt)" ge '2.6.2' \
     && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libssl3)" ge '3.0.22-1~deb12u2' \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
