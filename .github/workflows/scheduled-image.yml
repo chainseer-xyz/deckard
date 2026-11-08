@@ -41,6 +41,8 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: deckard:${{ matrix.target }}
+          # Upstream detection templates contain public test keys and secret patterns.
+          skip-dirs: /usr/local/share/deckard/nuclei-templates
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           format: sarif
@@ -60,6 +62,7 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: deckard:${{ matrix.target }}
+          skip-dirs: /usr/local/share/deckard/nuclei-templates
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           format: table
