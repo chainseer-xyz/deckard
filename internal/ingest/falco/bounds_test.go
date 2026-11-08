@@ -12,7 +12,7 @@ import (
 
 func TestEventAndIncidentCountsAreBounded(t *testing.T) {
 	many := "[" + strings.Repeat(`{}`+",", maxEvents) + `{}` + "]"
-	if out, err := Parse([]byte(many), ingest.ParseOptions{Scope: "marina-staging"}); err == nil || len(out) != 0 || !strings.Contains(err.Error(), "event count") {
+	if out, err := Parse([]byte(many), ingest.ParseOptions{Scope: "test-cluster"}); err == nil || len(out) != 0 || !strings.Contains(err.Error(), "event count") {
 		t.Fatalf("event limit not enforced: %v", err)
 	}
 	var batch strings.Builder
@@ -21,7 +21,7 @@ func TestEventAndIncidentCountsAreBounded(t *testing.T) {
 		batch.WriteString(input)
 		batch.WriteByte('\n')
 	}
-	if out, err := Parse([]byte(batch.String()), ingest.ParseOptions{Scope: "marina-staging"}); err == nil || len(out) != 0 || !strings.Contains(err.Error(), "incident count") {
+	if out, err := Parse([]byte(batch.String()), ingest.ParseOptions{Scope: "test-cluster"}); err == nil || len(out) != 0 || !strings.Contains(err.Error(), "incident count") {
 		t.Fatalf("incident limit not enforced: %v", err)
 	}
 }
