@@ -12,7 +12,7 @@ WORKDIR /src
 RUN git clone --depth 1 --branch ${KUBESCAPE_VERSION} https://github.com/kubescape/kubescape.git . \
  && test "$(git rev-parse HEAD)" = "${KUBESCAPE_COMMIT}"
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    go get golang.org/x/image@v0.45.0 golang.org/x/net@v0.60.0 \
+    go get golang.org/x/image@v0.45.0 golang.org/x/net@v0.62.0 github.com/go-jose/go-jose/v4@v4.1.6 github.com/klauspost/compress@v1.20.2 \
  && go mod tidy \
  && go mod verify \
  && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -mod=readonly -trimpath \

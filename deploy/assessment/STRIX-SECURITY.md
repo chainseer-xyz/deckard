@@ -14,8 +14,10 @@ The resulting environment is not the unchanged upstream lock environment.
 | cryptography | 48.0.1 | 50.0.0 |
 | filelock | 3.29.4 | [4.2.1](https://pypi.org/project/filelock/4.2.1/) |
 | graphql-core | 3.2.11 | [3.2.12](https://pypi.org/project/graphql-core/3.2.12/) |
+| litellm | 1.101.0 | [1.101.3](https://pypi.org/project/litellm/1.101.3/) |
 | Pillow | 12.3.0 | [13.0.0](https://pypi.org/project/pillow/13.0.0/) |
-| pypdf | 6.14.2 | [6.21.2](https://pypi.org/project/pypdf/6.21.2/) |
+| pyasn1 | 0.6.4 | [0.6.5](https://pypi.org/project/pyasn1/0.6.5/) |
+| pypdf | 6.14.2 | [6.21.4](https://pypi.org/project/pypdf/6.21.4/) |
 | urllib3 | 2.7.0 | 2.8.0 |
 | yarl | 1.24.2 | [1.25.1](https://pypi.org/project/yarl/1.25.1/) |
 
@@ -24,10 +26,11 @@ The image installs only the exact packages and SHA256-verified official PyPI whe
 listed in `strix-security-requirements.txt`. It disables dependency resolution and
 source builds for this overlay, then runs `uv pip check` on the installed environment.
 The requirements cover Linux Python `3.13` on `amd64` and `arm64` only.
-The native aiohttp, Pillow and yarl wheel hashes cover both architectures. Other new
+The native aiohttp, litellm, Pillow and yarl wheel hashes cover both architectures. Other new
 overlay wheels are platform-independent. Tests pin the official release hashes
 and exercise image/PDF round trips alongside the real SDK/session contracts.
 The yarl update satisfies aiohttp `3.14.4`'s declared `yarl>=1.25.1` requirement.
+The runtime also upgrades Debian's `libssl3` to at least `3.0.22-1~deb12u2`.
 
 Upstream caps `cryptography<49` because newer releases lack the Intel macOS
 universal2 wheel. This Linux-only image deliberately overrides that packaging cap.
