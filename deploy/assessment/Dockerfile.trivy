@@ -2,11 +2,31 @@
 ARG DECKARD_IMAGE
 FROM ${DECKARD_IMAGE} AS deckard
 
-# Official Trivy 0.76.1 includes the patched Go standard library.
+# Rebuild the exact release with the compression security fix published after it.
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS scanner
+ARG TARGETOS
+ARG TARGETARCH
+RUN apk add --no-cache git
+WORKDIR /src
+RUN git clone --depth 1 --branch v0.76.2 https://github.com/aquasecurity/trivy.git . \
+ && test "$(git rev-parse HEAD)" = 3f6334d223b52188324af3b9923b4249cd206652
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    go get github.com/klauspost/compress@v1.20.2 \
+ && go mod tidy \
+ && go mod verify \
+ && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -mod=readonly -trimpath \
+      -ldflags="-s -w -X github.com/aquasecurity/trivy/pkg/version/app.ver=0.76.2" -o /out/trivy ./cmd/trivy \
+ && mkdir -p /out/licenses/trivy \
+ && cp LICENSE /out/licenses/trivy/LICENSE \
+ && cp /usr/local/go/LICENSE /out/licenses/trivy/Go-LICENSE
+
+# Keep the official release's runtime and supporting files.
 # No Docker socket, host filesystem or cloud identity.
-FROM ghcr.io/aquasecurity/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+FROM ghcr.io/aquasecurity/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
 # Retain explicit security floors without a broad OS upgrade.
-RUN apk add --no-cache --upgrade 'libexpat>=2.9.0-r0' 'brotli-libs>=1.2.1-r0'
+RUN apk add --no-cache --upgrade 'libexpat>=2.9.0-r0' 'brotli-libs>=1.2.1-r0' 'libcurl>=8.23.0-r0'
+COPY --from=scanner /out/trivy /usr/local/bin/trivy
+COPY --from=scanner /out/licenses/trivy /usr/share/licenses/trivy
 COPY --from=deckard /usr/local/bin/deckard /usr/local/bin/deckard
 ENV HOME=/tmp \
     TRIVY_CACHE_DIR=/tmp/trivy \
