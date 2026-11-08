@@ -6,6 +6,7 @@ FROM ${DECKARD_IMAGE} AS deckard
 FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS scanner
 ARG TARGETOS
 ARG TARGETARCH
+SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
 RUN apk add --no-cache git
 WORKDIR /src
 RUN git clone --depth 1 --branch v0.76.2 https://github.com/aquasecurity/trivy.git . \
@@ -15,10 +16,27 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
  && go mod tidy \
  && go mod verify \
  && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -mod=readonly -trimpath \
-      -ldflags="-s -w -X github.com/aquasecurity/trivy/pkg/version/app.ver=0.76.2" -o /out/trivy ./cmd/trivy \
- && mkdir -p /out/licenses/trivy \
+      -ldflags="-s -w -X github.com/aquasecurity/trivy/pkg/version/app.ver=0.76.2" -o /out/trivy ./cmd/trivy
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    mkdir -p /out/licenses/trivy \
  && cp LICENSE /out/licenses/trivy/LICENSE \
- && cp /usr/local/go/LICENSE /out/licenses/trivy/Go-LICENSE
+ && cp NOTICE /out/licenses/trivy/NOTICE \
+ && cp /usr/local/go/LICENSE /out/licenses/trivy/Go-LICENSE \
+ && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go list -mod=readonly -deps -f '{{with .Module}}{{if .Replace}}{{.Replace.Path}}|{{.Replace.Version}}|{{.Replace.Dir}}{{else}}{{.Path}}|{{.Version}}|{{.Dir}}{{end}}{{end}}' ./cmd/trivy | sort -u > /tmp/trivy-modules \
+ && while IFS='|' read -r module module_version module_dir; do \
+      test -n "$module" || continue; \
+      destination="/out/licenses/trivy/dependencies/$(printf '%s@%s' "$module" "$module_version" | tr '/' '_')"; \
+      mkdir -p "$destination"; \
+      find "$module_dir" -maxdepth 1 -type f \( -iname 'licen[cs]e*' -o -iname 'notice*' -o -iname 'copying*' -o -iname 'copyright*' \) -exec cp '{}' "$destination/" \; ; \
+      if test -z "$(find "$destination" -type f -print -quit)"; then \
+        for readme in "$module_dir"/README* "$module_dir"/readme*; do \
+          test -f "$readme" || continue; \
+          if grep -Eiq 'licen[cs]e|copyright' "$readme"; then cp "$readme" "$destination/"; fi; \
+        done; \
+      fi; \
+      test -n "$(find "$destination" -type f -print -quit)" || { printf 'missing license notice for %s@%s\n' "$module" "$module_version" >&2; exit 1; }; \
+      printf '%s@%s\n' "$module" "$module_version" >> /out/licenses/trivy/DEPENDENCIES.txt; \
+    done < /tmp/trivy-modules
 
 # Keep the official release's runtime and supporting files.
 # No Docker socket, host filesystem or cloud identity.
