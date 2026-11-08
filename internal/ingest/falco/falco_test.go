@@ -32,7 +32,7 @@ func TestRuleEventBecomesNonprobeableIncident(t *testing.T) {
 
 func TestHostAlertsAcceptNativeMissingKubernetesPlaceholders(t *testing.T) {
 	input := strings.NewReplacer("apps", "<NA>", "pod-123", "<NA>", "web-abc", "<NA>", "container-123", "<NA>").Replace(ruleEvent)
-	got, err := Parse([]byte(input), ingest.ParseOptions{Scope: "marina-staging"})
+	got, err := Parse([]byte(input), ingest.ParseOptions{Scope: "test-cluster"})
 	if err != nil || len(got) != 1 {
 		t.Fatalf("host alert rejected: %+v %v", got, err)
 	}
@@ -45,14 +45,14 @@ func TestHostAlertsAcceptNativeMissingKubernetesPlaceholders(t *testing.T) {
 }
 
 func TestInputBoundsAndScopeAreEnforced(t *testing.T) {
-	if out, err := Parse(bytes.Repeat([]byte(" "), MaxInputBytes+1), ingest.ParseOptions{Scope: "marina-staging"}); err == nil || len(out) != 0 {
+	if out, err := Parse(bytes.Repeat([]byte(" "), MaxInputBytes+1), ingest.ParseOptions{Scope: "test-cluster"}); err == nil || len(out) != 0 {
 		t.Fatal("oversized input accepted")
 	}
 	if out, err := Parse([]byte(ruleEvent), ingest.ParseOptions{}); err == nil || len(out) != 0 {
 		t.Fatal("missing operator scope accepted")
 	}
 	bad := strings.ReplaceAll(ruleEvent, "2026-10-14T12:00:00Z", "0001-01-01T00:00:00Z")
-	if out, err := Parse([]byte(bad), ingest.ParseOptions{Scope: "marina-staging"}); err == nil || len(out) != 0 {
+	if out, err := Parse([]byte(bad), ingest.ParseOptions{Scope: "test-cluster"}); err == nil || len(out) != 0 {
 		t.Fatal("zero event timestamp accepted")
 	}
 }
@@ -61,11 +61,11 @@ func TestMissingIdentityTupleCannotAliasAnotherWorkload(t *testing.T) {
 	base := strings.ReplaceAll(ruleEvent, `"k8s.pod.uid":"pod-123",`, "")
 	a := strings.NewReplacer("web-abc", "a|b", "container-123", "c").Replace(base)
 	b := strings.NewReplacer("web-abc", "a", "container-123", "b|c").Replace(base)
-	first, err := Parse([]byte(a), ingest.ParseOptions{Scope: "marina-staging"})
+	first, err := Parse([]byte(a), ingest.ParseOptions{Scope: "test-cluster"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := Parse([]byte(b), ingest.ParseOptions{Scope: "marina-staging"})
+	second, err := Parse([]byte(b), ingest.ParseOptions{Scope: "test-cluster"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestMalformedOrLossMarkedBatchIsRejectedWhole(t *testing.T) {
 func TestFalcoPriorityUsesItsNativeScale(t *testing.T) {
 	for priority, want := range map[string]model.Severity{"Emergency": model.SeverityCritical, "Alert": model.SeverityCritical, "Critical": model.SeverityCritical, "Error": model.SeverityHigh, "Warning": model.SeverityMedium, "Notice": model.SeverityLow, "Informational": model.SeverityInfo, "Debug": model.SeverityInfo} {
 		t.Run(priority, func(t *testing.T) {
-			got, err := Parse([]byte(strings.ReplaceAll(ruleEvent, "Warning", priority)), ingest.ParseOptions{Scope: "marina-staging"})
+			got, err := Parse([]byte(strings.ReplaceAll(ruleEvent, "Warning", priority)), ingest.ParseOptions{Scope: "test-cluster"})
 			if err != nil || len(got) != 1 || got[0].Severity != want {
 				t.Fatalf("priority %s: %+v %v", priority, got, err)
 			}

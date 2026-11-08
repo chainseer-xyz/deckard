@@ -50,15 +50,10 @@ Verify real positive/negative CNI fixtures before enabling assessments. Model
 protocol and failure fixtures do not prove a successful model-backed assessment.
 Never invent provider credentials, paid-model authority or live coverage.
 
-Marina staging's source of truth is `marina-infra`. Its
-`publish-overlay-staging.yaml` workflow writes `overlay-deckard.yaml` to
-`marina-platform-manifests:staging`; Argo's `marina-staging-overlays` owns the
-Deckard Application. The base `platform-staging` publisher does not deploy
-Deckard. Follow the overlay revision, child Application, Pods and actual uploads.
-Do not edit an unrelated `marina-manifests` checkout or deploy a production tag.
+Keep private deployment instructions, infrastructure repository names and
+session logs outside this repository. Use fictional identifiers in documentation
+and test fixtures.
 
-Marina retains Trivy findings in GitHub SARIF and pipeline gates. Do not add
-Trivy ingestion, a duplicate cluster image scanner or GHA-to-cluster networking
-without a new request. Reuse Tetragon, not a second Falco sensor. Use supported
-in-cluster collectors and normal provider APIs; never bypass provider login
-through database reads or forge credentials to make an integration appear ready.
+Use supported in-cluster collectors and normal provider APIs; never bypass
+provider login through database reads or forge credentials to make an
+integration appear ready.

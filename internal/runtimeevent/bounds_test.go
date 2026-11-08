@@ -23,7 +23,7 @@ func TestNewRejectsUnboundedOrAmbiguousConfiguration(t *testing.T) {
 		"empty namespace": func(s *Settings) { s.Namespace = "" }, "invalid namespace": func(s *Settings) { s.Namespace = "*" },
 		"empty selector": func(s *Settings) { s.Selector = "" }, "broad selector": func(s *Settings) { s.Selector = " " }, "invalid selector": func(s *Settings) { s.Selector = "app in (" },
 		"missing container": func(s *Settings) { s.Container = "" }, "invalid container": func(s *Settings) { s.Container = "unsafe/name" },
-		"display name scope": func(s *Settings) { s.ClusterScope = "marina-staging" }, "missing UID": func(s *Settings) { s.ClusterScope = "k8s:uid:" }, "invalid UID": func(s *Settings) { s.ClusterScope = "k8s:uid:SECRET/token" },
+		"display name scope": func(s *Settings) { s.ClusterScope = "test-cluster" }, "missing UID": func(s *Settings) { s.ClusterScope = "k8s:uid:" }, "invalid UID": func(s *Settings) { s.ClusterScope = "k8s:uid:SECRET/token" },
 		"excess lookback": func(s *Settings) { s.Lookback = time.Hour + time.Nanosecond }, "negative lookback": func(s *Settings) { s.Lookback = -time.Second },
 		"excess timeout": func(s *Settings) { s.Timeout = 3 * time.Minute }, "negative timeout": func(s *Settings) { s.Timeout = -time.Second },
 		"excess pods": func(s *Settings) { s.MaxPods = 65 }, "negative pods": func(s *Settings) { s.MaxPods = -1 },

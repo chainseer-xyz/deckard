@@ -9,3 +9,8 @@ internal/api/ui/dist/*
 coverage.*
 .claude/
 !.env.example
+
+# Local execution plans and session logs.
+/oss-platform-plan.md
+/oss-platform-completion.md
+/docs/superpowers/plans/

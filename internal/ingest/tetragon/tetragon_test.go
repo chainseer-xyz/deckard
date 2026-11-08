@@ -90,13 +90,13 @@ func TestNativePodDisplayNamesAreOrderIndependentAndRefuseConflicts(t *testing.T
 func TestNativeAggregationAndSimultaneousHooksCountEvents(t *testing.T) {
 	first := strings.Replace(policyEvent, `"node_name"`, `"aggregation_info":{"count":"3"},"node_name"`, 1)
 	second := strings.ReplaceAll(policyEvent, "security_file_permission", "security_inode_permission")
-	got, err := Parse([]byte(first+"\n"+second+"\n"+first), ingest.ParseOptions{Scope: "marina-staging"})
+	got, err := Parse([]byte(first+"\n"+second+"\n"+first), ingest.ParseOptions{Scope: "test-cluster"})
 	if err != nil || len(got) != 1 || got[0].Evidence["runtime_batch_count"] != int64(4) {
 		t.Fatalf("native aggregation lost: %+v %v", got, err)
 	}
 	for _, count := range []string{`"0"`, `"1000000001"`, `"SECRET"`, `-1`, `1.5`} {
 		bad := strings.Replace(first, `"count":"3"`, `"count":`+count, 1)
-		if out, err := Parse([]byte(bad), ingest.ParseOptions{Scope: "marina-staging"}); err == nil || len(out) != 0 {
+		if out, err := Parse([]byte(bad), ingest.ParseOptions{Scope: "test-cluster"}); err == nil || len(out) != 0 {
 			t.Fatalf("invalid aggregate count accepted: %+v %v", out, err)
 		}
 	}
@@ -105,7 +105,7 @@ func TestNativeAggregationAndSimultaneousHooksCountEvents(t *testing.T) {
 func TestProtobufJSONFieldNamesAndEnforcementActions(t *testing.T) {
 	camel := strings.NewReplacer("process_kprobe", "processKprobe", "policy_name", "policyName", "node_name", "nodeName", "exec_id", "execId", "function_name", "functionName").Replace(policyEvent)
 	for _, input := range []string{camel, strings.ReplaceAll(policyEvent, `"KPROBE_ACTION_POST"`, `3`), strings.ReplaceAll(policyEvent, "KPROBE_ACTION_POST", "KPROBE_ACTION_SIGNAL"), strings.ReplaceAll(policyEvent, "KPROBE_ACTION_POST", "KPROBE_ACTION_OVERRIDE")} {
-		got, err := Parse([]byte(input), ingest.ParseOptions{Scope: "marina-staging"})
+		got, err := Parse([]byte(input), ingest.ParseOptions{Scope: "test-cluster"})
 		if err != nil || len(got) != 1 {
 			t.Fatalf("valid protobuf event rejected: %+v %v", got, err)
 		}
@@ -116,14 +116,14 @@ func TestProtobufJSONFieldNamesAndEnforcementActions(t *testing.T) {
 }
 
 func TestInputBoundsAndScopeAreEnforced(t *testing.T) {
-	if out, err := Parse(bytes.Repeat([]byte(" "), MaxInputBytes+1), ingest.ParseOptions{Scope: "marina-staging"}); err == nil || len(out) != 0 {
+	if out, err := Parse(bytes.Repeat([]byte(" "), MaxInputBytes+1), ingest.ParseOptions{Scope: "test-cluster"}); err == nil || len(out) != 0 {
 		t.Fatal("oversized input accepted")
 	}
 	if out, err := Parse([]byte(policyEvent), ingest.ParseOptions{}); err == nil || len(out) != 0 {
 		t.Fatal("missing operator scope accepted")
 	}
 	bad := strings.ReplaceAll(policyEvent, "2026-10-14T12:00:00Z", "0001-01-01T00:00:00Z")
-	if out, err := Parse([]byte(bad), ingest.ParseOptions{Scope: "marina-staging"}); err == nil || len(out) != 0 {
+	if out, err := Parse([]byte(bad), ingest.ParseOptions{Scope: "test-cluster"}); err == nil || len(out) != 0 {
 		t.Fatal("zero event timestamp accepted")
 	}
 }
@@ -132,11 +132,11 @@ func TestMissingIdentityTupleCannotAliasAnotherWorkload(t *testing.T) {
 	base := strings.ReplaceAll(policyEvent, `"uid":"pod-123",`, "")
 	a := strings.NewReplacer("web-abc", "a|b", "worker-1", "c").Replace(base)
 	b := strings.NewReplacer("web-abc", "a", "worker-1", "b|c").Replace(base)
-	first, err := Parse([]byte(a), ingest.ParseOptions{Scope: "marina-staging"})
+	first, err := Parse([]byte(a), ingest.ParseOptions{Scope: "test-cluster"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := Parse([]byte(b), ingest.ParseOptions{Scope: "marina-staging"})
+	second, err := Parse([]byte(b), ingest.ParseOptions{Scope: "test-cluster"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestMalformedOrLossMarkedBatchIsRejectedWhole(t *testing.T) {
 
 func TestRoutineTelemetryAndUnnamedTracingAreNotSecurityFindings(t *testing.T) {
 	for _, input := range []string{"", "[]", `{"process_exec":{"process":{"binary":"/usr/bin/curl","arguments":"SECRET"}}}`, `{"process_exit":{"process":{"pid":12},"status":0}}`, strings.ReplaceAll(policyEvent, `"sensitive-file-write"`, `""`)} {
-		got, err := Parse([]byte(input), ingest.ParseOptions{Scope: "marina-staging"})
+		got, err := Parse([]byte(input), ingest.ParseOptions{Scope: "test-cluster"})
 		if err != nil || len(got) != 0 {
 			t.Fatalf("ordinary telemetry became an incident: %+v, %v", got, err)
 		}
@@ -182,7 +182,7 @@ func TestRoutineTelemetryAndUnnamedTracingAreNotSecurityFindings(t *testing.T) {
 func TestNamedPolicyEventKindsAreSupported(t *testing.T) {
 	for _, kind := range []string{"process_kprobe", "process_tracepoint", "process_uprobe", "process_lsm", "process_usdt"} {
 		t.Run(kind, func(t *testing.T) {
-			got, err := Parse([]byte(strings.ReplaceAll(policyEvent, "process_kprobe", kind)), ingest.ParseOptions{Scope: "marina-staging"})
+			got, err := Parse([]byte(strings.ReplaceAll(policyEvent, "process_kprobe", kind)), ingest.ParseOptions{Scope: "test-cluster"})
 			if err != nil || len(got) != 1 {
 				t.Fatalf("named policy event lost: %+v %v", got, err)
 			}
