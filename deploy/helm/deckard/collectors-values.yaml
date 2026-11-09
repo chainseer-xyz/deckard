@@ -98,10 +98,15 @@ collectors:
   #     image: quay.io/kubescape/kubescape-cli@sha256:d575d4f2281473ce539d41053d63482a4e9e07f35d987206b2bac79b2c9ad4bc # 4.0.16
   #     scope: k8s:your-cluster
   #     frameworks: [nsa, mitre] # default; nonempty unique subset of these two
+  #     # Only include failed controls at or above this severity. The scan still
+  #     # remains incomplete when any source or resource class is excluded.
+  #     minSeverity: high
   #     tokenSecretRef: {name: kubescape-ingest, key: token}
   #     # Empty/missing means all namespaces. A list gives namespace RoleBindings
   #     # and --include-namespaces; cluster metadata remains separately read-only.
   #     namespaces: [apps, edge]
+  #     # Exclude known platform baseline namespaces from this producer's report.
+  #     excludeNamespaces: [kube-system, monitoring]
   #     # Secret/ConfigMap and host/image assessment are excluded. Every report is
   #     # incomplete: findings can open/refresh but never resolve missing findings.
   #     # For large clusters, separate nsa and mitre jobs can share this same scope.

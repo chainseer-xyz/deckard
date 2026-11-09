@@ -76,6 +76,20 @@ capabilities:
 {{- $_ := set $seenFrameworks $framework true -}}
 {{- end -}}
 {{- end -}}
+{{- $minSeverity := "" -}}
+{{- $excludeNamespaces := list -}}
+{{- if eq $job.type "kubescape" -}}
+{{- $minSeverity = default "" $job.minSeverity -}}
+{{- if and (ne $minSeverity "") (not (has $minSeverity (list "low" "medium" "high" "critical"))) -}}{{- fail "Kubescape minSeverity must be low, medium, high or critical" -}}{{- end -}}
+{{- if hasKey $job "excludeNamespaces" -}}
+{{- if not (kindIs "slice" $job.excludeNamespaces) -}}{{- fail "Kubescape excludeNamespaces must be a list of namespace names" -}}{{- end -}}
+{{- $excludeNamespaces = $job.excludeNamespaces | default list -}}
+{{- if gt (len $excludeNamespaces) 128 -}}{{- fail "Kubescape supports at most 128 excluded namespaces" -}}{{- end -}}
+{{- range $namespace := $excludeNamespaces -}}
+{{- if or (gt (len $namespace) 63) (not (regexMatch "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" $namespace)) -}}{{- fail "Kubescape excludeNamespaces must contain explicit DNS labels" -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- $image := default "" $job.image -}}
 {{- if eq $job.type "tetragon" -}}
 {{- $image = default $ingestImage $job.image -}}
@@ -298,10 +312,18 @@ spec:
                 - /report/result.json
                 - --exclude-kinds
                 - Secret,ConfigMap
+                {{- if $minSeverity }}
+                - --min-severity
+                - {{ $minSeverity | quote }}
+                {{- end }}
                 - --cluster-name
                 - {{ required "collector scope is required" $job.scope | quote }}
                 {{- with $job.namespaces }}
                 - --include-namespaces
+                - {{ join "," . | quote }}
+                {{- end }}
+                {{- with $excludeNamespaces }}
+                - --exclude-namespaces
                 - {{ join "," . | quote }}
                 {{- end }}
                 {{- end }}
