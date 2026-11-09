@@ -74,6 +74,9 @@ reject 'Kubescape refuses duplicate frameworks' 'Kubescape frameworks must be a 
 reject 'Kubescape refuses scalar framework values' 'Kubescape frameworks must be a nonempty unique subset of nsa, mitre' '.collectors.jobs[0].frameworks="nsa"' "$kube_values"
 reject 'Kubescape refuses null framework values' 'Kubescape frameworks must be a nonempty unique subset of nsa, mitre' '.collectors.jobs[0].frameworks=null' "$kube_values"
 reject 'Kubescape refuses invalid minimum severity' 'Kubescape minSeverity must be low, medium, high or critical' '.collectors.jobs[0].minSeverity="urgent"' "$kube_values"
+for invalid_severity in false 0 '[]' '{}'; do
+  reject "Kubescape refuses non-string minimum severity $invalid_severity" 'Kubescape minSeverity must be a string' ".collectors.jobs[0].minSeverity=$invalid_severity" "$kube_values"
+done
 reject 'Kubescape refuses invalid excluded namespace names' 'Kubescape excludeNamespaces must contain explicit DNS labels' '.collectors.jobs[0].excludeNamespaces=["not_a_namespace"]' "$kube_values"
 other_frameworks=$(render_mutation '.collectors.jobs[0].frameworks=["not-a-kubescape-framework"]' "$values")
 assert 'Kubescape framework settings never change another collector command' '[.[]|select(.kind=="CronJob").spec.jobTemplate.spec.template.spec.initContainers[0].args]|all(index("framework")==null and index("image")!=null)' "$other_frameworks"
