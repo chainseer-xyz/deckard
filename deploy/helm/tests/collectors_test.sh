@@ -44,13 +44,14 @@ assert 'scanner never receives ingest credentials' '.spec.jobTemplate.spec.templ
 assert 'collector containers are restricted with no CPU limits' '.spec.jobTemplate.spec.template.spec|.securityContext.runAsNonRoot and .securityContext.runAsUser==65532 and .securityContext.seccompProfile.type=="RuntimeDefault" and ([.initContainers[],.containers[]]|all(.securityContext.readOnlyRootFilesystem and (.securityContext.allowPrivilegeEscalation|not) and .securityContext.capabilities.drop==["ALL"] and (.resources.limits|has("cpu")|not)))' "$job"
 assert 'collector policy cannot inherit Deckard open egress' '.spec.jobTemplate.spec.template.metadata.labels."app.kubernetes.io/name"=="deckard-collector"' "$job"
 assert 'each collector gets a separate network policy' '[.[]|select(.kind=="NetworkPolicy" and .metadata.name=="collectors-deckard-collect-web-image" and .spec.podSelector.matchLabels."app.kubernetes.io/name"=="deckard-collector")]|length==1' "$trivy"
-kube_values=$(jq '.collectors.jobs=[{name:"cluster-posture",type:"kubescape",schedule:"15 */6 * * *",scope:"k8s:example",image:"quay.io/kubescape/kubescape-cli@sha256:d575d4f2281473ce539d41053d63482a4e9e07f35d987206b2bac79b2c9ad4bc"}]' <<< "$values")
+kube_values=$(jq '.collectors.jobs=[{name:"cluster-posture",type:"kubescape",schedule:"15 */6 * * *",scope:"k8s:example",image:"quay.io/kubescape/kubescape-cli@sha256:d575d4f2281473ce539d41053d63482a4e9e07f35d987206b2bac79b2c9ad4bc",minSeverity:"high",excludeNamespaces:["kube-system","monitoring"]}]' <<< "$values")
 if kube=$(render "$kube_values"); then
   assert 'Kubescape collector renders' '[.[]|select(.kind=="CronJob")]|length==1' "$kube"
   kube_job=$(jq '.[]|select(.kind=="CronJob")' <<< "$kube")
   assert 'Kubescape uses bundled policies and never submits or probes hosts/images' '.spec.jobTemplate.spec.template.spec.initContainers[0].args|index("--use-default")!=null and index("--keep-local")!=null and index("--submit=false")!=null and index("--host-scan=false")!=null and index("--scan-images=false")!=null and index("Secret,ConfigMap")!=null and index("v2")!=null' "$kube_job"
   assert 'restricted Kubescape assessment can never resolve absent findings' '.spec.jobTemplate.spec.template.spec.containers[0].args|index("--incomplete")!=null' "$kube_job"
   assert 'Kubescape defaults to both approved frameworks' '.spec.jobTemplate.spec.template.spec.initContainers[0].args|.[index("framework")+1]=="nsa,mitre"' "$kube_job"
+  assert 'Kubescape filters actionable severity and explicit excluded namespaces' '.spec.jobTemplate.spec.template.spec.initContainers[0].args|.[index("--min-severity")+1]=="high" and .[index("--exclude-namespaces")+1]=="kube-system,monitoring"' "$kube_job"
   for framework in nsa mitre; do
     framework_values=$(jq --arg framework "$framework" '.collectors.jobs[0].frameworks=[$framework]' <<< "$kube_values")
     selected=$(render "$framework_values")
@@ -72,6 +73,8 @@ reject 'Kubescape refuses unknown frameworks' 'Kubescape frameworks must be a no
 reject 'Kubescape refuses duplicate frameworks' 'Kubescape frameworks must be a nonempty unique subset of nsa, mitre' '.collectors.jobs[0].frameworks=["nsa","nsa"]' "$kube_values"
 reject 'Kubescape refuses scalar framework values' 'Kubescape frameworks must be a nonempty unique subset of nsa, mitre' '.collectors.jobs[0].frameworks="nsa"' "$kube_values"
 reject 'Kubescape refuses null framework values' 'Kubescape frameworks must be a nonempty unique subset of nsa, mitre' '.collectors.jobs[0].frameworks=null' "$kube_values"
+reject 'Kubescape refuses invalid minimum severity' 'Kubescape minSeverity must be low, medium, high or critical' '.collectors.jobs[0].minSeverity="urgent"' "$kube_values"
+reject 'Kubescape refuses invalid excluded namespace names' 'Kubescape excludeNamespaces must contain explicit DNS labels' '.collectors.jobs[0].excludeNamespaces=["not_a_namespace"]' "$kube_values"
 other_frameworks=$(render_mutation '.collectors.jobs[0].frameworks=["not-a-kubescape-framework"]' "$values")
 assert 'Kubescape framework settings never change another collector command' '[.[]|select(.kind=="CronJob").spec.jobTemplate.spec.template.spec.initContainers[0].args]|all(index("framework")==null and index("image")!=null)' "$other_frameworks"
 prowler_values=$(jq '.collectors.jobs=[{name:"prowler-pull",type:"prowler-app",schedule:"0 */6 * * *",apiURL:"http://prowler-api.prowler.svc:8080",apiKeySecretRef:{name:"prowler-reader",key:"api-key"},providerTypes:["aws","gcp"],providerUIDs:["123456789012"],maxScanAge:"24h",minSeverity:"low"}]' <<< "$values")
