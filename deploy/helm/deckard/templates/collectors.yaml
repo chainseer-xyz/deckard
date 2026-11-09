@@ -79,7 +79,10 @@ capabilities:
 {{- $minSeverity := "" -}}
 {{- $excludeNamespaces := list -}}
 {{- if eq $job.type "kubescape" -}}
-{{- $minSeverity = default "" $job.minSeverity -}}
+{{- if hasKey $job "minSeverity" -}}
+{{- if not (kindIs "string" $job.minSeverity) -}}{{- fail "Kubescape minSeverity must be a string: low, medium, high or critical" -}}{{- end -}}
+{{- $minSeverity = $job.minSeverity -}}
+{{- end -}}
 {{- if and (ne $minSeverity "") (not (has $minSeverity (list "low" "medium" "high" "critical"))) -}}{{- fail "Kubescape minSeverity must be low, medium, high or critical" -}}{{- end -}}
 {{- if hasKey $job "excludeNamespaces" -}}
 {{- if not (kindIs "slice" $job.excludeNamespaces) -}}{{- fail "Kubescape excludeNamespaces must be a list of namespace names" -}}{{- end -}}
