@@ -76,9 +76,10 @@ Collector Pods inherit the chart's top-level `nodeSelector`, `tolerations` and
 affinity must also permit those nodes.
 
 Kubescape jobs accept `frameworks: [nsa]`, `[mitre]` or both; the default is both.
-The list must be nonempty and unique. For large clusters, use separately named
-jobs with the same immutable cluster scope when combined reports approach the
-`5000`-finding limit. Measure each report first; every restricted report remains
+The list must be nonempty and unique. Native incomplete Kubescape uploads split
+reports into requests within the `5000`-finding and `10 MiB` API limits. Every
+batch is validated before uploading starts; every delivery receipt must succeed.
+The tool, scope and scan timestamp stay the same. Every restricted report remains
 incomplete, so these jobs cannot resolve findings through absence.
 
 ### Collector failures
