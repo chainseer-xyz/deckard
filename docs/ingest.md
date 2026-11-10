@@ -202,6 +202,11 @@ deckard ingest --tool <name> --scope <scope> [--format <parser>] [--file <path> 
 - `--format` picks the parser and defaults to the tool name, so `--tool semgrep --format sarif`
   stores Semgrep's SARIF under `ext.semgrep`.
 - `--observed-at` defaults to now. Pass the scan's own time if you post later.
+- Native Kubescape reports with `--incomplete` automatically use bounded batches.
+  Input is limited to `64 MiB`; every request remains within `5000` findings and
+  `10 MiB`. All batches are validated before the first upload. A failed request
+  or invalid receipt fails the command, even if earlier batches were accepted.
+  Multi-batch `--dry-run` prints one JSON request per line.
 - The token is read from the variable named by `--token-env`; a `--url` with credentials is
   refused and the token is scrubbed from everything the command prints.
 - Exit codes: **0** posted and applied (a replay counts), **1** usage, input or validation

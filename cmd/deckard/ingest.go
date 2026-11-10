@@ -84,6 +84,9 @@ container-image vulnerability JSON bound by Metadata.RepoDigests. Pass --incompl
 for filtered or partial reports. CycloneDX requires an immutable OCI image PURL;
 SBOM imports always use complete=false: inventory is not a clean CVE scan.
 
+Native Kubescape --incomplete reports are split into bounded requests when needed.
+Multi-request --dry-run output is one JSON request per line.
+
 Exit codes: 0 posted and applied, 1 usage, input or validation error, 2 the server rejected the
 request or some items (or did not apply it as complete), 3 network error. See docs/ingest.md.
 `
@@ -193,6 +196,9 @@ func runIngest(args []string, stdout, stderr io.Writer) int {
 	if model.IsRuntimeTool(f.format) {
 		inputLimit = min(falco.MaxInputBytes, tetragon.MaxInputBytes)
 	}
+	if f.format == kubescape.Tool {
+		inputLimit = maxKubescapeInput
+	}
 	data, src, err := readIngestInput(f.file, inputLimit)
 	if err != nil {
 		return fail(ingestExitUsage, "%v", err)
@@ -220,6 +226,9 @@ func runIngest(args []string, stdout, stderr io.Writer) int {
 	}
 	req := &ingest.Request{Tool: f.tool, Scope: f.scope, Complete: !f.incomplete, ObservedAt: &observed, Findings: findings,
 		Artifacts: report.Artifacts, Relations: report.Relations}
+	if f.tool == kubescape.Tool && f.format == kubescape.Tool && f.incomplete {
+		return ingestKubescapeBatches(req, f, endpoint, src, token, out, errw)
+	}
 	if problems := ingest.Validate(req, ingest.Options{Now: time.Now()}); len(problems) > 0 {
 		return fail(ingestExitUsage, "the request would be rejected: %s", ingest.Summary(problems))
 	}
