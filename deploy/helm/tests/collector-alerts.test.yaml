@@ -39,9 +39,9 @@ tests:
         exp_alerts: &failed_alert
           - exp_labels: {collector: tetragon-events, namespace: deckard, severity: warning}
             exp_annotations:
-              summary: Deckard collector tetragon-events failed after its last successful ingest
-              description: "A scanner or upload failed. Inspect scanner logs first, then ingest logs if scanning succeeded. No accepted report from that run; report delivery does not prove complete coverage."
-              diagnostic_command: kubectl -n deckard get pods -l deckard.io/collector=tetragon-events
+              summary: Deckard collector tetragon-events failed
+              description: "Run at 1970-01-01 00:01:00 +0000 UTC has no accepted upload. Schedule: */5 * * * *. Check scanner logs, then ingest logs."
+              diagnostic_command: kubectl -n deckard describe cronjob deckard-collect-tetragon-events
               runbook_url: https://github.com/chainseer-xyz/deckard/blob/main/docs/collectors.md#collector-failures
 
   - name: one KSM exporter with multiple failure reasons still fires once
@@ -212,9 +212,9 @@ tests:
         exp_alerts:
           - exp_labels: {collector: tetragon-events, namespace: deckard, severity: warning}
             exp_annotations:
-              summary: Deckard collector tetragon-events has no recent successful ingest
-              description: "No accepted upload within 600 seconds. Schedule: */5 * * * *. Check the collector Pods and scanner/ingest logs. Existing findings remain stored; this alert does not assert remediation or complete coverage."
-              diagnostic_command: kubectl -n deckard get pods -l deckard.io/collector=tetragon-events
+              summary: Deckard collector tetragon-events is stale
+              description: "No accepted upload for 25m 59s. Schedule: */5 * * * *. Check scanner logs, then ingest logs."
+              diagnostic_command: kubectl -n deckard describe cronjob deckard-collect-tetragon-events
               runbook_url: https://github.com/chainseer-xyz/deckard/blob/main/docs/collectors.md#collector-failures
 
   - name: suspended collectors do not emit stale-delivery alerts
