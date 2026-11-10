@@ -101,8 +101,8 @@ func TestTopologyRuntimeImageIDRequiresRepositoryManifestReference(t *testing.T)
 			if got := has(d, model.KindContainerImage, topologyDigest); got != tc.want {
 				t.Errorf("immutable image exists=%v, want %v", got, tc.want)
 			}
-			if d.Partial == tc.want {
-				t.Errorf("running Pod with unsupported runtime identity must be partial; Partial=%v supported=%v", d.Partial, tc.want)
+			if d.Partial || (len(d.Warnings) > 0) == tc.want || (len(d.PreserveImageWorkloads) > 0) == tc.want {
+				t.Errorf("manifest gap must retain only this workload's image edges: %+v", d)
 			}
 			workload, _ := topologyAsset(d, model.KindWorkload, "web", "front-1")
 			if got := hasRel(d, workload.Kind, workload.Key, model.KindContainerImage, topologyDigest, model.RelRuns); got != tc.want {
@@ -142,7 +142,7 @@ func TestTopologyInitAndEphemeralRuntimeImagesDeduplicateByDigest(t *testing.T) 
 	}
 }
 
-func TestTopologyPendingPodWithoutImageIsNormalButRunningStatusGapIsPartial(t *testing.T) {
+func TestTopologyPendingPodWithoutImageIsNormalButRunningStatusGapRetainsImageEdges(t *testing.T) {
 	for _, phase := range []corev1.PodPhase{corev1.PodPending, corev1.PodRunning} {
 		t.Run(string(phase), func(t *testing.T) {
 			pod := topologyPod("web", "front-1", "pod-uid")
@@ -151,7 +151,7 @@ func TestTopologyPendingPodWithoutImageIsNormalButRunningStatusGapIsPartial(t *t
 			if err != nil {
 				t.Fatal(err)
 			}
-			if d.Partial != (phase == corev1.PodRunning) || has(d, model.KindContainerImage, topologyDigest) {
+			if d.Partial || len(d.PreserveImageWorkloads) != 1 || (len(d.Warnings) > 0) != (phase == corev1.PodRunning) || has(d, model.KindContainerImage, topologyDigest) {
 				t.Fatalf("phase=%s completeness=%v images=%+v", phase, d.Partial, d.Assets)
 			}
 		})

@@ -56,15 +56,29 @@ func collectAssets(rows pgx.Rows) ([]model.Asset, error) {
 // defaultDiscoverySource owns assets handed to AddDiscovered without a source.
 const defaultDiscoverySource = "discovered"
 
-func (s *Store) ApplySnapshot(ctx context.Context, source string, assets []store.AssetUpsert, rels []model.RelationInput, now time.Time) (store.InventoryDiff, error) {
-	return s.applySnapshot(ctx, source, assets, rels, now, true)
+func (s *Store) ApplySnapshot(ctx context.Context, source string, assets []store.AssetUpsert, rels []model.RelationInput, now time.Time, opts ...store.SnapshotOptions) (store.InventoryDiff, error) {
+	present := make(map[string]bool, len(assets))
+	for _, asset := range assets {
+		if asset.Kind == model.KindWorkload {
+			present[asset.Key] = true
+		}
+	}
+	var preserve []string
+	for _, opt := range opts {
+		for _, key := range opt.PreserveImageWorkloads {
+			if present[key] {
+				preserve = append(preserve, key)
+			}
+		}
+	}
+	return s.applySnapshot(ctx, source, assets, rels, now, true, preserve)
 }
 
 func (s *Store) UpsertSnapshot(ctx context.Context, source string, assets []store.AssetUpsert, rels []model.RelationInput, now time.Time) (store.InventoryDiff, error) {
-	return s.applySnapshot(ctx, source, assets, rels, now, false)
+	return s.applySnapshot(ctx, source, assets, rels, now, false, nil)
 }
 
-func (s *Store) applySnapshot(ctx context.Context, source string, assets []store.AssetUpsert, rels []model.RelationInput, now time.Time, remove bool) (store.InventoryDiff, error) {
+func (s *Store) applySnapshot(ctx context.Context, source string, assets []store.AssetUpsert, rels []model.RelationInput, now time.Time, remove bool, preserve []string) (store.InventoryDiff, error) {
 	var diff store.InventoryDiff
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		if err := lockInventoryIdentity(ctx, tx); err != nil {
@@ -75,7 +89,7 @@ func (s *Store) applySnapshot(ctx context.Context, source string, assets []store
 			return err
 		}
 		diff = d
-		if err := syncRelations(ctx, tx, relationReporter{name: "source:" + source}, rels, remove); err != nil {
+		if err := syncRelations(ctx, tx, relationReporter{name: "source:" + source, keepArtifacts: true, keepImageWorkloads: preserve}, rels, remove); err != nil {
 			return err
 		}
 		if !remove {
@@ -93,7 +107,8 @@ func (s *Store) applySnapshot(ctx context.Context, source string, assets []store
 		// stopped but another source still reports it, ownership moves to that
 		// source, projecting only that source's retained facts.
 		rows, err := tx.Query(ctx, `SELECT `+assetCols+` FROM assets a
-			WHERE $1 = ANY(a.reporters) AND a.removed_at IS NULL AND a.id <> ALL($2::bigint[]) ORDER BY a.id FOR UPDATE`, source, seen)
+			WHERE $1 = ANY(a.reporters) AND a.removed_at IS NULL AND a.id <> ALL($2::bigint[])
+			AND a.kind NOT IN ('container_image', 'package') ORDER BY a.id FOR UPDATE`, source, seen)
 		if err != nil {
 			return err
 		}
@@ -140,9 +155,8 @@ func (s *Store) AddDiscovered(ctx context.Context, assets []store.AssetUpsert, r
 }
 
 // removeAssets marks the given live assets removed, records asset_removed
-// events and resolves their open/acknowledged findings, all in tx.
-// Suppressed and false_positive findings keep their status (the operator's
-// decision survives) but ListFindings hides them while the asset is removed.
+// events and resolves only network assets' open/acknowledged findings, all in tx.
+// Metadata findings retain their status and remain visible after retirement.
 func removeAssets(ctx context.Context, tx pgx.Tx, in []model.Asset, now time.Time) ([]model.Asset, error) {
 	if len(in) == 0 {
 		return nil, nil
@@ -276,8 +290,10 @@ func resolveFindings(ctx context.Context, tx pgx.Tx, ids []int64, now time.Time)
 	if len(ids) == 0 {
 		return nil
 	}
-	fr, err := tx.Query(ctx, `UPDATE findings SET status = 'resolved', resolved_at = $2, suppressed_until = NULL, suppression_note = ''
-		WHERE asset_id = ANY($1::bigint[]) AND status IN ('open', 'acknowledged') RETURNING id`, ids, now)
+	fr, err := tx.Query(ctx, `UPDATE findings f SET status = 'resolved', resolved_at = $2, suppressed_until = NULL, suppression_note = ''
+		WHERE asset_id = ANY($1::bigint[]) AND status IN ('open', 'acknowledged')
+		AND EXISTS (SELECT 1 FROM assets a WHERE a.id = f.asset_id AND a.kind IN ('zone', 'hostname', 'ip', 'service', 'url'))
+		AND f.check_name NOT IN ('ext.falco', 'ext.tetragon') RETURNING f.id`, ids, now)
 	if err != nil {
 		return err
 	}

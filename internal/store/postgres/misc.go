@@ -230,8 +230,8 @@ func (s *Store) Stats(ctx context.Context) (store.Stats, error) {
 		{&st.AssetsByKind, `SELECT kind, count(*) FROM assets WHERE removed_at IS NULL GROUP BY kind`},
 		{&st.AssetsBySource, `SELECT source, count(*) FROM assets WHERE removed_at IS NULL GROUP BY source`},
 		{&st.AssetsByScope, `SELECT scope, count(*) FROM assets WHERE removed_at IS NULL GROUP BY scope`},
-		{&st.FindingsBySev, `SELECT severity, count(*) FROM findings f JOIN assets a ON a.id = f.asset_id WHERE f.status = 'open' AND a.removed_at IS NULL GROUP BY severity`},
-		{&st.FindingsByCheck, `SELECT check_name, count(*) FROM findings f JOIN assets a ON a.id = f.asset_id WHERE f.status = 'open' AND a.removed_at IS NULL GROUP BY check_name`},
+		{&st.FindingsBySev, `SELECT severity, count(*) FROM findings f JOIN assets a ON a.id = f.asset_id WHERE f.status = 'open' AND ` + findingAssetVisible + ` GROUP BY severity`},
+		{&st.FindingsByCheck, `SELECT check_name, count(*) FROM findings f JOIN assets a ON a.id = f.asset_id WHERE f.status = 'open' AND ` + findingAssetVisible + ` GROUP BY check_name`},
 	}
 	for _, g := range groups {
 		if err := s.countBy(ctx, g.sql, *g.dst); err != nil {

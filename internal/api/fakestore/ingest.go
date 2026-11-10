@@ -261,7 +261,7 @@ func (s *Store) ListIngestScopes(context.Context) ([]store.IngestScope, error) {
 		sc.Open = 0
 		for _, f := range s.Findings {
 			a := s.Assets[f.AssetID]
-			if f.Check == model.IngestCheck(sc.Tool) && f.IngestScope == sc.Scope && f.Status == model.StatusOpen && a.RemovedAt == nil {
+			if f.Check == model.IngestCheck(sc.Tool) && f.IngestScope == sc.Scope && f.Status == model.StatusOpen && findingAssetVisible(a, f) {
 				sc.Open++
 			}
 		}

@@ -421,6 +421,8 @@ type builder struct {
 	rels      map[model.RelationInput]bool
 	relOrder  []model.RelationInput
 	partial   []string
+	warnings  []string
+	imageGaps []string
 	exposures []serviceExposure
 }
 
@@ -465,7 +467,8 @@ func (b *builder) rel(fk model.AssetKind, fkey string, tk model.AssetKind, tkey 
 }
 
 func (b *builder) result() *source.Discovery {
-	d := &source.Discovery{Relations: b.relOrder, Partial: len(b.partial) > 0, PartialReasons: b.partial}
+	d := &source.Discovery{Relations: b.relOrder, Partial: len(b.partial) > 0, PartialReasons: b.partial,
+		Warnings: b.warnings, PreserveImageWorkloads: b.imageGaps}
 	for _, id := range b.order {
 		d.Assets = append(d.Assets, *b.assets[id])
 	}

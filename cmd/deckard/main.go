@@ -32,7 +32,8 @@ Commands:
   serve             run the API, scheduler and workers
   migrate           apply database migrations and exit
   config validate   load and validate the configuration
-  sync              run one inventory sync and exit
+  sync [--source <name>] [--accept-shrink]
+                    run one inventory sync and exit; shrink acceptance requires one explicit source
   scan [--no-update] run one scan pass and exit (refreshes nuclei templates and reference data first; --no-update skips)
   findings          print current findings (--min-severity, --status, --format table|json)
   ingest            post an external scanner's output (prowler, kubescape, trufflehog, gitleaks,

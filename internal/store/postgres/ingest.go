@@ -326,7 +326,7 @@ func refProblem(it store.IngestItem, a model.Asset, found bool) string {
 func (s *Store) ListIngestScopes(ctx context.Context) ([]store.IngestScope, error) {
 	rows, err := s.pool.Query(ctx, `SELECT s.tool, s.scope, s.created_at, s.last_at, s.complete_at, s.observed_at,
 			(SELECT count(*) FROM findings f JOIN assets a ON a.id = f.asset_id
-			  WHERE f.check_name = $1 || s.tool AND f.ingest_scope = s.scope AND f.status = 'open' AND a.removed_at IS NULL)
+			  WHERE f.check_name = $1 || s.tool AND f.ingest_scope = s.scope AND f.status = 'open' AND `+findingAssetVisible+`)
 		FROM ingest_scopes s ORDER BY s.tool, s.created_at, s.scope`, model.IngestCheckPrefix)
 	if err != nil {
 		return nil, err
