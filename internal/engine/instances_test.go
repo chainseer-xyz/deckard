@@ -221,17 +221,15 @@ func TestReclaimUnblocksUniqueSync(t *testing.T) {
 		t.Errorf("syncs %d, reclaimed %d", synced, reclaimedN)
 	}
 
-	// The periodic sync may have queued behind the orphan; once nothing live
-	// is left for the source, a new sync is accepted, not deduplicated.
-	eventually(t, "no live sync job", func() bool {
-		var n int
-		_ = pool.QueryRow(ctx, `SELECT count(*) FROM river_job WHERE kind = $1 AND state NOT IN ('completed','cancelled','discarded')`, KindSyncSource).Scan(&n)
-		return n == 0
+	// The startup periodic sync can enqueue between a database check and an
+	// insert. Wait for an actual accepted insert after that sync completes.
+	eventually(t, "sync accepted after reclaim", func() bool {
+		res, err := e.client.Insert(ctx, SyncSourceArgs{Source: "fake"}, nil)
+		if err != nil {
+			t.Fatalf("enqueue sync after reclaim: %v", err)
+		}
+		return !res.UniqueSkippedAsDuplicate
 	})
-	res, err := e.client.Insert(ctx, SyncSourceArgs{Source: "fake"}, nil)
-	if err != nil || res.UniqueSkippedAsDuplicate {
-		t.Fatalf("sync not enqueueable after reclaim: %+v %v", res, err)
-	}
 }
 
 // TestInstanceLifecycle: Start registers the River client id River records in
