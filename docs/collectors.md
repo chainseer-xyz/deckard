@@ -86,9 +86,12 @@ incomplete, so these jobs cannot resolve findings through absence.
 
 Check collection, upload and report freshness separately. Application readiness
 only proves that the service can reach its database; it does not prove collection.
-Find the collector Pods with the alert's `diagnostic_command`. Inspect the failed
-Pod's `scanner` logs first. If scanning succeeded, inspect its `ingest` logs and
-validate the delivery receipt. A report must be accepted, not merely return HTTP `200`.
+Check the CronJob with the alert's `diagnostic_command`. Inspect the run's
+`scanner` logs first. If scanning succeeded, inspect its `ingest` logs and validate
+the delivery receipt. If Pods have expired, use the run timestamp to query retained
+collector logs.
+
+A report must be accepted, not merely return HTTP `200`.
 
 An `unknown flag` error means the pinned scanner does not support the rendered
 command. Validate every rendered argument against that exact binary before an
