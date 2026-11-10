@@ -75,7 +75,7 @@ func (s *Store) Ping(context.Context) error {
 	return s.PingErr
 }
 
-func (s *Store) ApplySnapshot(context.Context, string, []store.AssetUpsert, []model.RelationInput, time.Time) (store.InventoryDiff, error) {
+func (s *Store) ApplySnapshot(context.Context, string, []store.AssetUpsert, []model.RelationInput, time.Time, ...store.SnapshotOptions) (store.InventoryDiff, error) {
 	return store.InventoryDiff{}, nil
 }
 
@@ -348,6 +348,10 @@ func (s *Store) ListFindings(_ context.Context, f store.FindingFilter) ([]model.
 	defer s.mu.Unlock()
 	var out []model.Finding
 	for _, x := range s.Findings {
+		a := s.Assets[x.AssetID]
+		if !f.IncludeRemovedAssets && f.AssetID == 0 && !findingAssetVisible(a, x) && x.Status != model.StatusResolved {
+			continue
+		}
 		if len(f.Statuses) > 0 {
 			ok := false
 			for _, st := range f.Statuses {
@@ -373,6 +377,10 @@ func (s *Store) ListFindings(_ context.Context, f store.FindingFilter) ([]model.
 	sort.Slice(out, func(i, j int) bool { return findingLess(out[i], out[j], f) })
 	lo, hi := page(len(out), f.Limit, f.Offset)
 	return out[lo:hi], len(out), nil
+}
+
+func findingAssetVisible(a model.Asset, f model.Finding) bool {
+	return a.RemovedAt == nil || !model.NetworkKind(a.Kind) || model.IsRuntimeTool(strings.TrimPrefix(f.Check, model.IngestCheckPrefix))
 }
 
 func (s *Store) ChangeFindingStatus(_ context.Context, id int64, c store.StatusChange, now time.Time) error {

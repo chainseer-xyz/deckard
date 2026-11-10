@@ -11,8 +11,10 @@ import (
 )
 
 type relationReporter struct {
-	name     string
-	parentID *int64
+	name               string
+	parentID           *int64
+	keepArtifacts      bool
+	keepImageWorkloads []string
 }
 
 func checkRelationReporter(parentID int64, origin string) relationReporter {
@@ -55,7 +57,15 @@ func syncRelations(ctx context.Context, tx pgx.Tx, reporter relationReporter, re
 	var from, to []int64
 	var types []string
 	if replace {
-		rows, err := tx.Query(ctx, `DELETE FROM relation_reporters WHERE reporter = $1 RETURNING from_id, to_id, type`, reporter.name)
+		rows, err := tx.Query(ctx, `DELETE FROM relation_reporters p WHERE reporter = $1
+			AND NOT ($2 AND p.type = 'contains' AND EXISTS (
+				SELECT 1 FROM assets f, assets t WHERE f.id = p.from_id AND t.id = p.to_id
+				AND f.kind IN ('container_image', 'package') AND t.kind IN ('container_image', 'package')))
+			AND NOT (p.type = 'runs' AND EXISTS (
+				SELECT 1 FROM assets f, assets t WHERE f.id = p.from_id AND t.id = p.to_id
+				AND f.kind = 'workload' AND t.kind = 'container_image'
+				AND f.key = ANY(COALESCE($3::text[], '{}'))))
+			RETURNING from_id, to_id, type`, reporter.name, reporter.keepArtifacts, reporter.keepImageWorkloads)
 		if err != nil {
 			return err
 		}

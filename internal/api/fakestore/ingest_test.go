@@ -1,6 +1,7 @@
 package fakestore
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -10,8 +11,8 @@ import (
 )
 
 // seed is a minimal ApplySnapshot for the ingest contract: it upserts the
-// source's assets and marks its other assets removed (resolving their open
-// findings, as the postgres store does).
+// source's assets and marks its other non-artifact assets removed (resolving
+// only network findings, as the postgres store does).
 func seed(t *testing.T, st store.Store, source string, assets []store.AssetUpsert, now time.Time) {
 	t.Helper()
 	s := st.(*Store)
@@ -33,14 +34,14 @@ func seed(t *testing.T, st store.Store, source string, assets []store.AssetUpser
 			seen[a.ID] = true
 		}
 		for id, a := range s.Assets {
-			if a.Source != source || seen[id] || a.RemovedAt != nil {
+			if a.Source != source || seen[id] || a.RemovedAt != nil || a.Kind == model.KindContainerImage || a.Kind == model.KindPackage {
 				continue
 			}
 			removed := now
 			a.RemovedAt = &removed
 			s.Assets[id] = a
 			for fid, f := range s.Findings {
-				if f.AssetID == id && (f.Status == model.StatusOpen || f.Status == model.StatusAcknowledged) {
+				if f.AssetID == id && model.NetworkKind(a.Kind) && !model.IsRuntimeTool(strings.TrimPrefix(f.Check, model.IngestCheckPrefix)) && (f.Status == model.StatusOpen || f.Status == model.StatusAcknowledged) {
 					f.Status, f.ResolvedAt = model.StatusResolved, &removed
 					s.Findings[fid] = f
 				}

@@ -20,6 +20,12 @@ type Discovery struct {
 	Assets    []model.AssetInput
 	Relations []model.RelationInput
 
+	// PreserveImageWorkloads retains previous runs edges only for these exact,
+	// present workload keys whose runtime manifest identity is unknown.
+	PreserveImageWorkloads []string
+	// Warnings report metadata gaps that do not invalidate asset enumeration.
+	Warnings []string
+
 	// Partial is set when a sub-feature was skipped because the upstream
 	// refused or lacked it (403, 404, "not enabled"), so the result may lack
 	// assets that feature would have produced. The inventory still upserts a

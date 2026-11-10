@@ -64,6 +64,11 @@ const (
 // changed.
 var ErrSuspiciousShrink = errors.New("suspicious shrink")
 
+// SyncOptions applies to one explicit operator invocation, never scheduled syncs.
+type SyncOptions struct {
+	AcceptShrink bool
+}
+
 // Service syncs sources into the store and maintains classification state.
 type Service struct {
 	st  store.Store
@@ -111,6 +116,12 @@ func New(st store.Store, cls Classifier, log *slog.Logger, opts ...Option) *Serv
 // cases the classifier retains previous zones and unreported IP claims. A
 // present IP's current ownership evidence replaces its previous claim.
 func (s *Service) Sync(ctx context.Context, src source.Source) (store.InventoryDiff, error) {
+	return s.SyncWithOptions(ctx, src, SyncOptions{})
+}
+
+// SyncWithOptions accepts an operator-reviewed shrink only after complete,
+// successful discovery. A partial accepted-shrink invocation writes no assets.
+func (s *Service) SyncWithOptions(ctx context.Context, src source.Source, opts SyncOptions) (store.InventoryDiff, error) {
 	s.syncMu.RLock()
 	defer s.syncMu.RUnlock()
 	start := s.now()
@@ -141,12 +152,15 @@ func (s *Service) Sync(ctx context.Context, src source.Source) (store.InventoryD
 	if err != nil {
 		return fail(fmt.Errorf("discover %s: %w", name, err))
 	}
+	if opts.AcceptShrink && d.Partial {
+		return fail(fmt.Errorf("accept shrink %s: discovery is partial; no assets changed", name))
+	}
 
 	// Decide up front whether this snapshot may remove anything.
 	removals, refused := true, ""
 	if d.Partial {
 		removals = false
-	} else if s.shrinkFrac > 0 {
+	} else if !opts.AcceptShrink && s.shrinkFrac > 0 {
 		var err error
 		if refused, err = s.shrinkVerdict(ctx, name, d.Assets); err != nil {
 			return fail(fmt.Errorf("shrink check %s: %w", name, err))
@@ -182,7 +196,7 @@ func (s *Service) Sync(ctx context.Context, src source.Source) (store.InventoryD
 	ups := s.upserts(name, d.Assets)
 	var diff store.InventoryDiff
 	if removals {
-		diff, err = s.st.ApplySnapshot(ctx, name, ups, d.Relations, s.now())
+		diff, err = s.st.ApplySnapshot(ctx, name, ups, d.Relations, s.now(), store.SnapshotOptions{PreserveImageWorkloads: d.PreserveImageWorkloads})
 	} else {
 		diff, err = s.st.UpsertSnapshot(ctx, name, ups, d.Relations, s.now())
 	}
@@ -207,6 +221,9 @@ func (s *Service) Sync(ctx context.Context, src source.Source) (store.InventoryD
 		status.Warning = "partial discovery, removals skipped: " + strings.Join(d.PartialReasons, "; ")
 		s.log.Warn("inventory: partial discovery; removals skipped", "source", name, "reasons", d.PartialReasons)
 	}
+	if len(d.Warnings) > 0 {
+		s.log.Warn("inventory: discovery metadata gaps", "source", name, "warnings", d.Warnings)
+	}
 	if err := s.st.RecordSync(ctx, status); err != nil {
 		s.log.Error("inventory: record sync", "source", name, "err", err)
 	}
@@ -229,15 +246,21 @@ func (s *Service) shrinkVerdict(ctx context.Context, name string, assets []model
 	for _, a := range assets {
 		seen[key{a.Kind, a.Key}] = true
 	}
-	missing := 0
+	missing, removable := 0, 0
 	for _, a := range existing {
+		// Immutable artifact history is additive, so absent artifacts are not
+		// candidates for removal and cannot affect the shrink baseline.
+		if a.Kind == model.KindContainerImage || a.Kind == model.KindPackage {
+			continue
+		}
+		removable++
 		if !seen[key{a.Kind, a.Key}] {
 			missing++
 		}
 	}
-	if missing > s.shrinkMin && float64(missing) > s.shrinkFrac*float64(len(existing)) {
+	if missing > s.shrinkMin && float64(missing) > s.shrinkFrac*float64(removable) {
 		return fmt.Sprintf("discovery would remove %d of %d assets (more than %.0f%% and more than %d)",
-			missing, len(existing), s.shrinkFrac*100, s.shrinkMin), nil
+			missing, removable, s.shrinkFrac*100, s.shrinkMin), nil
 	}
 	return "", nil
 }

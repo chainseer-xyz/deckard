@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/chainseer-xyz/deckard/internal/config"
@@ -28,7 +29,9 @@ func TestTopologyUnresolvedRuntimeIdentityCannotRetirePreviousImageEdge(t *testi
 	}
 	inv := inventory.New(st, guard, log)
 	pod := topologyPod("web", "front-1", "pod-uid")
-	cs := topologyClient("cluster-a", pod)
+	oldPod := topologyPod("web", "retired-1", "old-pod-uid")
+	oldPod.Status.ContainerStatuses[0].ImageID = "registry.example.com/team/old@sha256:" + strings.Repeat("c", 64)
+	cs := topologyClient("cluster-a", pod, oldPod)
 	src := NewWithClusters("k8s-topology", []Cluster{{Name: "prod", Client: cs}}, log, WithTopology(true))
 	if _, err := inv.Sync(ctx, src); err != nil {
 		t.Fatal(err)
@@ -49,6 +52,13 @@ func TestTopologyUnresolvedRuntimeIdentityCannotRetirePreviousImageEdge(t *testi
 		}
 	}
 	assertPreviousImage()
+	oldWorkload, err := st.GetAssetByKey(ctx, model.KindWorkload, resourceKey("uid:cluster-a", "web", "pod", "old-pod-uid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cs.CoreV1().Pods("web").Delete(ctx, oldPod.Name, metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
 	pod.Status.ContainerStatuses[0].ImageID = "containerd://sha256:" + strings.Repeat("b", 64)
 	if _, err := cs.CoreV1().Pods("web").UpdateStatus(ctx, pod, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
@@ -58,7 +68,23 @@ func TestTopologyUnresolvedRuntimeIdentityCannotRetirePreviousImageEdge(t *testi
 			t.Fatal(err)
 		}
 		assertPreviousImage()
+		retired, err := st.GetAsset(ctx, oldWorkload.ID)
+		if err != nil || retired.RemovedAt == nil {
+			t.Fatalf("unrelated retired Pod retained by runtime image gap: %+v %v", retired, err)
+		}
 	}
+	// Missing status in another phase is still not replacement evidence for
+	// the same exact Pod UID. Normal Pending Pods need no warning or Partial.
+	statuses := pod.Status.ContainerStatuses
+	pod.Status.Phase, pod.Status.ContainerStatuses = corev1.PodPending, nil
+	if _, err := cs.CoreV1().Pods("web").UpdateStatus(ctx, pod, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := inv.Sync(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+	assertPreviousImage()
+	pod.Status.Phase, pod.Status.ContainerStatuses = corev1.PodRunning, statuses
 	// A later confirmed manifest is real replacement evidence, not a gap.
 	replacement := "sha256:" + strings.Repeat("b", 64)
 	pod.Status.ContainerStatuses[0].ImageID = "registry.example.com/team/app@" + replacement
@@ -69,8 +95,12 @@ func TestTopologyUnresolvedRuntimeIdentityCannotRetirePreviousImageEdge(t *testi
 		t.Fatal(err)
 	}
 	current, err := st.GetAsset(ctx, image.ID)
-	if err != nil || current.RemovedAt == nil {
-		t.Fatalf("confirmed replacement did not retire source-only old image: %+v %v", current, err)
+	if err != nil || current.RemovedAt != nil {
+		t.Fatalf("confirmed replacement retired immutable image history: %+v %v", current, err)
+	}
+	oldEdges, err := st.Edges(ctx, image.ID)
+	if err != nil || len(oldEdges) != 0 {
+		t.Fatalf("confirmed replacement retained obsolete runs edge: %+v %v", oldEdges, err)
 	}
 	next, err := st.GetAssetByKey(ctx, model.KindContainerImage, replacement)
 	if err != nil || next.RemovedAt != nil {

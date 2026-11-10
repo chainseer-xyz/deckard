@@ -24,6 +24,28 @@ replicas. A remote six-hour collector is not stale after thirty minutes. Never-s
 configured sources remain visible and alert separately. Collector report freshness
 does not certify complete scanner coverage or lossless runtime telemetry.
 
+## Recovering a suspicious inventory shrink
+
+A complete source snapshot normally refuses unusually large removals. Repeated
+partial Kubernetes snapshots can retain many historical Pod UIDs, so a later
+complete enumeration can exceed that guard. API/list failures remain partial;
+unknown runtime image identities retain only the affected present workloads'
+previous image edges and produce an operator log warning.
+
+Upgrade every inventory writer before recovery. Confirm the source's API access
+and intended inventory scope, then run one native sync with the normal config:
+
+```sh
+deckard sync --config /etc/deckard/config.yaml --source example-cluster --accept-shrink
+```
+
+`--accept-shrink` requires exactly one configured source. It accepts the shrink
+only after successful, complete discovery; partial or failed discovery changes
+no assets in this invocation. Scheduled syncs keep the normal shrink guard.
+This command retires absent metadata, preserves other reporters' facts and exact
+asset IDs, and retains image/package inventory and immutable contents. Metadata
+retirement never resolves or hides scanner findings or runtime incidents.
+
 ## Upgrading source-attributed inventory facts
 
 Migration 12 adds source-attributed facts. Stop old inventory writers before

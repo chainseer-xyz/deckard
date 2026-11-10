@@ -14,7 +14,9 @@ import (
 	"github.com/chainseer-xyz/deckard/internal/app"
 	"github.com/chainseer-xyz/deckard/internal/config"
 	"github.com/chainseer-xyz/deckard/internal/engine"
+	"github.com/chainseer-xyz/deckard/internal/inventory"
 	"github.com/chainseer-xyz/deckard/internal/logging"
+	"github.com/chainseer-xyz/deckard/internal/source"
 )
 
 // commonFlagsWith parses --config, loads the configuration and registers any
@@ -48,6 +50,10 @@ func withAppFlags(name string, args []string, extra func(*flag.FlagSet), stdout,
 	if cfg == nil {
 		return code
 	}
+	return withConfig(name, cfg, stdout, stderr, fn)
+}
+
+func withConfig(name string, cfg *config.Config, stdout, stderr io.Writer, fn func(context.Context, *app.App, io.Writer) error) int {
 	log := logging.New(cfg.Log, stdout)
 	// Libraries (River's migrator, the stdlib log package) write through the
 	// default logger; make it the same JSON handler so stdout is uniformly JSON.
@@ -86,15 +92,41 @@ func runMigrate(args []string, stdout, stderr io.Writer) int {
 	})
 }
 
-// runSync performs one inventory sync of every source and prints a summary.
+// runSync performs one inventory sync of the selected source(s).
 func runSync(args []string, stdout, stderr io.Writer) int {
-	return withApp("sync", args, stdout, stderr, func(ctx context.Context, a *app.App, out io.Writer) error {
+	var sourceName string
+	var acceptShrink bool
+	cfg, code := commonFlagsWith("sync", args, stderr, func(fs *flag.FlagSet) {
+		fs.StringVar(&sourceName, "source", "", "sync only this configured source")
+		fs.BoolVar(&acceptShrink, "accept-shrink", false, "accept a complete source's suspicious shrink for this invocation (requires --source)")
+	})
+	if cfg == nil {
+		return code
+	}
+	if acceptShrink && sourceName == "" {
+		_, _ = fmt.Fprintln(stderr, "deckard: --accept-shrink requires one explicit --source")
+		return 2
+	}
+	return withConfig("sync", cfg, stdout, stderr, func(ctx context.Context, a *app.App, out io.Writer) error {
+		sources := a.Sources()
+		if sourceName != "" {
+			var selected []source.Source
+			for _, src := range sources {
+				if src.Name() == sourceName {
+					selected = append(selected, src)
+				}
+			}
+			if len(selected) != 1 {
+				return fmt.Errorf("--source %q must select exactly one configured source", sourceName)
+			}
+			sources = selected
+		}
 		if err := a.Migrate(ctx); err != nil {
 			return err
 		}
 		var failed int
-		for _, src := range a.Sources() {
-			d, err := a.Inventory().Sync(ctx, src)
+		for _, src := range sources {
+			d, err := a.Inventory().SyncWithOptions(ctx, src, inventory.SyncOptions{AcceptShrink: acceptShrink})
 			if err != nil {
 				failed++
 				_, _ = fmt.Fprintf(out, "%s: FAILED: %v\n", src.Name(), err)
@@ -104,7 +136,7 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 				src.Name(), len(d.Added), len(d.Changed), len(d.Removed), len(d.Revived))
 		}
 		if failed > 0 {
-			return fmt.Errorf("%d of %d sources failed", failed, len(a.Sources()))
+			return fmt.Errorf("%d of %d sources failed", failed, len(sources))
 		}
 		return nil
 	})

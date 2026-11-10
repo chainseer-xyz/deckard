@@ -32,6 +32,13 @@ type InventoryDiff struct {
 	Ignored int
 }
 
+// SnapshotOptions limits relationship replacement within a complete snapshot.
+type SnapshotOptions struct {
+	// PreserveImageWorkloads retains runs edges for exact present workload keys
+	// with unknown runtime image identities. It grants no ownership or new edges.
+	PreserveImageWorkloads []string
+}
+
 // IsDerivedSource reports whether an asset source label marks a derived asset,
 // one discovered by a check, port scan or expansion rather than reported by an
 // inventory source (cloudflare, route53, gcpdns, aws, kubernetes, static). Derived
@@ -194,7 +201,7 @@ type IngestScope struct {
 	LastAt     time.Time // last accepted request (any kind)
 	CompleteAt time.Time // last request applied as complete; zero if never
 	ObservedAt time.Time // newest ObservedAt accepted
-	Open       int       // open findings of (Tool, Scope) on live assets
+	Open       int       // visible open findings of (Tool, Scope), including retired metadata
 }
 
 // FindingFilter narrows ListFindings. Zero values mean "any".
@@ -215,11 +222,10 @@ type FindingFilter struct {
 	Query          string
 	Limit          int
 	Offset         int
-	// IncludeRemovedAssets keeps unresolved findings (open, acknowledged,
-	// suppressed, false_positive) of removed assets in the result. The zero
-	// value hides them, so the dispatcher's open list never re-alerts on a
-	// removed asset. Resolved findings (history) are always listed, and a
-	// filter naming an AssetID is never narrowed.
+	// IncludeRemovedAssets also keeps unresolved findings of removed network
+	// assets. Metadata findings and runtime incidents remain visible regardless
+	// of retirement. Resolved history is always listed, and an AssetID filter
+	// is never narrowed.
 	IncludeRemovedAssets bool
 }
 
@@ -328,8 +334,10 @@ type Store interface {
 	Close()
 
 	// ApplySnapshot writes a complete, successful sync of one source: upserts
-	// assets, replaces that source's reported relations, and removes unseen assets.
-	ApplySnapshot(ctx context.Context, source string, assets []AssetUpsert, rels []model.RelationInput, now time.Time) (InventoryDiff, error)
+	// assets, replaces that source's reported relations, and retires unseen assets.
+	// Image/package inventory and immutable contents stay additive. Metadata
+	// retirement never resolves or hides its findings.
+	ApplySnapshot(ctx context.Context, source string, assets []AssetUpsert, rels []model.RelationInput, now time.Time, opts ...SnapshotOptions) (InventoryDiff, error)
 	// UpsertSnapshot is ApplySnapshot without the removal step: it upserts the
 	// source's assets and relations (same ownership rules, reporter sets kept
 	// intact) but marks nothing removed. Used for partial or suspect syncs.
@@ -342,7 +350,8 @@ type Store interface {
 	// (assetID, origin). Children previously registered for the same
 	// (assetID, origin) that are absent now lose that registration; a derived
 	// child no (parent, origin) observes any more is marked removed, its
-	// relations are deleted and its findings resolved. Source-owned (claimed)
+	// relations are deleted and its network findings resolved. Metadata findings
+	// keep their status and visibility. Source-owned (claimed)
 	// children are never removed here.
 	// Relationships replace the (assetID, origin) set even when both endpoints
 	// remain live through another reporter.

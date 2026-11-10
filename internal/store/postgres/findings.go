@@ -273,6 +273,10 @@ func findingGroupColumn(by string) string {
 	}
 }
 
+// Metadata retirement cannot prove that its findings stopped applying.
+// Use the same visibility rule in lists, groups, dashboard and ingest counts.
+const findingAssetVisible = "(a.removed_at IS NULL OR a.kind NOT IN ('zone', 'hostname', 'ip', 'service', 'url') OR f.check_name IN ('ext.falco', 'ext.tetragon'))"
+
 func findingWhere(f store.FindingFilter) where {
 	var w where
 	if len(f.Statuses) > 0 {
@@ -304,7 +308,7 @@ func findingWhere(f store.FindingFilter) where {
 		w.add(`(f.title ILIKE ? ESCAPE '\' OR a.key ILIKE ? ESCAPE '\')`, "%"+likeEscape(f.Query)+"%", "%"+likeEscape(f.Query)+"%")
 	}
 	if !f.IncludeRemovedAssets && f.AssetID == 0 {
-		w.add("(a.removed_at IS NULL OR f.status = 'resolved')")
+		w.add("(" + findingAssetVisible + " OR f.status = 'resolved')")
 	}
 	if f.GroupKey != nil {
 		if col := findingGroupColumn(f.GroupBy); col != "" {

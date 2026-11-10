@@ -87,13 +87,16 @@ func (s *Source) discoverTopology(ctx context.Context, b *builder, c Cluster, se
 			b.asset(model.KindWorkload, ownerKey, ownerAttrs)
 			b.rel(model.KindWorkload, ownerKey, model.KindWorkload, key, model.RelContains)
 		}
-		unresolvedImages += recordRuntimeImages(b, pod, key)
+		unknown, gap := recordRuntimeImages(b, pod, key)
+		unresolvedImages += unknown
+		if gap {
+			b.imageGaps = append(b.imageGaps, key)
+		}
 	}
 	if unresolvedImages > 0 {
-		// The current source contract has one completeness bit. Unknown
-		// runtime manifests therefore conservatively preserve the whole source
-		// snapshot's prior registrations, not just its image edges.
-		b.skip(fmt.Sprintf("cluster %s: %d runtime image identities unresolved; digest relationships incomplete", c.Name, unresolvedImages))
+		// A missing runtime manifest does not invalidate successful Pod/API
+		// enumeration. Preserve only the affected present workloads' image edges.
+		b.warnings = append(b.warnings, fmt.Sprintf("cluster %s: %d runtime image identities unresolved; previous image relationships retained for affected workloads", c.Name, unresolvedImages))
 	}
 
 	var slices []discoveryv1.EndpointSlice
@@ -179,18 +182,18 @@ func containerReferences(pod corev1.Pod) []map[string]any {
 	return refs
 }
 
-func recordRuntimeImages(b *builder, pod corev1.Pod, podKey string) int {
+func recordRuntimeImages(b *builder, pod corev1.Pod, podKey string) (unknown int, gap bool) {
 	statuses := append([]corev1.ContainerStatus(nil), pod.Status.ContainerStatuses...)
 	statuses = append(statuses, pod.Status.InitContainerStatuses...)
 	statuses = append(statuses, pod.Status.EphemeralContainerStatuses...)
 	reported := make(map[string]bool, len(statuses))
-	unknown := 0
 	for _, status := range statuses {
 		reported[status.Name] = true
 		// Bare runtime sha256 IDs can be config digests. Only a named,
 		// repository-qualified runtime ImageID establishes pullable identity.
 		digest, valid := model.ContainerImageKey(status.ImageID)
 		if !strings.Contains(status.ImageID, "@") || !valid {
+			gap = true
 			if status.ImageID != "" || pod.Status.Phase == corev1.PodRunning {
 				unknown++
 			}
@@ -199,23 +202,27 @@ func recordRuntimeImages(b *builder, pod corev1.Pod, podKey string) int {
 		b.asset(model.KindContainerImage, digest, map[string]any{"digest": digest})
 		b.rel(model.KindWorkload, podKey, model.KindContainerImage, digest, model.RelRuns)
 	}
-	if pod.Status.Phase == corev1.PodRunning {
-		missing := func(name string) {
-			if !reported[name] {
+	// Missing status in any phase cannot retract an exact Pod UID's previous
+	// manifest claim. A Pending Pod without an image is normal, so only warn
+	// about missing statuses once the Pod is Running.
+	missing := func(name string) {
+		if !reported[name] {
+			gap = true
+			if pod.Status.Phase == corev1.PodRunning {
 				unknown++
 			}
 		}
-		for _, container := range pod.Spec.Containers {
-			missing(container.Name)
-		}
-		for _, container := range pod.Spec.InitContainers {
-			missing(container.Name)
-		}
-		for _, container := range pod.Spec.EphemeralContainers {
-			missing(container.Name)
-		}
 	}
-	return unknown
+	for _, container := range pod.Spec.Containers {
+		missing(container.Name)
+	}
+	for _, container := range pod.Spec.InitContainers {
+		missing(container.Name)
+	}
+	for _, container := range pod.Spec.EphemeralContainers {
+		missing(container.Name)
+	}
+	return unknown, gap
 }
 
 func linkServicePods(b *builder, services []corev1.Service, serviceKeys map[namespacedName]string, pods []corev1.Pod, podKeys map[namespacedUID]string, slices []discoveryv1.EndpointSlice) {
