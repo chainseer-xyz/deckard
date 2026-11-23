@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: true
@@ -84,7 +84,7 @@ jobs:
           persist-credentials: false
       - name: release runner naming with GitHub reserved environment
         run: python3 -m unittest discover -s deploy/assessment/tests -p test_release_workflow.py -v
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
       - run: helm lint deploy/helm/deckard --set database.cnpg.enabled=true
       - run: sudo apt-get update && sudo apt-get install -y zsh
       - name: pinned structured YAML parser
@@ -127,7 +127,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: true
@@ -212,7 +212,7 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: docker build --target "$TARGET" -t "deckard:$TARGET" .
       - if: matrix.target == 'full'
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: true
