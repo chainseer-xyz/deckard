@@ -7,6 +7,7 @@ The resulting environment is not the unchanged upstream lock environment.
 
 | Package | Upstream lock | Downstream security version |
 | --- | --- | --- |
+| mcp | 1.28.1 | [1.30.0](https://pypi.org/project/mcp/1.30.0/) |
 | PyJWT | 2.13.0 | 2.14.0 |
 | anyio | 4.14.1 | 4.14.2 |
 | aiohttp | 3.14.3 | [3.14.4](https://pypi.org/project/aiohttp/3.14.4/) |

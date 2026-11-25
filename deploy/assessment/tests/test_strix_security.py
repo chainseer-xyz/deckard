@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 EXPECTED = {
+    "mcp": "1.30.0",
     "PyJWT": "2.14.0",
     "anyio": "4.14.2",
     "aiohttp": "3.14.4",
