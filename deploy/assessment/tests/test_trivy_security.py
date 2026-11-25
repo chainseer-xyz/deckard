@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 
-LIBRARY_FLOORS = {"libexpat": "2.9.0-r0", "brotli-libs": "1.2.1-r0", "libcurl": "8.23.0-r0"}
+LIBRARY_FLOORS = {"git": "2.54.1-r0", "git-init-template": "2.54.1-r0", "libexpat": "2.9.0-r0", "brotli-libs": "1.2.1-r0", "libcurl": "8.23.0-r0"}
 
 
 def require_fixed_compiler(metadata):
@@ -18,9 +18,9 @@ def require_fixed_compiler(metadata):
         raise ValueError("actual binary must contain a stable Go compiler version")
     version = tuple(int(part) for part in match.groups())
     if version[:2] == (1, 26):
-        fixed = version >= (1, 26, 10)
+        fixed = version >= (1, 26, 11)
     else:
-        fixed = version >= (1, 27, 3)
+        fixed = version >= (1, 27, 4)
     if not fixed:
         raise ValueError("actual binary contains a vulnerable Go standard library")
 
@@ -44,7 +44,7 @@ class TrivySecurityTests(unittest.TestCase):
             ["docker", "run", "--rm", "--pull=never", "--network", "none", "--read-only",
              "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
              "--entrypoint", "/bin/sh", image, "-eu", "-c",
-             "id -u; id -g; apk --no-network list --installed libexpat brotli-libs libcurl; trivy --version"],
+             "id -u; id -g; apk --no-network list --installed git git-init-template libexpat brotli-libs libcurl; trivy --version"],
             check=True, capture_output=True, text=True, timeout=30,
         ).stdout.splitlines()
         self.assertEqual(output[:2], ["65532", "65532"])
@@ -62,9 +62,9 @@ class TrivySecurityTests(unittest.TestCase):
         self.assertIn("Version: 0.76.2", output)
 
     def test_compiler_contract_rejects_older_patch_lines(self):
-        for version in ("1.26.10", "1.27.3", "1.27.4"):
+        for version in ("1.26.11", "1.27.4"):
             require_fixed_compiler("trivy: go" + version)
-        for version in ("1.26.8", "1.26.9", "1.27.2", "1.27.3rc1"):
+        for version in ("1.26.8", "1.26.9", "1.26.10", "1.27.2", "1.27.3", "1.27.3rc1"):
             with self.subTest(version=version), self.assertRaises(ValueError):
                 require_fixed_compiler("trivy: go" + version)
 

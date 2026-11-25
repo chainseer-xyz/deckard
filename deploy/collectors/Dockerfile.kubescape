@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # Retain the official CLI's bundled frameworks, debug shell and nonroot runtime.
 # Replace only its executable with the exact release source and reviewed fixes.
-FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS scanner
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS scanner
 ARG TARGETOS
 ARG TARGETARCH
 ARG KUBESCAPE_VERSION=v4.0.16
@@ -12,7 +12,7 @@ WORKDIR /src
 RUN git clone --depth 1 --branch ${KUBESCAPE_VERSION} https://github.com/kubescape/kubescape.git . \
  && test "$(git rev-parse HEAD)" = "${KUBESCAPE_COMMIT}"
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    go get golang.org/x/image@v0.45.0 golang.org/x/net@v0.62.0 github.com/go-jose/go-jose/v4@v4.1.6 github.com/klauspost/compress@v1.20.2 \
+    go get golang.org/x/image@v0.45.0 golang.org/x/net@v0.62.0 github.com/go-jose/go-jose/v4@v4.1.6 github.com/klauspost/compress@v1.20.2 github.com/containerd/containerd/v2@v2.3.7 \
  && go mod tidy \
  && go mod verify \
  && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -mod=readonly -trimpath \

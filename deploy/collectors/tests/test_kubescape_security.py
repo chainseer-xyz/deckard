@@ -26,9 +26,9 @@ def stable_version(value, prefix="v"):
 def verify_metadata(metadata):
     compiler = stable_version(metadata.splitlines()[0].split()[-1], "go")
     if compiler[:2] == (1, 26):
-        if compiler < (1, 26, 10):
+        if compiler < (1, 26, 11):
             raise ValueError("Go standard library is below the fixed security floor")
-    elif compiler < (1, 27, 3):
+    elif compiler < (1, 27, 4):
         raise ValueError("Go standard library is below the fixed security floor")
     modules = {}
     previous = None
@@ -37,13 +37,16 @@ def verify_metadata(metadata):
         if fields and fields[0] == "dep" and len(fields) >= 3:
             previous = fields[1]
             modules[previous] = fields[2]
-        elif fields and fields[0] == "=>" and previous in MINIMUMS:
+        elif fields and fields[0] == "=>" and (previous in MINIMUMS or previous == "github.com/containerd/containerd/v2"):
             raise ValueError("module replacement bypasses a reviewed security fix")
         else:
             previous = None
     for module, minimum in MINIMUMS.items():
         if stable_version(modules.get(module, "v0.0.0")) < minimum:
             raise ValueError("dependency is below its fixed security floor: " + module)
+    containerd = stable_version(modules.get("github.com/containerd/containerd/v2", "v0.0.0"))
+    if not ((2, 3, 7) <= containerd < (2, 4, 0) or containerd >= (2, 4, 2)):
+        raise ValueError("containerd is below its fixed security release")
 
 
 class KubescapeSecurityTests(unittest.TestCase):
@@ -68,10 +71,11 @@ class KubescapeSecurityTests(unittest.TestCase):
         return result.stdout
 
     def test_metadata_refuses_vulnerable_compilers_dependencies_and_replacements(self):
-        fixed = "kubescape: go1.27.3\n\tdep\tgolang.org/x/image\tv0.45.0\th1:fixture\n\tdep\tgolang.org/x/net\tv0.62.0\th1:fixture\n\tdep\tgithub.com/go-jose/go-jose/v4\tv4.1.6\th1:fixture\n\tdep\tgithub.com/klauspost/compress\tv1.20.2\th1:fixture\n"
+        fixed = "kubescape: go1.27.4\n\tdep\tgolang.org/x/image\tv0.45.0\th1:fixture\n\tdep\tgolang.org/x/net\tv0.62.0\th1:fixture\n\tdep\tgithub.com/go-jose/go-jose/v4\tv4.1.6\th1:fixture\n\tdep\tgithub.com/klauspost/compress\tv1.20.2\th1:fixture\n\tdep\tgithub.com/containerd/containerd/v2\tv2.3.7\th1:fixture\n"
         verify_metadata(fixed)
-        verify_metadata(fixed.replace("go1.27.3", "go1.26.10"))
-        for broken in (fixed.replace("go1.27.3", "go1.27.2"), fixed.replace("go1.27.3", "go1.26.9"), fixed.replace("v0.45.0", "v0.44.0"), fixed.replace("v0.62.0", "v0.61.0"), fixed + "\t=>\t../local\t(devel)\n"):
+        verify_metadata(fixed.replace("go1.27.4", "go1.26.11"))
+        verify_metadata(fixed.replace("v2.3.7", "v2.4.2"))
+        for broken in (fixed.replace("go1.27.4", "go1.27.3"), fixed.replace("go1.27.4", "go1.26.10"), fixed.replace("v0.45.0", "v0.44.0"), fixed.replace("v0.62.0", "v0.61.0"), fixed.replace("v2.3.7", "v2.3.6"), fixed.replace("v2.3.7", "v2.4.1"), fixed + "\t=>\t../local\t(devel)\n"):
             with self.subTest(metadata=broken), self.assertRaises(ValueError):
                 verify_metadata(broken)
 
