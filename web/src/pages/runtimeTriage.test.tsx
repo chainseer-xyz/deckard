@@ -101,10 +101,10 @@ describe('runtime triage context', () => {
     }));
     renderRoute(<Findings />, '/findings', '/findings?finding=1');
     const drawer = await screen.findByRole('dialog', { name: 'Finding details' });
-    const action = await within(drawer).findByRole('button', { name: 'Resolve incident' });
+    const action = await within(drawer).findByRole('button', { name: 'Resolve' });
     await waitFor(() => expect(action).toBeEnabled());
     await userEvent.click(action);
-    const modal = await screen.findByRole('dialog', { name: 'Resolve runtime incident' });
+    const modal = await screen.findByRole('dialog', { name: 'Resolve finding' });
     await userEvent.click(within(modal).getByRole('button', { name: 'Resolve' }));
     expect(received).toBeUndefined();
     expect(within(modal).getByText('A reason is required.')).toBeInTheDocument();

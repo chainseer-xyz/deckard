@@ -34,10 +34,17 @@ func TestRuntimeIncidentRequiresAuditedManualResolution(t *testing.T) {
 	}
 }
 
-func TestAssessmentFindingCannotBeManuallyHealed(t *testing.T) {
+func TestNonRuntimeFindingCanBeManuallyResolvedWithAuditNote(t *testing.T) {
 	e := newIngestEnv(t)
 	e.seed()
-	if r := e.do("POST", "/api/v1/findings/1/resolve", `{"note":"skip scan"}`); r.Code != 409 {
-		t.Fatalf("non-runtime healed: %d %s", r.Code, r.Body)
+	if r := e.do("POST", "/api/v1/findings/1/resolve", `{}`); r.Code != 400 {
+		t.Fatalf("resolution without reason: %d %s", r.Code, r.Body)
+	}
+	if r := e.do("POST", "/api/v1/findings/1/resolve", `{"note":"Resource no longer exists; verified in the source account"}`); r.Code != 200 {
+		t.Fatalf("non-runtime resolution: %d %s", r.Code, r.Body)
+	}
+	f, err := e.store.GetFinding(context.Background(), 1)
+	if err != nil || f.Status != model.StatusResolved || f.SuppressionNote != "Resource no longer exists; verified in the source account" || f.ResolvedAt == nil {
+		t.Fatalf("resolution audit lost: %+v %v", f, err)
 	}
 }

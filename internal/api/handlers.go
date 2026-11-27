@@ -510,7 +510,7 @@ func (s *Server) findingAction(action string) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid_body", "suppress requires a note")
 			return
 		case action == "resolve" && req.Note == "":
-			writeError(w, http.StatusBadRequest, "invalid_body", "runtime resolution requires an investigation note")
+			writeError(w, http.StatusBadRequest, "invalid_body", "resolution requires an investigation note")
 			return
 		case req.Until != nil && action != "suppress" && action != "acknowledge":
 			writeError(w, http.StatusBadRequest, "invalid_body", "until is only valid for suppress and acknowledge")
@@ -527,10 +527,6 @@ func (s *Server) findingAction(action string) http.HandlerFunc {
 		}
 		tool := strings.TrimPrefix(f.Check, "ext.")
 		runtime := model.IsRuntimeTool(tool) && f.Source == model.IngestSource(tool) && f.IngestScope != ""
-		if action == "resolve" && !runtime {
-			writeError(w, http.StatusConflict, "conflict", "only runtime incidents support manual resolution")
-			return
-		}
 		if f.Status == model.StatusResolved && (!runtime || action != "reopen") {
 			writeError(w, http.StatusConflict, "conflict", "finding is resolved")
 			return

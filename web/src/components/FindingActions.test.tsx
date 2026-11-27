@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, expect, it } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { mockServer, renderRoute } from '../test/utils';
@@ -11,7 +11,7 @@ beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-it('requires a reason to resolve a runtime incident', async () => {
+it('requires a reason to resolve a finding', async () => {
   let received: unknown;
   const f = { ...makeFindings()[0]!, check: 'ext.tetragon', source: 'ingest:tetragon', status: 'open' as const };
   server.use(http.post(`*/api/v1/findings/${f.id}/resolve`, async ({ request }) => {
@@ -19,16 +19,16 @@ it('requires a reason to resolve a runtime incident', async () => {
     return HttpResponse.json({ ...f, status: 'resolved' });
   }));
   renderRoute(<FindingActions f={f} />);
-  const button = await screen.findByRole('button', { name: 'Resolve incident' });
+  const button = await screen.findByRole('button', { name: 'Resolve' });
   await waitFor(() => expect(button).toBeEnabled());
   await userEvent.click(button);
   const reason = await screen.findByRole('textbox', { name: /Reason/ });
   await userEvent.type(reason, 'Reviewed and contained');
-  await userEvent.click(screen.getByRole('button', { name: 'Resolve' }));
+  await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Resolve' }));
   await waitFor(() => expect(received).toEqual({ note: 'Reviewed and contained' }));
 });
 
-it('does not offer manual healing for an assessment finding', () => {
+it('offers audited resolution for a non-runtime finding', () => {
   renderRoute(<FindingActions f={makeFindings()[0]!} />);
-  expect(screen.queryByRole('button', { name: 'Resolve incident' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Resolve' })).toBeInTheDocument();
 });

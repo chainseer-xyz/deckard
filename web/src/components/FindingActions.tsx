@@ -17,7 +17,7 @@ const META: Record<FindingAction, { label: string; Icon: typeof Check }> = {
   suppress: { label: 'Suppress', Icon: EyeOff },
   'false-positive': { label: 'False positive', Icon: ThumbsDown },
   reopen: { label: 'Reopen', Icon: RotateCcw },
-  resolve: { label: 'Resolve incident', Icon: Check },
+  resolve: { label: 'Resolve', Icon: Check },
 };
 
 type Pending = 'suppress' | 'false-positive' | 'resolve' | null;
@@ -29,9 +29,9 @@ export function FindingActions({ f }: { f: Finding }) {
   const [pending, setPending] = useState<Pending>(null);
   const canWrite = me.data?.can_write ?? false;
   const runtime = ['falco', 'tetragon'].some((tool) => f.check === `ext.${tool}` && f.source === `ingest:${tool}`);
-  const actions: FindingAction[] = runtime
-    ? f.status === 'resolved' ? ['reopen'] : [...ACTIONS[f.status], 'resolve']
-    : ACTIONS[f.status];
+  const actions: FindingAction[] = f.status === 'resolved'
+    ? runtime ? ['reopen'] : []
+    : [...ACTIONS[f.status], 'resolve'];
 
   const run = (a: FindingAction) => {
     if (a === 'suppress' || a === 'false-positive' || a === 'resolve') setPending(a);
@@ -65,7 +65,7 @@ export function FindingActions({ f }: { f: Finding }) {
       )}
       {pending && (
         <SuppressModal
-          title={pending === 'resolve' ? 'Resolve runtime incident' : pending === 'suppress' ? 'Suppress finding' : 'Mark as false positive'}
+          title={pending === 'resolve' ? 'Resolve finding' : pending === 'suppress' ? 'Suppress finding' : 'Mark as false positive'}
           subject={f.title}
           submitLabel={pending === 'resolve' ? 'Resolve' : pending === 'suppress' ? 'Suppress' : 'Mark false positive'}
           withExpiry={pending === 'suppress'}
