@@ -333,6 +333,16 @@ RPC and broker-only target traffic. Reports always remain incomplete. See
 [constrained Strix](collectors.md#constrained-strix) for exclusions, model approval
 and live containment requirements. No automatic fixes or PR writes are supported.
 
+## Manual finding resolution
+
+Operators can resolve any finding from its detail view or with
+`POST /api/v1/findings/{id}/resolve`. The request must include a non-empty
+`note`; Deckard records the note and authenticated actor with the status change.
+Use this when you have verified that a finding's resource no longer exists or
+when an operator has otherwise confirmed the finding is no longer actionable.
+This action does not remove the asset or change scanner completeness. A later
+scanner report can reopen a resolved finding if the issue is reported again.
+
 ## Runtime incidents
 
 Native `--tool falco` and `--tool tetragon` imports accept bounded JSON/NDJSON.
@@ -343,7 +353,8 @@ Display cluster names and reported ownership never establish that binding.
 
 Older or repeated events cannot reopen a manually resolved incident. Newer events
 can reopen it. Runtime telemetry silence, deleted Pods and empty batches cannot
-resolve findings. Resolve reviewed incidents with an audit note in the UI/API.
+resolve findings automatically. Resolve reviewed incidents with an audit note
+in the UI/API.
 Raw command arguments, environment, labels and log bodies are discarded.
 See [runtime delivery](collectors.md#runtime-delivery) for the bounded scheduled collector.
 

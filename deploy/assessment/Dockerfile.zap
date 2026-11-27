@@ -12,7 +12,9 @@ FROM debian@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc
 # hadolint ignore=DL3008
 RUN apt-get update \
  && apt-get install -y --no-install-recommends bash ca-certificates openjdk-17-jre-headless perl-base apt libapt-pkg6.0 \
+    libpam-modules libpam-modules-bin libpam-runtime libpam0g \
  && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' apt)" ge '2.6.2' \
+ && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libpam-modules)" ge '1.5.2-6+deb12u3' \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=scanner /zap/db /zap/db
