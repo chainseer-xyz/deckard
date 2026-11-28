@@ -30,7 +30,7 @@ const ConfigActor = "config"
 //	check=ext.kubescape control_id=C-0270
 //
 // Keys: check, asset (the asset key), zone, source, severity, fingerprint,
-// title, control_id. A key may repeat (all occurrences must match). Matching is
+// title, control_id, credential_source. A key may repeat (all occurrences must match). Matching is
 // case-insensitive. control_id requires check=ext.kubescape and matches only
 // the exact string in finding evidence, never a title or tag. Its value must
 // be C- followed by four digits; wildcards are not allowed. Other values
@@ -46,7 +46,7 @@ const ConfigActor = "config"
 // by accident.
 var matchKeys = map[string]bool{
 	"check": true, "asset": true, "zone": true, "source": true,
-	"severity": true, "fingerprint": true, "title": true, "control_id": true,
+	"severity": true, "fingerprint": true, "title": true, "control_id": true, "credential_source": true,
 }
 
 type term struct{ key, pattern string }
@@ -68,7 +68,7 @@ func parseMatch(s string) ([]term, error) {
 		return nil, errors.New("empty match (a suppression must name at least one key=value term)")
 	}
 	terms := make([]term, 0, len(toks))
-	hasControlID, kubescapeScope := false, false
+	hasControlID, kubescapeScope, credentialSource, credentialControl := false, false, false, false
 	for _, tok := range toks {
 		k, v, ok := strings.Cut(tok, "=")
 		k = strings.ToLower(strings.TrimSpace(k))
@@ -76,7 +76,7 @@ func parseMatch(s string) ([]term, error) {
 			return nil, fmt.Errorf("term %q is not key=value", tok)
 		}
 		if !matchKeys[k] {
-			return nil, fmt.Errorf("unknown match key %q (valid: check, asset, zone, source, severity, fingerprint, title, control_id)", k)
+			return nil, fmt.Errorf("unknown match key %q (valid: check, asset, zone, source, severity, fingerprint, title, control_id, credential_source)", k)
 		}
 		if v == "" {
 			return nil, fmt.Errorf("empty value for %q", k)
@@ -84,7 +84,14 @@ func parseMatch(s string) ([]term, error) {
 		if k == "severity" && !strings.ContainsAny(v, "*?") && !model.Severity(strings.ToLower(v)).Valid() {
 			return nil, fmt.Errorf("unknown severity %q", v)
 		}
+		if k == "credential_source" {
+			if v != "secretKeyRef" {
+				return nil, errors.New("credential_source must be secretKeyRef")
+			}
+			credentialSource = true
+		}
 		if k == "control_id" {
+			credentialControl = credentialControl || strings.EqualFold(v, "C-0012")
 			if !validKubescapeControlID(v) {
 				return nil, errors.New("control_id must be an exact Kubescape control ID such as C-0270 (no wildcards)")
 			}
@@ -94,6 +101,9 @@ func parseMatch(s string) ([]term, error) {
 			kubescapeScope = true
 		}
 		terms = append(terms, term{key: k, pattern: strings.ToLower(v)})
+	}
+	if credentialSource && (!kubescapeScope || !credentialControl) {
+		return nil, errors.New("credential_source requires check=ext.kubescape control_id=C-0012")
 	}
 	if hasControlID && !kubescapeScope {
 		return nil, errors.New("control_id requires check=ext.kubescape")
@@ -189,6 +199,12 @@ func (r rule) matches(f model.Finding) bool {
 			v = f.Fingerprint
 		case "title":
 			v = f.Title
+		case "credential_source":
+			source, ok := f.Evidence["credential_source"].(string)
+			if !ok || source != "secretKeyRef" {
+				return false
+			}
+			continue
 		case "control_id":
 			controlID, ok := f.Evidence["control_id"].(string)
 			if !ok || !strings.EqualFold(t.pattern, controlID) {

@@ -1004,6 +1004,16 @@ for this key. Only string `evidence.control_id` matches; missing or malformed
 evidence never falls back to titles, descriptions or tags. Other controls,
 including credential findings, remain unaffected by the example.
 
+For credential-reference false positives, add `credential_source=secretKeyRef`
+to an exact `check=ext.kubescape control_id=C-0012` rule, with an explicit
+cluster asset scope. This matches only report-derived source evidence: every
+reported path must identify an environment entry backed by a nonempty Secret
+name and key, without an inline `value`. Unknown paths, mixed inline values,
+ConfigMap references, missing resources and historical findings without this
+proof remain active. The importer retains only the source classification, never
+the resource spec or credential value. A new report is required; old env indexes
+cannot prove the current source. This exception does not change other controls.
+
 The dispatcher filters matching open findings immediately. Stored status changes
 when a fresh accepted observation next includes the finding; replayed reports
 and unseen historical findings do not apply the new status. Config suppression

@@ -6,7 +6,9 @@ package kubescape
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/chainseer-xyz/deckard/internal/ingest"
@@ -24,7 +26,8 @@ type report struct {
 	Resources []struct {
 		ResourceID string `json:"resourceID"`
 		Object     struct {
-			Kind     string `json:"kind"`
+			Spec     map[string]any `json:"spec"`
+			Kind     string         `json:"kind"`
 			Metadata struct {
 				Name      string `json:"name"`
 				Namespace string `json:"namespace"`
@@ -92,10 +95,13 @@ func Parse(data []byte, o ingest.ParseOptions) ([]ingest.Finding, error) {
 	if strings.TrimSpace(cluster) == "" {
 		cluster = o.Scope
 	}
-	type obj struct{ kind, ns, name string }
+	type obj struct {
+		kind, ns, name string
+		spec           map[string]any
+	}
 	objects := map[string]obj{}
 	for _, res := range r.Resources {
-		objects[res.ResourceID] = obj{res.Object.Kind, res.Object.Metadata.Namespace, res.Object.Metadata.Name}
+		objects[res.ResourceID] = obj{res.Object.Kind, res.Object.Metadata.Namespace, res.Object.Metadata.Name, res.Object.Spec}
 	}
 
 	var out []ingest.Finding
@@ -115,8 +121,15 @@ func Parse(data []byte, o ingest.ParseOptions) ([]ingest.Finding, error) {
 				name = sum.Name
 			}
 			var failed, fixes []string
+			completePaths := len(c.Rules) > 0
 			for _, rule := range c.Rules {
+				if len(rule.Paths) == 0 {
+					completePaths = false
+				}
 				for _, p := range rule.Paths {
+					if p.FailedPath == "" && p.ReviewPath == "" && p.DeletePath == "" {
+						completePaths = false
+					}
 					for _, fp := range []string{p.FailedPath, p.ReviewPath, p.DeletePath} {
 						if fp != "" {
 							failed = append(failed, fp)
@@ -140,6 +153,13 @@ func Parse(data []byte, o ingest.ParseOptions) ([]ingest.Finding, error) {
 				remediation = strings.TrimSpace(remediation + "\n\nFix: " + strings.Join(fixes, "; "))
 			}
 			remediation = strings.TrimSpace(remediation + "\n\nSee https://hub.armosec.io/docs/" + strings.ToLower(c.ControlID))
+			evidence := map[string]any{
+				"control_id": c.ControlID, "cluster": cluster, "resource_id": res.ResourceID,
+				"kind": ob.kind, "namespace": ob.ns, "name": ob.name, "failed_paths": failed,
+			}
+			if strings.EqualFold(c.ControlID, "C-0012") && completePaths && secretRefsOnly(ob.spec, failed) {
+				evidence["credential_source"] = "secretKeyRef"
+			}
 			out = append(out, ingest.Finding{
 				Key:         c.ControlID + ":" + res.ResourceID,
 				Asset:       ingest.Asset{Kind: model.KindCloudResource, Key: "k8s://" + cluster + "/" + res.ResourceID},
@@ -148,10 +168,7 @@ func Parse(data []byte, o ingest.ParseOptions) ([]ingest.Finding, error) {
 				Severity:    severity(sum),
 				Remediation: remediation,
 				Tags:        ingest.Tags(Tool, c.ControlID, sum.Category.Name),
-				Evidence: map[string]any{
-					"control_id": c.ControlID, "cluster": cluster, "resource_id": res.ResourceID,
-					"kind": ob.kind, "namespace": ob.ns, "name": ob.name, "failed_paths": failed,
-				},
+				Evidence:    evidence,
 			})
 		}
 	}
@@ -189,4 +206,64 @@ func uniq(in []string) []string {
 		}
 	}
 	return out
+}
+
+// A source classification is proof from the same report, never from a name or
+// historical path alone. Refuse unknown paths and mixed inline/reference data.
+var envPath = regexp.MustCompile(`^spec\.(?:(?:template\.spec\.)|(?:jobTemplate\.spec\.template\.spec\.))?(?:initContainers|containers|ephemeralContainers)\[[0-9]+\]\.env\[[0-9]+\]\.(?:name|value|valueFrom\.secretKeyRef\.(?:name|key))$`)
+var pathPart = regexp.MustCompile(`^([A-Za-z]+)(?:\[([0-9]+)\])?$`)
+
+func secretRefsOnly(spec map[string]any, paths []string) bool {
+	if len(paths) == 0 {
+		return false
+	}
+	for _, path := range paths {
+		if !envPath.MatchString(path) {
+			return false
+		}
+		end := strings.Index(path, "].env[")
+		if end < 0 {
+			return false
+		}
+		envEnd := strings.Index(path[end+6:], "]") + end + 6
+		var node any = map[string]any{"spec": spec}
+		for _, part := range strings.Split(path[:envEnd+1], ".") {
+			match := pathPart.FindStringSubmatch(part)
+			object, ok := node.(map[string]any)
+			if !ok || match == nil {
+				return false
+			}
+			node = object[match[1]]
+			if match[2] != "" {
+				index, err := strconv.Atoi(match[2])
+				list, ok := node.([]any)
+				if err != nil || !ok || index >= len(list) {
+					return false
+				}
+				node = list[index]
+			}
+		}
+		env, ok := node.(map[string]any)
+		if !ok {
+			return false
+		}
+		if _, inline := env["value"]; inline {
+			return false
+		}
+		from, ok := env["valueFrom"].(map[string]any)
+		if !ok || len(from) != 1 {
+			return false
+		}
+		ref, ok := from["secretKeyRef"].(map[string]any)
+		if !ok {
+			return false
+		}
+		for _, key := range []string{"name", "key"} {
+			value, ok := ref[key].(string)
+			if !ok || strings.TrimSpace(value) == "" {
+				return false
+			}
+		}
+	}
+	return true
 }
