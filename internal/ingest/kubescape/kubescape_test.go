@@ -46,7 +46,7 @@ func FuzzParse(f *testing.F) {
 }
 
 func TestNonObjectSpecsRemainAcceptedAndUnproven(t *testing.T) {
-	for _, spec := range []string{`null`, `[]`, `"opaque"`, `17`, `true`} {
+	for _, spec := range []string{`null`, `[]`, `"opaque"`, `17`, `true`, `1e400`, `{"numeric":1e400}`} {
 		t.Run(spec, func(t *testing.T) {
 			data := []byte(`{"resources":[{"resourceID":"custom","object":{"kind":"Custom","spec":` + spec + `}}],"results":[{"resourceID":"custom","controls":[{"controlID":"C-0012","status":"failed","rules":[{"paths":[{"failedPath":"spec.template.spec.containers[0].env[0].name"}]}]}]}]}`)
 			fs, err := Parse(data, ingest.ParseOptions{})
