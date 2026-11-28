@@ -26,8 +26,8 @@ type report struct {
 	Resources []struct {
 		ResourceID string `json:"resourceID"`
 		Object     struct {
-			Spec     map[string]any `json:"spec"`
-			Kind     string         `json:"kind"`
+			Spec     any    `json:"spec"`
+			Kind     string `json:"kind"`
 			Metadata struct {
 				Name      string `json:"name"`
 				Namespace string `json:"namespace"`
@@ -97,7 +97,7 @@ func Parse(data []byte, o ingest.ParseOptions) ([]ingest.Finding, error) {
 	}
 	type obj struct {
 		kind, ns, name string
-		spec           map[string]any
+		spec           any
 	}
 	objects := map[string]obj{}
 	for _, res := range r.Resources {
@@ -213,7 +213,7 @@ func uniq(in []string) []string {
 var envPath = regexp.MustCompile(`^spec\.(?:(?:template\.spec\.)|(?:jobTemplate\.spec\.template\.spec\.))?(?:initContainers|containers|ephemeralContainers)\[[0-9]+\]\.env\[[0-9]+\]\.(?:name|value|valueFrom\.secretKeyRef\.(?:name|key))$`)
 var pathPart = regexp.MustCompile(`^([A-Za-z]+)(?:\[([0-9]+)\])?$`)
 
-func secretRefsOnly(spec map[string]any, paths []string) bool {
+func secretRefsOnly(spec any, paths []string) bool {
 	if len(paths) == 0 {
 		return false
 	}

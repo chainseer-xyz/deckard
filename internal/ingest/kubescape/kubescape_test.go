@@ -44,3 +44,18 @@ func FuzzParse(f *testing.F) {
 	f.Add([]byte(`{"results":[{"resourceID":"","controls":[{"status":"failed"}]}]}`))
 	f.Fuzz(func(t *testing.T, data []byte) { ingesttest.Fuzz(t, Tool, Parse, data) })
 }
+
+func TestNonObjectSpecsRemainAcceptedAndUnproven(t *testing.T) {
+	for _, spec := range []string{`null`, `[]`, `"opaque"`, `17`, `true`} {
+		t.Run(spec, func(t *testing.T) {
+			data := []byte(`{"resources":[{"resourceID":"custom","object":{"kind":"Custom","spec":` + spec + `}}],"results":[{"resourceID":"custom","controls":[{"controlID":"C-0012","status":"failed","rules":[{"paths":[{"failedPath":"spec.template.spec.containers[0].env[0].name"}]}]}]}]}`)
+			fs, err := Parse(data, ingest.ParseOptions{})
+			if err != nil || len(fs) != 1 {
+				t.Fatalf("previously accepted report rejected: findings=%d err=%v", len(fs), err)
+			}
+			if _, ok := fs[0].Evidence["credential_source"]; ok {
+				t.Fatal("non-object spec classified as Secret reference")
+			}
+		})
+	}
+}
